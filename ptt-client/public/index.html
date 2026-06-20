@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PTT Client (Phase A 検証用)</title>
+<style>
+  :root {
+    --bg: #0d1210;
+    --panel: #141b18;
+    --line: #263129;
+    --text: #d8e4dd;
+    --muted: #6f8079;
+    --accent: #ff7a3c;
+    --accent-dim: #5c3520;
+    --live: #3ddc84;
+    --danger: #ff5c5c;
+    --mono: "SF Mono", "Menlo", "Consolas", monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+
+  .unit {
+    width: 100%;
+    max-width: 420px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  .unit-header {
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+  }
+
+  .unit-header .label {
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
+
+  .unit-header .channel {
+    font-size: 13px;
+    color: var(--text);
+  }
+
+  .status-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 18px;
+    border-bottom: 1px solid var(--line);
+    font-size: 12px;
+  }
+
+  .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--muted);
+    flex-shrink: 0;
+  }
+
+  .dot.connected { background: var(--live); box-shadow: 0 0 6px var(--live); }
+  .dot.error { background: var(--danger); }
+
+  .status-text { color: var(--muted); flex: 1; }
+
+  .form {
+    padding: 16px 18px;
+    display: grid;
+    gap: 10px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .field { display: grid; gap: 4px; }
+
+  .field label {
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .field input {
+    background: var(--bg);
+    border: 1px solid var(--line);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    padding: 8px 10px;
+    border-radius: 2px;
+    outline: none;
+  }
+
+  .field input:focus { border-color: var(--accent); }
+
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+  button.connect {
+    background: transparent;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    padding: 9px 0;
+    border-radius: 2px;
+    cursor: pointer;
+    text-transform: uppercase;
+  }
+
+  button.connect:hover { background: var(--accent-dim); }
+  button.connect:disabled { opacity: 0.35; cursor: not-allowed; }
+
+  .talk-area {
+    padding: 26px 18px 24px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .ptt-btn {
+    width: 140px;
+    height: 140px;
+    border-radius: 50%;
+    border: 2px solid var(--line);
+    background: radial-gradient(circle at 35% 30%, #1c2620, #10160f);
+    color: var(--muted);
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: border-color 120ms, color 120ms, transform 80ms;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+  }
+
+  .ptt-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  .ptt-btn.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    transform: scale(0.97);
+    box-shadow: 0 0 24px -4px var(--accent);
+  }
+
+  .hint { font-size: 11px; color: var(--muted); text-align: center; }
+
+  .talkers {
+    width: 100%;
+    padding: 14px 18px 18px;
+    border-top: 1px solid var(--line);
+  }
+
+  .talkers .label {
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+
+  .talker-list { display: flex; flex-wrap: wrap; gap: 6px; min-height: 22px; }
+
+  .chip {
+    font-size: 11px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    color: var(--muted);
+  }
+
+  .chip.live {
+    border-color: var(--live);
+    color: var(--live);
+  }
+
+  .log {
+    max-height: 110px;
+    overflow-y: auto;
+    padding: 10px 18px;
+    border-top: 1px solid var(--line);
+    font-size: 10px;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+
+  .log div { white-space: pre-wrap; word-break: break-all; }
+</style>
+</head>
+<body>
+
+<div class="unit">
+  <div class="unit-header">
+    <span class="label">PTT Prototype</span>
+    <span class="channel" id="channelLabel">未接続</span>
+  </div>
+
+  <div class="status-row">
+    <span class="dot" id="statusDot"></span>
+    <span class="status-text" id="statusText">サーバ未接続</span>
+  </div>
+
+  <div class="form">
+    <div class="field">
+      <label for="serverUrl">サーバURL</label>
+      <input id="serverUrl" value="ws://localhost:8080" />
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label for="roomId">ルームID</label>
+        <input id="roomId" value="room1" />
+      </div>
+      <div class="field">
+        <label for="clientId">クライアントID</label>
+        <input id="clientId" value="" placeholder="例: alice" />
+      </div>
+    </div>
+    <button class="connect" id="connectBtn">接続する</button>
+  </div>
+
+  <div class="talk-area">
+    <button class="ptt-btn" id="pttBtn" disabled>押して送話</button>
+    <div class="hint">ボタンを押している間だけ音声が送信されます</div>
+  </div>
+
+  <div class="talkers">
+    <div class="label">送話中</div>
+    <div class="talker-list" id="talkerList"></div>
+  </div>
+
+  <div class="log" id="log"></div>
+</div>
+
+<script>
+const SAMPLE_RATE = 48000;
+const CHANNELS = 1;
+const FRAME_DURATION_US = 20000; // 20ms, サーバ側のFRAME_SIZE(960samples@48kHz)と一致させる
+
+let ws = null;
+let audioEncoder = null;
+let audioDecoder = null;
+let micStream = null;
+let micProcessor = null;
+let micReader = null;
+let isSending = false;
+let myClientId = null;
+
+let audioCtx = null;
+let nextPlayTime = 0;
+
+const talkers = new Set();
+
+const $ = (id) => document.getElementById(id);
+const logEl = $('log');
+const statusDot = $('statusDot');
+const statusText = $('statusText');
+const channelLabel = $('channelLabel');
+const connectBtn = $('connectBtn');
+const pttBtn = $('pttBtn');
+const talkerList = $('talkerList');
+
+function log(msg) {
+  const line = document.createElement('div');
+  const t = new Date().toLocaleTimeString();
+  line.textContent = `[${t}] ${msg}`;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function setStatus(state, text) {
+  statusDot.className = 'dot' + (state ? ' ' + state : '');
+  statusText.textContent = text;
+}
+
+function renderTalkers() {
+  talkerList.innerHTML = '';
+  if (talkers.size === 0) {
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.textContent = '— なし —';
+    talkerList.appendChild(chip);
+    return;
+  }
+  for (const id of talkers) {
+    const chip = document.createElement('span');
+    chip.className = 'chip live';
+    chip.textContent = id;
+    talkerList.appendChild(chip);
+  }
+}
+renderTalkers();
+
+// ---------- WebSocket / 制御メッセージ ----------
+
+function connect() {
+  const url = $('serverUrl').value.trim();
+  const room = $('roomId').value.trim();
+  const clientId = $('clientId').value.trim();
+
+  if (!url || !room || !clientId) {
+    log('サーバURL / ルームID / クライアントIDを入力してください');
+    return;
+  }
+
+  myClientId = clientId;
+  setStatus(null, '接続中...');
+  connectBtn.disabled = true;
+
+  ws = new WebSocket(url);
+  ws.binaryType = 'arraybuffer';
+
+  ws.onopen = () => {
+    log('WebSocket接続完了。joinを送信します');
+    ws.send(JSON.stringify({ type: 'join', room, clientId }));
+  };
+
+  ws.onmessage = (event) => {
+    if (typeof event.data === 'string') {
+      handleControlMessage(JSON.parse(event.data));
+    } else {
+      handleAudioFrame(event.data);
+    }
+  };
+
+  ws.onclose = () => {
+    setStatus('error', '切断されました');
+    channelLabel.textContent = '未接続';
+    connectBtn.disabled = false;
+    connectBtn.textContent = '接続する';
+    pttBtn.disabled = true;
+    log('WebSocket切断');
+  };
+
+  ws.onerror = (e) => {
+    log('WebSocketエラー');
+  };
+}
+
+function disconnect() {
+  if (ws) {
+    ws.send(JSON.stringify({ type: 'leave' }));
+    ws.close();
+  }
+  stopSending();
+}
+
+function handleControlMessage(msg) {
+  switch (msg.type) {
+    case 'joined':
+      setStatus('connected', `接続中 (members: ${msg.members.join(', ')})`);
+      channelLabel.textContent = `room: ${msg.room}`;
+      pttBtn.disabled = false;
+      connectBtn.disabled = false;
+      connectBtn.textContent = '切断する';
+      log(`参加完了: ${JSON.stringify(msg)}`);
+      initAudioPipeline();
+      break;
+    case 'member_joined':
+      log(`参加: ${msg.clientId}`);
+      break;
+    case 'member_left':
+      log(`退出: ${msg.clientId}`);
+      talkers.delete(msg.clientId);
+      renderTalkers();
+      break;
+    case 'talker_start':
+      talkers.add(msg.clientId);
+      renderTalkers();
+      break;
+    case 'talker_end':
+      talkers.delete(msg.clientId);
+      renderTalkers();
+      break;
+    case 'error':
+      log(`サーバエラー: ${msg.message}`);
+      break;
+    default:
+      log(`不明な制御メッセージ: ${JSON.stringify(msg)}`);
+  }
+}
+
+// ---------- 音声パイプライン初期化 ----------
+
+async function initAudioPipeline() {
+  audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
+  nextPlayTime = 0;
+
+  // --- 送信用エンコーダ ---
+  audioEncoder = new AudioEncoder({
+    output: (chunk) => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const buf = new ArrayBuffer(chunk.byteLength);
+      chunk.copyTo(buf);
+      ws.send(buf);
+    },
+    error: (e) => log(`エンコードエラー: ${e.message}`),
+  });
+
+  audioEncoder.configure({
+    codec: 'opus',
+    sampleRate: SAMPLE_RATE,
+    numberOfChannels: CHANNELS,
+    bitrate: 24000,
+    opus: { frameDuration: FRAME_DURATION_US },
+  });
+
+  // --- 受信用デコーダ ---
+  audioDecoder = new AudioDecoder({
+    output: (audioData) => playDecodedAudio(audioData),
+    error: (e) => log(`デコードエラー: ${e.message}`),
+  });
+
+  audioDecoder.configure({
+    codec: 'opus',
+    sampleRate: SAMPLE_RATE,
+    numberOfChannels: CHANNELS,
+  });
+
+  // --- マイク取得（送話時にトラックを読み出す） ---
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        sampleRate: SAMPLE_RATE,
+        channelCount: CHANNELS,
+        echoCancellation: true,
+        noiseSuppression: true,
+      },
+    });
+    log('マイク取得完了');
+  } catch (e) {
+    log(`マイク取得失敗: ${e.message}`);
+  }
+}
+
+// ---------- 送話（PTT） ----------
+
+async function startSending() {
+  if (isSending || !micStream) return;
+  isSending = true;
+  pttBtn.classList.add('active');
+  ws.send(JSON.stringify({ type: 'ptt_start' }));
+
+  const track = micStream.getAudioTracks()[0];
+  micProcessor = new MediaStreamTrackProcessor({ track });
+  micReader = micProcessor.readable.getReader();
+
+  pumpMicFrames();
+}
+
+async function pumpMicFrames() {
+  while (isSending) {
+    let result;
+    try {
+      result = await micReader.read();
+    } catch (e) {
+      break;
+    }
+    if (result.done) break;
+    const audioData = result.value;
+    try {
+      audioEncoder.encode(audioData);
+    } catch (e) {
+      log(`encode呼び出しエラー: ${e.message}`);
+    }
+    audioData.close();
+  }
+}
+
+function stopSending() {
+  if (!isSending) return;
+  isSending = false;
+  pttBtn.classList.remove('active');
+  if (micReader) {
+    micReader.cancel().catch(() => {});
+    micReader = null;
+  }
+  micProcessor = null;
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'ptt_end' }));
+  }
+  if (audioEncoder) {
+    audioEncoder.flush().catch(() => {});
+  }
+}
+
+// ---------- 受話 ----------
+
+function handleAudioFrame(arrayBuffer) {
+  if (!audioDecoder || audioDecoder.state !== 'configured') return;
+  const chunk = new EncodedAudioChunk({
+    type: 'key',
+    timestamp: performance.now() * 1000,
+    data: arrayBuffer,
+  });
+  try {
+    audioDecoder.decode(chunk);
+  } catch (e) {
+    log(`decode呼び出しエラー: ${e.message}`);
+  }
+}
+
+function playDecodedAudio(audioData) {
+  const numFrames = audioData.numberOfFrames;
+  const numChannels = audioData.numberOfChannels;
+  const buffer = audioCtx.createBuffer(numChannels, numFrames, audioData.sampleRate);
+
+  for (let ch = 0; ch < numChannels; ch++) {
+    const channelData = new Float32Array(numFrames);
+    audioData.copyTo(channelData, { planeIndex: ch });
+    buffer.copyToChannel(channelData, ch);
+  }
+  audioData.close();
+
+  const source = audioCtx.createBufferSource();
+  source.buffer = buffer;
+  source.connect(audioCtx.destination);
+
+  const now = audioCtx.currentTime;
+  if (nextPlayTime < now) {
+    nextPlayTime = now + 0.05; // 初回 or 途切れた場合の小さなバッファ
+  }
+  source.start(nextPlayTime);
+  nextPlayTime += buffer.duration;
+}
+
+// ---------- イベント ----------
+
+connectBtn.addEventListener('click', () => {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    disconnect();
+  } else {
+    connect();
+  }
+});
+
+pttBtn.addEventListener('mousedown', startSending);
+pttBtn.addEventListener('mouseup', stopSending);
+pttBtn.addEventListener('mouseleave', stopSending);
+pttBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startSending(); });
+pttBtn.addEventListener('touchend', (e) => { e.preventDefault(); stopSending(); });
+
+if (!('MediaStreamTrackProcessor' in window) || !('AudioEncoder' in window)) {
+  log('警告: このブラウザはWebCodecs/MediaStreamTrackProcessorに対応していません。Chromeを使用してください。');
+}
+</script>
+
+</body>
+</html>
