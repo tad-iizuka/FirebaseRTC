@@ -382,6 +382,30 @@ function disconnect() {
     ws.close();
   }
   stopSending();
+  teardownAudioPipeline();
+}
+
+function teardownAudioPipeline() {
+  // マイクトラックを停止 → ブラウザのマイク使用中インジケーターが消える
+  if (micStream) {
+    micStream.getTracks().forEach(t => t.stop());
+    micStream = null;
+  }
+  // エンコーダ・デコーダを閉じる
+  if (audioEncoder && audioEncoder.state !== 'closed') {
+    try { audioEncoder.close(); } catch (_) {}
+    audioEncoder = null;
+  }
+  if (audioDecoder && audioDecoder.state !== 'closed') {
+    try { audioDecoder.close(); } catch (_) {}
+    audioDecoder = null;
+  }
+  // AudioContext を閉じる
+  if (audioCtx) {
+    audioCtx.close().catch(() => {});
+    audioCtx = null;
+  }
+  nextPlayTime = 0;
 }
 
 function handleControlMessage(msg) {
@@ -451,16 +475,7 @@ async function initAudioPipeline() {
   });
 
   // --- 受信用デコーダ ---
-  audioDecoder = new AudioDecoder({
-    output: (audioData) => playDecodedAudio(audioData),
-    error: (e) => log(`デコードエラー: ${e.message}`),
-  });
-
-  audioDecoder.configure({
-    codec: 'opus',
-    sampleRate: SAMPLE_RATE,
-    numberOfChannels: CHANNELS,
-  });
+  createAudioDecoder();
 
   // --- マイク取得 ---
   try {
@@ -537,21 +552,59 @@ function stopSending() {
 
 // ---------- 受話 ----------
 
-function handleAudioFrame(arrayBuffer) {
-  if (!audioDecoder || audioDecoder.state !== 'configured') return;
+// AudioDecoder はエラーで state='closed' になると再利用不可。
+// エラー時に自動で再生成する。
+function createAudioDecoder() {
+  if (audioDecoder && audioDecoder.state !== 'closed') {
+    try { audioDecoder.close(); } catch (_) {}
+  }
+  audioDecoder = new AudioDecoder({
+    output: (audioData) => playDecodedAudio(audioData),
+    error: (e) => {
+      logThrottled(`デコーダエラー(自動リセット): ${e.message}`);
+      // エラー後に再生成
+      createAudioDecoder();
+    },
+  });
+  audioDecoder.configure({
+    codec: 'opus',
+    sampleRate: SAMPLE_RATE,
+    numberOfChannels: CHANNELS,
+  });
+}
 
-  // [FIX #5] Opus は基本的に delta フレーム。'key' を強制するとデコーダが誤動作する場合がある。
-  // WebCodecs の EncodedAudioChunk は type が再生品質に直接影響しないが、
-  // 'delta' が仕様上正しい。
+// エラーログが大量に出ないようスロットリング（1秒に1回まで）
+let lastLogTime = 0;
+function logThrottled(msg) {
+  const now = Date.now();
+  if (now - lastLogTime > 1000) {
+    log(msg);
+    lastLogTime = now;
+  }
+}
+
+function handleAudioFrame(arrayBuffer) {
+  if (!audioDecoder) return;
+
+  // state が 'closed' になっていたらリセット
+  if (audioDecoder.state === 'closed') {
+    createAudioDecoder();
+  }
+  if (audioDecoder.state !== 'configured') return;
+
+  // Opus over WebCodecs: type='key' を使う
+  // (Chrome は 'delta' でも動くが、デコーダリセット直後は 'key' が安全)
   const chunk = new EncodedAudioChunk({
-    type: 'delta',
+    type: 'key',
     timestamp: performance.now() * 1000,
     data: arrayBuffer,
   });
   try {
     audioDecoder.decode(chunk);
   } catch (e) {
-    log(`decode呼び出しエラー: ${e.message}`);
+    logThrottled(`decode呼び出しエラー: ${e.message}`);
+    // 例外でも closed になるのでリセット
+    createAudioDecoder();
   }
 }
 
