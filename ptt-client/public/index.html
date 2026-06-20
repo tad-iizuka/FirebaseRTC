@@ -255,7 +255,7 @@
 <script>
 const SAMPLE_RATE = 48000;
 const CHANNELS = 1;
-const FRAME_DURATION_US = 20000; // 20ms, サーバ側のFRAME_SIZE(960samples@48kHz)と一致させる
+const FRAME_DURATION_US = 20000; // 20ms
 
 let ws = null;
 let audioEncoder = null;
@@ -352,7 +352,7 @@ function connect() {
     log('WebSocket切断');
   };
 
-  ws.onerror = (e) => {
+  ws.onerror = () => {
     log('WebSocketエラー');
   };
 }
@@ -404,6 +404,12 @@ function handleControlMessage(msg) {
 
 async function initAudioPipeline() {
   audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
+
+  // [FIX #4] ブラウザはユーザー操作なしに AudioContext を suspended で開始する場合がある
+  // 接続ボタンのクリック直後なのでここで resume() する
+  if (audioCtx.state === 'suspended') {
+    await audioCtx.resume();
+  }
   nextPlayTime = 0;
 
   // --- 送信用エンコーダ ---
@@ -437,7 +443,7 @@ async function initAudioPipeline() {
     numberOfChannels: CHANNELS,
   });
 
-  // --- マイク取得（送話時にトラックを読み出す） ---
+  // --- マイク取得 ---
   try {
     micStream = await navigator.mediaDevices.getUserMedia({
       audio: {
@@ -459,6 +465,12 @@ async function startSending() {
   if (isSending || !micStream) return;
   isSending = true;
   pttBtn.classList.add('active');
+
+  // [FIX #4] PTTボタン押下はユーザー操作なので、ここでも resume() を試みる（念のため）
+  if (audioCtx && audioCtx.state === 'suspended') {
+    await audioCtx.resume();
+  }
+
   ws.send(JSON.stringify({ type: 'ptt_start' }));
 
   const track = micStream.getAudioTracks()[0];
@@ -508,8 +520,12 @@ function stopSending() {
 
 function handleAudioFrame(arrayBuffer) {
   if (!audioDecoder || audioDecoder.state !== 'configured') return;
+
+  // [FIX #5] Opus は基本的に delta フレーム。'key' を強制するとデコーダが誤動作する場合がある。
+  // WebCodecs の EncodedAudioChunk は type が再生品質に直接影響しないが、
+  // 'delta' が仕様上正しい。
   const chunk = new EncodedAudioChunk({
-    type: 'key',
+    type: 'delta',
     timestamp: performance.now() * 1000,
     data: arrayBuffer,
   });
@@ -538,7 +554,7 @@ function playDecodedAudio(audioData) {
 
   const now = audioCtx.currentTime;
   if (nextPlayTime < now) {
-    nextPlayTime = now + 0.05; // 初回 or 途切れた場合の小さなバッファ
+    nextPlayTime = now + 0.05;
   }
   source.start(nextPlayTime);
   nextPlayTime += buffer.duration;
@@ -559,10 +575,6 @@ pttBtn.addEventListener('mouseup', stopSending);
 pttBtn.addEventListener('mouseleave', stopSending);
 pttBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startSending(); });
 pttBtn.addEventListener('touchend', (e) => { e.preventDefault(); stopSending(); });
-
-if (!('MediaStreamTrackProcessor' in window) || !('AudioEncoder' in window)) {
-  log('警告: このブラウザはWebCodecs/MediaStreamTrackProcessorに対応していません。Chromeを使用してください。');
-}
 </script>
 
 </body>
