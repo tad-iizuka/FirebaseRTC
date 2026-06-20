@@ -45,16 +45,19 @@ function broadcastBinary(roomState, buffer, excludeClientId = null) {
   }
 }
 
+// [FIX #1] opusscript の decode() は Int16Array を返す。
+// 旧実装では Buffer メソッド(readInt16LE)で読もうとしていたため NaN が加算され音声が壊れていた。
+// → Int16Array のインデックスで直接アクセスし、encode用に Buffer へ変換して返す。
 function mixPcmBuffers(pcmBuffers) {
-  const out = Buffer.alloc(FRAME_SIZE * 2);
+  const out = new Int16Array(FRAME_SIZE);
   for (let i = 0; i < FRAME_SIZE; i++) {
     let sum = 0;
-    for (const buf of pcmBuffers) sum += buf.readInt16LE(i * 2);
+    for (const buf of pcmBuffers) sum += buf[i];
     if (sum > 32767) sum = 32767;
     if (sum < -32768) sum = -32768;
-    out.writeInt16LE(sum, i * 2);
+    out[i] = sum;
   }
-  return out;
+  return Buffer.from(out.buffer);
 }
 
 function startMixLoopIfNeeded(roomState, roomId) {
@@ -62,27 +65,58 @@ function startMixLoopIfNeeded(roomState, roomId) {
 
   roomState.mixTimer = setInterval(() => {
     const now = Date.now();
-    const activePcms = [];
 
-    for (const [, client] of roomState.clients.entries()) {
+    // アクティブな送話者リストを収集（clientId も保持）
+    const activeSenders = [];
+    for (const [clientId, client] of roomState.clients.entries()) {
       if (client.lastPcm && now - client.lastFrameAt <= STALE_FRAME_MS) {
-        activePcms.push(client.lastPcm);
+        activeSenders.push({ clientId, pcm: client.lastPcm });
       }
     }
 
-    if (activePcms.length === 0) return;
+    if (activeSenders.length === 0) return;
 
-    const mixedPcm = activePcms.length === 1 ? activePcms[0] : mixPcmBuffers(activePcms);
+    if (activeSenders.length === 1) {
+      // 送話者が1人の場合: 自分以外に送る
+      const { clientId, pcm } = activeSenders[0];
 
-    let encoded;
-    try {
-      encoded = roomState.sharedEncoder.encode(mixedPcm, FRAME_SIZE);
-    } catch (e) {
-      console.error(`[room=${roomId}] encode error:`, e.message);
-      return;
+      // [FIX #2] Int16Array → Buffer へ変換してからエンコード
+      const pcmBuf = Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength);
+      let encoded;
+      try {
+        encoded = roomState.sharedEncoder.encode(pcmBuf, FRAME_SIZE);
+      } catch (e) {
+        console.error(`[room=${roomId}] encode error:`, e.message);
+        return;
+      }
+      // [FIX #3] 送話者自身を除外して送信（エコー防止）
+      broadcastBinary(roomState, encoded, clientId);
+
+    } else {
+      // 送話者が複数の場合: 各受信者ごとに「自分以外の音だけミックス」して送る
+      for (const [receiverId, receiverClient] of roomState.clients.entries()) {
+        if (receiverClient.ws.readyState !== WebSocket.OPEN) continue;
+
+        const pcmsForReceiver = activeSenders
+          .filter(s => s.clientId !== receiverId)
+          .map(s => s.pcm);
+
+        if (pcmsForReceiver.length === 0) continue;
+
+        const mixedPcm = pcmsForReceiver.length === 1
+          ? Buffer.from(pcmsForReceiver[0].buffer, pcmsForReceiver[0].byteOffset, pcmsForReceiver[0].byteLength)
+          : mixPcmBuffers(pcmsForReceiver);
+
+        let encoded;
+        try {
+          encoded = roomState.sharedEncoder.encode(mixedPcm, FRAME_SIZE);
+        } catch (e) {
+          console.error(`[room=${roomId}] encode error:`, e.message);
+          continue;
+        }
+        receiverClient.ws.send(encoded);
+      }
     }
-
-    broadcastBinary(roomState, encoded);
   }, MIX_INTERVAL_MS);
 }
 
@@ -131,13 +165,14 @@ wss.on('connection', (ws) => {
 
       let pcm;
       try {
+        // opusscript decode() は Int16Array を返す
         pcm = client.decoder.decode(data);
       } catch (e) {
         console.error(`[decode error] room=${roomId} clientId=${clientId}:`, e.message);
         return;
       }
 
-      client.lastPcm = pcm;
+      client.lastPcm = pcm; // Int16Array のまま保持
       client.lastFrameAt = Date.now();
       return;
     }
