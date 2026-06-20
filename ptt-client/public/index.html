@@ -23,13 +23,21 @@
   body {
     margin: 0;
     min-height: 100vh;
+    min-height: 100dvh; /* iOS Safari アドレスバー対応 */
     background: var(--bg);
     color: var(--text);
     font-family: var(--mono);
     display: flex;
-    align-items: center;
+    align-items: flex-start; /* スマホで縦に収まらない場合に上寄せ */
     justify-content: center;
-    padding: 24px;
+    padding: 16px;
+  }
+
+  @media (min-width: 480px) {
+    body {
+      align-items: center;
+      padding: 24px;
+    }
   }
 
   .unit {
@@ -104,10 +112,12 @@
     border: 1px solid var(--line);
     color: var(--text);
     font-family: var(--mono);
-    font-size: 13px;
+    font-size: 16px; /* iOS Safari の自動ズーム防止 (16px未満でズームが発生する) */
     padding: 8px 10px;
     border-radius: 2px;
     outline: none;
+    width: 100%;
+    min-width: 0; /* grid内でのはみ出し防止 */
   }
 
   .field input:focus { border-color: var(--accent); }
@@ -139,13 +149,13 @@
   }
 
   .ptt-btn {
-    width: 140px;
-    height: 140px;
+    width: 160px;
+    height: 160px;
     border-radius: 50%;
     border: 2px solid var(--line);
     background: radial-gradient(circle at 35% 30%, #1c2620, #10160f);
     color: var(--muted);
-    font-size: 12px;
+    font-size: 13px;
     letter-spacing: 0.1em;
     text-transform: uppercase;
     cursor: pointer;
@@ -153,6 +163,15 @@
     user-select: none;
     -webkit-user-select: none;
     touch-action: none;
+    -webkit-tap-highlight-color: transparent; /* モバイルタップ時のハイライト除去 */
+  }
+
+  @media (min-width: 480px) {
+    .ptt-btn {
+      width: 140px;
+      height: 140px;
+      font-size: 12px;
+    }
   }
 
   .ptt-btn:disabled { opacity: 0.3; cursor: not-allowed; }
