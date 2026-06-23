@@ -314,7 +314,7 @@ final class PTTConnectionManager: NSObject, ObservableObject {
         } else {
             status = .disconnected
         }
-        isDisconnecting = false
+//        isDisconnecting = false
     }
 
     private func appendLog(_ line: String) {

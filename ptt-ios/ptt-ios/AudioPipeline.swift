@@ -38,6 +38,7 @@ final class AudioPipeline {
     static let sampleRate: Double = 48000
     static let channels: AVAudioChannelCount = 1
     static let frameSize: AVAudioFrameCount = 960 // 20ms @ 48kHz
+    static let inputGain: Float = 2.5
 
     // MARK: - Audio graph
 
@@ -222,6 +223,12 @@ final class AudioPipeline {
 
     /// Float32 サンプル列を pendingSamples に追加し、960サンプルずつエンコード
     private func enqueue(_ samples: [Float]) {
+		// [追加] 入力ゲインを適用し、-1.0...1.0 にクリップ（歪み防止）
+		let amplified = samples.map { sample -> Float in
+			let boosted = sample * Self.inputGain
+			return max(-1.0, min(1.0, boosted))
+		}
+
         audioLock.withLock { _pendingSamples.append(contentsOf: samples) }
 
         let frameSizeInt = Int(Self.frameSize)
@@ -238,9 +245,10 @@ final class AudioPipeline {
             encodeCount += 1   // ← 追加：これが無いと常に0のまま
         }
 
-        let pendingNow = audioLock.withLock { _pendingSamples.count }
-        let msg = "enqueue: samples=\(samples.count) encodeCount=\(encodeCount) pending=\(pendingNow)"
-        DispatchQueue.main.async { [weak self] in self?.onStatus?(msg) }
+		if encodeCount != 5 {
+			let msg = "enqueue: samples=\(samples.count) encodeCount=\(encodeCount) pending=\(audioLock.withLock { _pendingSamples.count })"
+			DispatchQueue.main.async { [weak self] in self?.onStatus?(msg) }
+		}
     }
 
     /// フォールバック: AVAudioConverter で Float32 に変換してから enqueue
