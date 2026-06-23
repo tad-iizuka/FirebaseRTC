@@ -12,24 +12,14 @@
 //        Xcode → File → Add Package Dependencies… → https://github.com/alta/swift-opus
 //
 //  [修正点]
-//  - [FIX A] AVAudioConverter 方式を廃止。
-//    AVAudioConverter をオーディオスレッドから毎フレーム呼び出す方式では、
-//    コンバータ内部のフィルタ状態が「ストリームが途切れた」とみなされリセットされるため
-//    フレーム境界でクリックノイズ（ビリビリ音）が発生していた。
-//    → AVAudioMixerNode を中継ノードとして挟み、フォーマット変換を
-//      AVAudioEngine 内部（エンジンのレンダースレッド上）に完全に委譲する方式に変更。
-//      これによりコンバータのストリーム状態が途切れることなく維持される。
+//  - [FIX A] inputNode 直タップ + floatChannelData 直接読み取り方式。
+//    AVAudioSession で 48kHz を指定しているため nativeFormat も 48kHz/mono/Float32 になり、
+//    AVAudioConverter 不要でサンプルをそのまま使える。
+//    フォーマットが異なる場合のフォールバックとして AVAudioConverter を保持するが、
+//    通常は使われない。
 //
-//  - [FIX B] Task { @MainActor in } によるフレーム順序の非保証を排除。
-//    オーディオスレッドから Task を生成する方式ではフレームの到着順が保証されず、
-//    pendingSamples への追記順がずれてビリビリ音になっていた。
-//    → タップコールバック内で pendingSamples への追記とエンコードをすべて
-//      オーディオスレッド上で同期的に完了させる方式に変更。
-//      isSending / pendingSamples は専用の NSLock で保護する。
-//
-//  - [従来からの修正点を継承]
-//    encode/decodeエラーを onError クロージャで通知。
-//    onMicBufferReceived デバッグフック。
+//  - [FIX B] オーディオスレッド上でエンコードまで完結。NSLock で共有状態を保護。
+//    UI コールバック (onStatus/onError/onMicBufferReceived) は DispatchQueue.main.async 経由。
 //
 
 import AVFoundation
@@ -54,39 +44,28 @@ final class AudioPipeline {
     private let engine = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
 
-    // [FIX A] inputNode → mixerNode(48kHz/mono/Float32) → tap の経路で
-    // フォーマット変換をエンジン内部に委譲するための中継ミキサー。
-    // AVAudioEngine はノード間の接続フォーマット差を内部で自動変換する。
-    private let inputMixerNode = AVAudioMixerNode()
-
     private var opusEncoder: Opus.Encoder?
     private var opusDecoder: Opus.Decoder?
 
     /// Opusが要求する固定フォーマット (48kHz / mono / Float32)
     private var opusFormat: AVAudioFormat?
 
-    // [FIX B] pendingSamples と isSending はオーディオスレッドからアクセスするため NSLock で保護する。
+    /// フォールバック用コンバータ（nativeFormat が Float32 以外の場合のみ使用）
+    private var audioConverter: AVAudioConverter?
+
     private let audioLock = NSLock()
     private var _pendingSamples: [Float] = []
     private var _isSending: Bool = false
 
-    /// エンコード済みフレームの送信先 (PTTConnectionManager.sendAudioFrame)
-    /// オーディオスレッドから呼ばれることに注意。スレッドセーフな実装が必要。
     var onEncodedFrame: ((Data) -> Void)?
-
-    /// エンコード/デコード/セッション関連のエラーを呼び出し元に通知する。
     var onError: ((String) -> Void)?
-
-    /// 起動シーケンスの進行状況を通知する（デバッグ用）。
     var onStatus: ((String) -> Void)?
-
-    /// マイクタップで実際に届いたバッファのフレーム数を通知する（デバッグ用）。
     var onMicBufferReceived: ((Int) -> Void)?
 
     private(set) var isRunning = false
 
     var isSending: Bool {
-        get { audioLock.withLock { _isSending } }
+        audioLock.withLock { _isSending }
     }
 
     // MARK: - Permission
@@ -131,49 +110,37 @@ final class AudioPipeline {
         opusDecoder = try Opus.Decoder(format: format, application: .voip)
         onStatus?("start(): Opusエンコーダ/デコーダ作成完了")
 
-        // --- オーディオグラフの構築 ---
-        //
-        // [FIX A] 接続トポロジー:
-        //   inputNode (nativeFormat) → inputMixerNode (opusFormat=48kHz/mono/Float32)
-        //                                     ↓ tap（ここで受け取るデータは常に48kHz/mono/Float32）
-        //   playerNode (opusFormat) → mainMixerNode
-        //
-        // inputNode → inputMixerNode の接続時にフォーマット差があれば
-        // AVAudioEngine が内部でサンプルレート変換・チャンネルダウンミックスを行う。
-        // コンバータのストリーム状態はエンジンが管理するため、フレーム境界での
-        // 状態リセット問題が発生しない。
+        // --- オーディオグラフ ---
+        // inputNode → (直タップ) → handleMicBuffer → encodeAndSend → onEncodedFrame
+        // playerNode → mainMixerNode → スピーカー
 
-        engine.attach(inputMixerNode)
         engine.attach(playerNode)
 
         let inputNode = engine.inputNode
         let nativeFormat = inputNode.outputFormat(forBus: 0)
-        onStatus?("start(): nativeFormat sampleRate=\(nativeFormat.sampleRate) ch=\(nativeFormat.channelCount)")
+        onStatus?("start(): nativeFormat sampleRate=\(nativeFormat.sampleRate) ch=\(nativeFormat.channelCount) fmt=\(nativeFormat.commonFormat.rawValue)")
 
         guard nativeFormat.sampleRate > 0, nativeFormat.channelCount > 0 else {
-            onStatus?("start(): 警告 nativeFormatが無効 — 入力ハードウェアが利用できない可能性")
+            onStatus?("start(): 警告 nativeFormatが無効")
             throw AudioPipelineError.formatCreationFailed
         }
 
-        // inputNode → inputMixerNode: nativeFormat → opusFormat への変換をエンジンに委譲
-        engine.connect(inputNode, to: inputMixerNode, format: nativeFormat)
-        // inputMixerNode → mainMixerNode: タップ後の出力先（音量ゼロにして再生しない）
-        engine.connect(inputMixerNode, to: engine.mainMixerNode, format: format)
-        inputMixerNode.outputVolume = 0.0 // マイク入力を再生側に漏らさない
-
-        // playerNode → mainMixerNode: 受信音声の再生
         engine.connect(playerNode, to: engine.mainMixerNode, format: format)
 
-        // [FIX A] タップは inputMixerNode の出力（すでに48kHz/mono/Float32に変換済み）に設置する。
-        // [FIX B] コールバック内でエンコードまで同期完了させ、Task生成を排除する。
-        inputMixerNode.installTap(onBus: 0, bufferSize: Self.frameSize, format: format) { [weak self] buffer, _ in
+        // nativeFormat が opusFormat と異なる場合のみコンバータを用意
+        if nativeFormat != format {
+            audioConverter = AVAudioConverter(from: nativeFormat, to: format)
+            onStatus?("start(): AVAudioConverter作成 \(Int(nativeFormat.sampleRate))Hz/\(nativeFormat.channelCount)ch/fmt\(nativeFormat.commonFormat.rawValue) → 48000Hz/1ch/Float32")
+        } else {
+            onStatus?("start(): nativeFormat == opusFormat、変換不要")
+        }
+
+        // inputNode に直接タップ
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) { [weak self] buffer, _ in
             guard let self else { return }
-            // このクロージャはオーディオスレッドで呼ばれる。
-            // MainActor状態（onMicBufferReceived等）へのアクセスは最小限に抑え、
-            // 安全のためすべての処理をここで完結させる。
             self.handleMicBuffer(buffer)
         }
-        onStatus?("start(): installTap完了（inputMixerNode、format=48kHz/mono/Float32）")
+        onStatus?("start(): installTap完了（inputNode直タップ）")
 
         engine.prepare()
         do {
@@ -198,15 +165,15 @@ final class AudioPipeline {
             _isSending = false
             _pendingSamples.removeAll()
         }
-        inputMixerNode.removeTap(onBus: 0)
+        engine.inputNode.removeTap(onBus: 0)
         playerNode.stop()
         engine.stop()
-        engine.detach(inputMixerNode)
         engine.detach(playerNode)
         isRunning = false
         opusEncoder = nil
         opusDecoder = nil
         opusFormat = nil
+        audioConverter = nil
     }
 
     private func configureAudioSession() throws {
@@ -234,24 +201,31 @@ final class AudioPipeline {
 
     // MARK: - Mic → Opus エンコード（オーディオスレッドで完結）
 
-    // [FIX B] このメソッドはオーディオスレッドから直接呼ばれる。
-    // MainActor へのホップは行わない。
-    // opusEncoder は start()/stop() でのみ書き換えられ、isRunning が true の間は
-    // 不変のため、ここでの読み取りは安全。
     private func handleMicBuffer(_ buffer: AVAudioPCMBuffer) {
-        // デバッグ通知はスレッドをまたぐが、onMicBufferReceived の実装側で
-        // DispatchQueue.main.async 等を使うこと。
-        onMicBufferReceived?(Int(buffer.frameLength))
+        let frameLen = Int(buffer.frameLength)
+        DispatchQueue.main.async { [weak self] in
+            self?.onMicBufferReceived?(frameLen)
+        }
 
         guard audioLock.withLock({ _isSending }) else { return }
-        guard let channelData = buffer.floatChannelData else { return }
 
-        let frameLength = Int(buffer.frameLength)
-        let newSamples = [Float](UnsafeBufferPointer(start: channelData[0], count: frameLength))
+        if let channelData = buffer.floatChannelData {
+            // nativeFormat が Float32 → そのまま使う（変換コストゼロ）
+            guard frameLen > 0 else { return }
+            let samples = [Float](UnsafeBufferPointer(start: channelData[0], count: frameLen))
+            enqueue(samples)
+        } else {
+            // nativeFormat が Float32 以外（Int16 等）→ AVAudioConverter でフォールバック変換
+            convertAndEnqueue(buffer)
+        }
+    }
 
-        audioLock.withLock { _pendingSamples.append(contentsOf: newSamples) }
+    /// Float32 サンプル列を pendingSamples に追加し、960サンプルずつエンコード
+    private func enqueue(_ samples: [Float]) {
+        audioLock.withLock { _pendingSamples.append(contentsOf: samples) }
 
         let frameSizeInt = Int(Self.frameSize)
+        var encodeCount = 0  // ← 追加
         while true {
             let chunk: [Float] = audioLock.withLock {
                 guard _pendingSamples.count >= frameSizeInt else { return [] }
@@ -262,17 +236,45 @@ final class AudioPipeline {
             guard chunk.count == frameSizeInt else { break }
             encodeAndSend(chunk)
         }
+		// ← 追加
+		if encodeCount != 5 {
+			let msg = "enqueue: samples=\(samples.count) encodeCount=\(encodeCount) pending=\(audioLock.withLock { _pendingSamples.count })"
+			DispatchQueue.main.async { [weak self] in self?.onStatus?(msg) }
+		}
     }
 
-    // [修正・デバッグ用] エンコード成功ログのスロットリング用
+    /// フォールバック: AVAudioConverter で Float32 に変換してから enqueue
+    private func convertAndEnqueue(_ buffer: AVAudioPCMBuffer) {
+        guard let converter = audioConverter, let format = opusFormat else { return }
+        let ratio = format.sampleRate / buffer.format.sampleRate
+        let outCount = AVAudioFrameCount(Double(buffer.frameLength) * ratio)
+        guard outCount > 0,
+              let out = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: outCount) else { return }
+
+        var err: NSError?
+        var fed = false
+        converter.convert(to: out, error: &err) { _, status in
+            if fed { status.pointee = .noDataNow; return nil }
+            fed = true; status.pointee = .haveData; return buffer
+        }
+        guard err == nil, let ch = out.floatChannelData, out.frameLength > 0 else {
+            if let e = err {
+                let msg = "convert error: \(e.localizedDescription)"
+                DispatchQueue.main.async { [weak self] in self?.onError?(msg) }
+            }
+            return
+        }
+        let samples = [Float](UnsafeBufferPointer(start: ch[0], count: Int(out.frameLength)))
+        enqueue(samples)
+    }
+
     private var lastEncodeLogAt: Date = .distantPast
 
-    // オーディオスレッドから呼ばれる。
     private func encodeAndSend(_ samples: [Float]) {
         guard let encoder = opusEncoder, let format = opusFormat else { return }
 
         guard let pcmBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: Self.frameSize) else {
-            onError?("PCMバッファ作成失敗")
+            DispatchQueue.main.async { [weak self] in self?.onError?("PCMバッファ作成失敗") }
             return
         }
         pcmBuffer.frameLength = Self.frameSize
@@ -288,13 +290,15 @@ final class AudioPipeline {
             let now = Date()
             if now.timeIntervalSince(lastEncodeLogAt) > 1.0 {
                 lastEncodeLogAt = now
-                let hexPrefix = trimmed.prefix(4).map { String(format: "%02x", $0) }.joined(separator: " ")
-                onStatus?("encode ok: bytes=\(byteCount) head=[\(hexPrefix)]")
+                let hex = trimmed.prefix(4).map { String(format: "%02x", $0) }.joined(separator: " ")
+                let msg = "encode ok: bytes=\(byteCount) head=[\(hex)]"
+                DispatchQueue.main.async { [weak self] in self?.onStatus?(msg) }
             }
 
             onEncodedFrame?(trimmed)
         } catch {
-            onError?("encode error: \(error)")
+            let msg = "encode error: \(error)"
+            DispatchQueue.main.async { [weak self] in self?.onError?(msg) }
         }
     }
 
@@ -304,10 +308,9 @@ final class AudioPipeline {
         guard isRunning, let decoder = opusDecoder, let expectedFormat = opusFormat else { return }
         do {
             let buffer = try decoder.decode(data)
-            // デコード出力フォーマットの検証（デバッグ用）
             if buffer.format.sampleRate != expectedFormat.sampleRate ||
                buffer.format.channelCount != expectedFormat.channelCount {
-                onError?("decode format mismatch: got \(buffer.format.sampleRate)Hz/\(buffer.format.channelCount)ch expected \(expectedFormat.sampleRate)Hz/\(expectedFormat.channelCount)ch")
+                onError?("decode format mismatch: got \(buffer.format.sampleRate)Hz/\(buffer.format.channelCount)ch")
             }
             playerNode.scheduleBuffer(buffer)
         } catch {

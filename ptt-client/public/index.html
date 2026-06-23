@@ -436,8 +436,13 @@ function handleAudioFrame(arrayBuffer) {
   }
 }
 
+// 受信キュー：iOSは4800サンプル(100ms)まとめて送るため
+// フレームがバースト状に届く。定周期スケジューラで均等に再生する。
+const playQueue = [];
+let playSchedulerRunning = false;
+
 function playDecodedAudio(audioData) {
-  if (!audioCtx) return;
+  if (!audioCtx) { audioData.close(); return; }
   const numFrames = audioData.numberOfFrames;
   const numChannels = audioData.numberOfChannels;
   const buffer = audioCtx.createBuffer(numChannels, numFrames, audioData.sampleRate);
@@ -447,20 +452,33 @@ function playDecodedAudio(audioData) {
     buffer.copyToChannel(channelData, ch);
   }
   audioData.close();
-
-  const source = audioCtx.createBufferSource();
-  source.buffer = buffer;
-  source.connect(audioCtx.destination);
-
-  const now = audioCtx.currentTime;
-  // [FIX] iOS→Chromeはレイテンシが大きいため nextPlayTime がリセット直後に
-  // 遅れて到着するパケットに追い抜かれることがある。
-  // バッファを80msに拡大し、時刻がずれた場合も確実にリセットする。
-  if (nextPlayTime < now + 0.01) {
-    nextPlayTime = now + 0.08;
+  playQueue.push(buffer);
+  if (!playSchedulerRunning) {
+    playSchedulerRunning = true;
+    schedulePlayback();
   }
-  source.start(nextPlayTime);
-  nextPlayTime += buffer.duration;
+}
+
+function schedulePlayback() {
+  if (!audioCtx) { playSchedulerRunning = false; return; }
+  const now = audioCtx.currentTime;
+  // 200ms のジッタバッファ。nextPlayTime が過去になったらリセット。
+  if (nextPlayTime < now + 0.005) {
+    nextPlayTime = now + 0.20;
+    if (playQueue.length > 25) {
+      playQueue.splice(0, playQueue.length - 10);
+    }
+  }
+  // 300ms先までスケジュール済みにする
+  while (playQueue.length > 0 && nextPlayTime < now + 0.30) {
+    const buf = playQueue.shift();
+    const src = audioCtx.createBufferSource();
+    src.buffer = buf;
+    src.connect(audioCtx.destination);
+    src.start(nextPlayTime);
+    nextPlayTime += buf.duration;
+  }
+  setTimeout(schedulePlayback, 20);
 }
 
 // ---------- イベント ----------

@@ -92,8 +92,10 @@ function startMixLoopIfNeeded(roomState, roomId) {
 
     const activeSenders = [];
     for (const [clientId, client] of roomState.clients.entries()) {
-      if (client.lastPcm && now - client.lastFrameAt <= STALE_FRAME_MS) {
-        activeSenders.push({ clientId, pcm: client.lastPcm });
+      // キューから1フレーム取り出す
+      if (client.pcmQueue.length > 0 && now - client.lastFrameAt <= STALE_FRAME_MS) {
+        const pcm = client.pcmQueue.shift();
+        activeSenders.push({ clientId, pcm });
       }
     }
 
@@ -167,11 +169,21 @@ wss.on('connection', (ws) => {
       const client = roomState.clients.get(clientId);
       if (!client) return;
 
+      // [FIX] ws ライブラリのバージョンによって data が Buffer / ArrayBuffer / Buffer[]
+      // のいずれかで届く。@discordjs/opus の decode() は Buffer のみ受け付けるため
+      // 型を明示的に正規化する。
+      const frame = Buffer.isBuffer(data) ? data
+        : Array.isArray(data)             ? Buffer.concat(data)
+        :                                   Buffer.from(data);
+
+      // [診断] 受信データの型・サイズを1秒スロットリングでログ出力
+      logDiagThrottled(clientId + '_type', `recv type=${data.constructor.name} frameBytes=${frame.length}`);
+
       let pcm;
       try {
         // @discordjs/opus の decode() は Buffer(Int16LE PCM) を返す。
         // frameSize 指定不要で内部的に正しく960サンプル(=1920バイト)をデコードする。
-        pcm = client.decoder.decode(data);
+        pcm = client.decoder.decode(frame);
       } catch (e) {
         console.error(`[decode error] room=${roomId} clientId=${clientId}:`, e.message);
         return;
@@ -181,7 +193,10 @@ wss.on('connection', (ws) => {
       const maxAmp = maxAbsAmplitude(pcm);
       logDiagThrottled(clientId, `recv bytes=${data.length} decodedSamples=${decodedSamples} maxAmp=${maxAmp}`);
 
-      client.lastPcm = pcm;
+      // キューに積む。溜まりすぎ防止のため上限を設ける（約500ms分）
+      if (client.pcmQueue.length < 25) {
+        client.pcmQueue.push(pcm);
+      }
       client.lastFrameAt = Date.now();
       return;
     }
@@ -215,7 +230,10 @@ wss.on('connection', (ws) => {
           ws,
           decoder: new OpusEncoder(SAMPLE_RATE, CHANNELS),
           encoder: new OpusEncoder(SAMPLE_RATE, CHANNELS),
-          lastPcm: null,
+          // [FIX] lastPcm(1フレームのみ保持)をキュー方式に変更。
+          // iOSは100ms分(5フレーム)をバースト送信するため、キューで全フレームを保持し
+          // ミックスループが20msごとに1フレームずつ消費する。
+          pcmQueue: [],
           lastFrameAt: 0,
         });
         ws.pttMeta = { roomId, clientId };
@@ -257,7 +275,7 @@ wss.on('connection', (ws) => {
         console.log(`[ptt_end] room=${roomId} clientId=${clientId}`);
         broadcastJSON(roomState, { type: 'talker_end', clientId }, clientId);
         const client = roomState.clients.get(clientId);
-        if (client) { client.lastFrameAt = 0; client.lastPcm = null; }
+        if (client) { client.lastFrameAt = 0; client.pcmQueue = []; }
         break;
       }
 
