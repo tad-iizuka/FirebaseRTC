@@ -1,5 +1,12 @@
 /**
  * PTT Server - Phase A Step 2: Opus mixing
+ *
+ * [修正・デバッグ用]
+ * iOSから送られてきたOpusフレームが、サーバー側のopusscriptデコーダで
+ * 「エラーなく」デコードされているにも関わらず、実際には無音/不正な
+ * PCMになっている可能性を確認するため、デコード直後のPCMの振幅(最大絶対値)を
+ * クライアントごとに間引いてログ出力するようにした。
+ * 原因特定後は不要になれば削除してよい。
  */
 
 const { WebSocketServer, WebSocket } = require('ws');
@@ -14,6 +21,9 @@ const MIX_INTERVAL_MS = 20;
 const STALE_FRAME_MS = 60;
 
 const rooms = new Map();
+
+// [修正・デバッグ用] クライアントごとの診断ログのスロットリング用
+const lastDiagLogAt = new Map();
 
 function getOrCreateRoom(roomId) {
   if (!rooms.has(roomId)) {
@@ -42,6 +52,26 @@ function broadcastBinary(roomState, buffer, excludeClientId = null) {
   for (const [clientId, client] of roomState.clients.entries()) {
     if (excludeClientId && clientId === excludeClientId) continue;
     if (client.ws.readyState === WebSocket.OPEN) client.ws.send(buffer);
+  }
+}
+
+// [修正・デバッグ用] Int16Array PCMの最大絶対値を求める（無音/不正データの検出用）
+function maxAbsAmplitude(int16arr) {
+  let maxAbs = 0;
+  for (let i = 0; i < int16arr.length; i++) {
+    const v = Math.abs(int16arr[i]);
+    if (v > maxAbs) maxAbs = v;
+  }
+  return maxAbs;
+}
+
+// [修正・デバッグ用] 1クライアントにつき1秒に1回程度の頻度で診断ログを出す
+function logDiagThrottled(clientId, message) {
+  const now = Date.now();
+  const last = lastDiagLogAt.get(clientId) || 0;
+  if (now - last > 1000) {
+    lastDiagLogAt.set(clientId, now);
+    console.log(`[diag] clientId=${clientId} ${message}`);
   }
 }
 
@@ -171,6 +201,11 @@ wss.on('connection', (ws) => {
         console.error(`[decode error] room=${roomId} clientId=${clientId}:`, e.message);
         return;
       }
+
+      // [修正・デバッグ用] 受信バイト数とデコード後の最大振幅をログに出す。
+      // 「decodeは成功しているが内容が無音/不正データになっていないか」を確認するため。
+      const maxAmp = maxAbsAmplitude(pcm);
+      logDiagThrottled(clientId, `recv bytes=${data.length} decodedSamples=${pcm.length} maxAmp=${maxAmp}`);
 
       client.lastPcm = pcm; // Int16Array のまま保持
       client.lastFrameAt = Date.now();
