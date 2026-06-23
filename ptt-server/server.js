@@ -1,16 +1,22 @@
 /**
  * PTT Server - Phase A Step 2: Opus mixing
  *
- * [修正・デバッグ用]
- * iOSから送られてきたOpusフレームが、サーバー側のopusscriptデコーダで
- * 「エラーなく」デコードされているにも関わらず、実際には無音/不正な
- * PCMになっている可能性を確認するため、デコード直後のPCMの振幅(最大絶対値)を
- * クライアントごとに間引いてログ出力するようにした。
- * 原因特定後は不要になれば削除してよい。
+ * [修正済み]
+ * - [FIX #4→#7] opusscript 0.1.1 は decode() の第2引数(frameSize)を完全に無視するバグがあり、
+ *   常に1920サンプル(40ms)でデコードされ maxAmp=255固定という不正な結果になっていた。
+ *   opusscript は最新版でも0.1.1のまま更新が止まっているため、
+ *   libopus ネイティブバインディングの @discordjs/opus に乗り換えた。
+ *   @discordjs/opus の decode() は Buffer を返し、内部で正しく960サンプルをデコードする。
+ * - [FIX #5] sharedEncoder を廃止し、クライアントごとに専用エンコーダを持つ方式に変更。
+ * - [FIX #6] 1人/複数人送話の処理パスを受信者ごとエンコードに統一。
+ *
+ * 事前準備:
+ *   npm uninstall opusscript
+ *   npm install @discordjs/opus
  */
 
 const { WebSocketServer, WebSocket } = require('ws');
-const OpusScript = require('opusscript');
+const { OpusEncoder } = require('@discordjs/opus');
 
 const PORT = process.env.PORT || 8080;
 
@@ -22,7 +28,6 @@ const STALE_FRAME_MS = 60;
 
 const rooms = new Map();
 
-// [修正・デバッグ用] クライアントごとの診断ログのスロットリング用
 const lastDiagLogAt = new Map();
 
 function getOrCreateRoom(roomId) {
@@ -30,7 +35,6 @@ function getOrCreateRoom(roomId) {
     rooms.set(roomId, {
       clients: new Map(),
       mixTimer: null,
-      sharedEncoder: new OpusScript(SAMPLE_RATE, CHANNELS, OpusScript.Application.VOIP),
     });
   }
   return rooms.get(roomId);
@@ -48,24 +52,16 @@ function broadcastJSON(roomState, payload, excludeClientId = null) {
   }
 }
 
-function broadcastBinary(roomState, buffer, excludeClientId = null) {
-  for (const [clientId, client] of roomState.clients.entries()) {
-    if (excludeClientId && clientId === excludeClientId) continue;
-    if (client.ws.readyState === WebSocket.OPEN) client.ws.send(buffer);
-  }
-}
-
-// [修正・デバッグ用] Int16Array PCMの最大絶対値を求める（無音/不正データの検出用）
-function maxAbsAmplitude(int16arr) {
+// [診断用] Int16 PCM Buffer の最大絶対値を求める
+function maxAbsAmplitude(buf) {
   let maxAbs = 0;
-  for (let i = 0; i < int16arr.length; i++) {
-    const v = Math.abs(int16arr[i]);
+  for (let i = 0; i < buf.length - 1; i += 2) {
+    const v = Math.abs(buf.readInt16LE(i));
     if (v > maxAbs) maxAbs = v;
   }
   return maxAbs;
 }
 
-// [修正・デバッグ用] 1クライアントにつき1秒に1回程度の頻度で診断ログを出す
 function logDiagThrottled(clientId, message) {
   const now = Date.now();
   const last = lastDiagLogAt.get(clientId) || 0;
@@ -75,19 +71,17 @@ function logDiagThrottled(clientId, message) {
   }
 }
 
-// [FIX #1] opusscript の decode() は Int16Array を返す。
-// 旧実装では Buffer メソッド(readInt16LE)で読もうとしていたため NaN が加算され音声が壊れていた。
-// → Int16Array のインデックスで直接アクセスし、encode用に Buffer へ変換して返す。
+// PCM は Int16LE の Buffer。複数バッファをサンプル単位でミックスして返す。
 function mixPcmBuffers(pcmBuffers) {
-  const out = new Int16Array(FRAME_SIZE);
+  const out = Buffer.alloc(FRAME_SIZE * 2); // Int16 = 2バイト/サンプル
   for (let i = 0; i < FRAME_SIZE; i++) {
     let sum = 0;
-    for (const buf of pcmBuffers) sum += buf[i];
+    for (const buf of pcmBuffers) sum += buf.readInt16LE(i * 2);
     if (sum > 32767) sum = 32767;
     if (sum < -32768) sum = -32768;
-    out[i] = sum;
+    out.writeInt16LE(sum, i * 2);
   }
-  return Buffer.from(out.buffer);
+  return out;
 }
 
 function startMixLoopIfNeeded(roomState, roomId) {
@@ -96,7 +90,6 @@ function startMixLoopIfNeeded(roomState, roomId) {
   roomState.mixTimer = setInterval(() => {
     const now = Date.now();
 
-    // アクティブな送話者リストを収集（clientId も保持）
     const activeSenders = [];
     for (const [clientId, client] of roomState.clients.entries()) {
       if (client.lastPcm && now - client.lastFrameAt <= STALE_FRAME_MS) {
@@ -106,46 +99,28 @@ function startMixLoopIfNeeded(roomState, roomId) {
 
     if (activeSenders.length === 0) return;
 
-    if (activeSenders.length === 1) {
-      // 送話者が1人の場合: 自分以外に送る
-      const { clientId, pcm } = activeSenders[0];
+    // 受信者ごとに「自分以外の音をミックス → 受信者専用エンコーダでエンコード → 送信」
+    for (const [receiverId, receiverClient] of roomState.clients.entries()) {
+      if (receiverClient.ws.readyState !== WebSocket.OPEN) continue;
 
-      // [FIX #2] Int16Array → Buffer へ変換してからエンコード
-      const pcmBuf = Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength);
+      const pcmsForReceiver = activeSenders
+        .filter(s => s.clientId !== receiverId)
+        .map(s => s.pcm);
+
+      if (pcmsForReceiver.length === 0) continue;
+
+      const mixedPcm = pcmsForReceiver.length === 1
+        ? pcmsForReceiver[0]
+        : mixPcmBuffers(pcmsForReceiver);
+
       let encoded;
       try {
-        encoded = roomState.sharedEncoder.encode(pcmBuf, FRAME_SIZE);
+        encoded = receiverClient.encoder.encode(mixedPcm);
       } catch (e) {
         console.error(`[room=${roomId}] encode error:`, e.message);
-        return;
+        continue;
       }
-      // [FIX #3] 送話者自身を除外して送信（エコー防止）
-      broadcastBinary(roomState, encoded, clientId);
-
-    } else {
-      // 送話者が複数の場合: 各受信者ごとに「自分以外の音だけミックス」して送る
-      for (const [receiverId, receiverClient] of roomState.clients.entries()) {
-        if (receiverClient.ws.readyState !== WebSocket.OPEN) continue;
-
-        const pcmsForReceiver = activeSenders
-          .filter(s => s.clientId !== receiverId)
-          .map(s => s.pcm);
-
-        if (pcmsForReceiver.length === 0) continue;
-
-        const mixedPcm = pcmsForReceiver.length === 1
-          ? Buffer.from(pcmsForReceiver[0].buffer, pcmsForReceiver[0].byteOffset, pcmsForReceiver[0].byteLength)
-          : mixPcmBuffers(pcmsForReceiver);
-
-        let encoded;
-        try {
-          encoded = roomState.sharedEncoder.encode(mixedPcm, FRAME_SIZE);
-        } catch (e) {
-          console.error(`[room=${roomId}] encode error:`, e.message);
-          continue;
-        }
-        receiverClient.ws.send(encoded);
-      }
+      receiverClient.ws.send(encoded);
     }
   }, MIX_INTERVAL_MS);
 }
@@ -167,7 +142,6 @@ function removeFromRoom(ws) {
   roomState.clients.delete(clientId);
 
   console.log(`[leave] room=${roomId} clientId=${clientId} (remaining=${roomState.clients.size})`);
-
   broadcastJSON(roomState, { type: 'member_left', clientId });
   stopMixLoopIfEmpty(roomState);
 
@@ -195,19 +169,19 @@ wss.on('connection', (ws) => {
 
       let pcm;
       try {
-        // opusscript decode() は Int16Array を返す
+        // @discordjs/opus の decode() は Buffer(Int16LE PCM) を返す。
+        // frameSize 指定不要で内部的に正しく960サンプル(=1920バイト)をデコードする。
         pcm = client.decoder.decode(data);
       } catch (e) {
         console.error(`[decode error] room=${roomId} clientId=${clientId}:`, e.message);
         return;
       }
 
-      // [修正・デバッグ用] 受信バイト数とデコード後の最大振幅をログに出す。
-      // 「decodeは成功しているが内容が無音/不正データになっていないか」を確認するため。
+      const decodedSamples = pcm.length / 2; // Int16 = 2バイト/サンプル
       const maxAmp = maxAbsAmplitude(pcm);
-      logDiagThrottled(clientId, `recv bytes=${data.length} decodedSamples=${pcm.length} maxAmp=${maxAmp}`);
+      logDiagThrottled(clientId, `recv bytes=${data.length} decodedSamples=${decodedSamples} maxAmp=${maxAmp}`);
 
-      client.lastPcm = pcm; // Int16Array のまま保持
+      client.lastPcm = pcm;
       client.lastFrameAt = Date.now();
       return;
     }
@@ -235,9 +209,12 @@ wss.on('connection', (ws) => {
           return;
         }
 
+        // [FIX #7] @discordjs/opus の OpusEncoder はエンコード・デコード両方を担う。
+        // クライアントごとに decoder/encoder を独立して持つ。
         roomState.clients.set(clientId, {
           ws,
-          decoder: new OpusScript(SAMPLE_RATE, CHANNELS, OpusScript.Application.VOIP),
+          decoder: new OpusEncoder(SAMPLE_RATE, CHANNELS),
+          encoder: new OpusEncoder(SAMPLE_RATE, CHANNELS),
           lastPcm: null,
           lastFrameAt: 0,
         });
@@ -258,10 +235,9 @@ wss.on('connection', (ws) => {
         break;
       }
 
-      case 'leave': {
+      case 'leave':
         removeFromRoom(ws);
         break;
-      }
 
       case 'ptt_start': {
         if (!ws.pttMeta) return;
@@ -280,12 +256,8 @@ wss.on('connection', (ws) => {
         if (!roomState) return;
         console.log(`[ptt_end] room=${roomId} clientId=${clientId}`);
         broadcastJSON(roomState, { type: 'talker_end', clientId }, clientId);
-
         const client = roomState.clients.get(clientId);
-        if (client) {
-          client.lastFrameAt = 0;
-          client.lastPcm = null;
-        }
+        if (client) { client.lastFrameAt = 0; client.lastPcm = null; }
         break;
       }
 
