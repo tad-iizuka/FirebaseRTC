@@ -24,7 +24,7 @@ const SAMPLE_RATE = 48000;
 const CHANNELS = 1;
 const FRAME_SIZE = 960; // 20ms @ 48kHz
 const MIX_INTERVAL_MS = 20;
-const STALE_FRAME_MS = 60;
+const STALE_FRAME_MS = 150;
 
 const rooms = new Map();
 

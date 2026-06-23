@@ -235,12 +235,12 @@ final class AudioPipeline {
             }
             guard chunk.count == frameSizeInt else { break }
             encodeAndSend(chunk)
+            encodeCount += 1   // ← 追加：これが無いと常に0のまま
         }
-		// ← 追加
-		if encodeCount != 5 {
-			let msg = "enqueue: samples=\(samples.count) encodeCount=\(encodeCount) pending=\(audioLock.withLock { _pendingSamples.count })"
-			DispatchQueue.main.async { [weak self] in self?.onStatus?(msg) }
-		}
+
+        let pendingNow = audioLock.withLock { _pendingSamples.count }
+        let msg = "enqueue: samples=\(samples.count) encodeCount=\(encodeCount) pending=\(pendingNow)"
+        DispatchQueue.main.async { [weak self] in self?.onStatus?(msg) }
     }
 
     /// フォールバック: AVAudioConverter で Float32 に変換してから enqueue
@@ -287,13 +287,10 @@ final class AudioPipeline {
             let byteCount = try encoder.encode(pcmBuffer, to: &encodedData)
             let trimmed = Data(encodedData.prefix(byteCount))
 
-            let now = Date()
-            if now.timeIntervalSince(lastEncodeLogAt) > 1.0 {
-                lastEncodeLogAt = now
-                let hex = trimmed.prefix(4).map { String(format: "%02x", $0) }.joined(separator: " ")
-                let msg = "encode ok: bytes=\(byteCount) head=[\(hex)]"
-                DispatchQueue.main.async { [weak self] in self?.onStatus?(msg) }
-            }
+            // [検証用] スロットリングを外して全フレームをログ出力
+            let hex = trimmed.prefix(4).map { String(format: "%02x", $0) }.joined(separator: " ")
+            let msg = "encode ok: bytes=\(byteCount) head=[\(hex)]"
+            DispatchQueue.main.async { [weak self] in self?.onStatus?(msg) }
 
             onEncodedFrame?(trimmed)
         } catch {
