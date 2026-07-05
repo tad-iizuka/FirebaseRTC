@@ -11,6 +11,7 @@
  */
 
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const { AccessToken } = require('livekit-server-sdk');
 
 const PORT = process.env.PORT || 8080;
@@ -24,6 +25,12 @@ if (!LIVEKIT_API_KEY || !LIVEKIT_API_SECRET) {
 
 const app = express();
 
+// [Phase 0] Cloud Run はリバースプロキシ経由でリクエストが来るため、
+// これを設定しないと req.ip が常にプロキシのIP(=全リクエスト同一IP)になり、
+// IPベースのレート制限が機能しない。
+// 値は1(1ホップ)。Cloud Runは1段のプロキシを経由するため。
+app.set('trust proxy', 1);
+
 // [CORS] Web版クライアント(ptt-client)からのクロスオリジンfetchを許可。
 // 本番では allowedOrigins を実際のホスティング先ドメインに絞ること。
 app.use((req, res, next) => {
@@ -31,6 +38,20 @@ app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
+});
+
+// [Phase 0: セキュリティ緊急対応]
+// /token はIPベースのレート制限をかけ、無制限のトークン発行を防ぐ。
+// - 1分あたり10回まで (通常利用は接続時に1回、再接続時に数回程度のはず)
+// - ヘルスチェック('/')には適用しない
+const tokenRateLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1分
+  max: 10,
+  standardHeaders: true, // RateLimit-* ヘッダーを返す
+  legacyHeaders: false,
+  message: { error: 'リクエストが多すぎます。しばらく待ってから再試行してください' },
+  // identity単位ではなくIP単位。将来的にidentity単位の制限も検討可。
+  keyGenerator: (req) => req.ip,
 });
 
 // Cloud Run のヘルスチェック用
@@ -45,7 +66,7 @@ app.get('/', (req, res) => res.send('ptt-token-server OK'));
  * 同一identityで既に接続中の場合、LiveKit側の既定動作として
  * 古い接続が切断され新しい接続に置き換わる(重複joinエラーは発生しない)。
  */
-app.get('/token', async (req, res) => {
+app.get('/token', tokenRateLimiter, async (req, res) => {
   const room = String(req.query.room || '').trim();
   const identity = String(req.query.identity || '').trim();
 
