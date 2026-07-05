@@ -1,0 +1,14 @@
+{
+  "name": "ptt-token-server",
+  "version": "1.0.0",
+  "description": "LiveKit用のアクセストークン発行サーバー (旧ptt-server/server.jsの後継)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.19.2",
+    "livekit-server-sdk": "^2.9.2"
+  }
+}

@@ -2,8 +2,10 @@
 //  ContentView.swift
 //  PTTClient
 //
-//  ptt-client/public/index.html のUIと同等の構成:
-//  接続フォーム → PTTボタン → 送話中リスト → ログ
+//  [LiveKit移行]
+//  Web版(ptt-client/public/index.html)のLiveKit版と同等のUI:
+//  接続フォーム(トークンサーバーURL / LiveKit URL / ルームID / クライアントID)
+//  → PTTボタン → 送話中リスト → ログ
 //
 
 import SwiftUI
@@ -12,7 +14,8 @@ struct ContentView: View {
 
     @StateObject private var connection = PTTConnectionManager()
 
-    @State private var serverURL: String = "wss://ptt-server-rnn4fqay3a-an.a.run.app"
+    @State private var tokenServerURL: String = "https://ptt-token-server-rnn4fqay3a-an.a.run.app"
+    @State private var livekitURL: String = "wss://ubunifu-talk-wy19xst3.livekit.cloud"
     @State private var roomId: String = "room1"
     @State private var clientId: String = ""
 
@@ -35,7 +38,7 @@ struct ContentView: View {
 
     private var header: some View {
         HStack {
-            Text("PTT PROTOTYPE")
+            Text("PTT CLIENT")
                 .font(.system(size: 11, weight: .regular, design: .monospaced))
                 .foregroundColor(.gray)
             Spacer()
@@ -89,7 +92,8 @@ struct ContentView: View {
 
     private var form: some View {
         VStack(spacing: 10) {
-            field(label: "サーバURL", text: $serverURL)
+            field(label: "トークンサーバーURL", text: $tokenServerURL)
+            field(label: "LiveKit URL (wss://)", text: $livekitURL)
             HStack(spacing: 10) {
                 field(label: "ルームID", text: $roomId)
                 field(label: "クライアントID", text: $clientId, placeholder: "例: alice")
@@ -117,7 +121,7 @@ struct ContentView: View {
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundColor(.gray)
             TextField(placeholder, text: text)
-                .font(.system(size: 16, design: .monospaced))
+                .font(.system(size: 14, design: .monospaced))
                 .padding(8)
                 .background(Color.black.opacity(0.3))
                 .autocorrectionDisabled()
@@ -134,8 +138,8 @@ struct ContentView: View {
         if isConnected {
             connection.disconnect()
         } else {
-            guard !roomId.isEmpty, !clientId.isEmpty else { return }
-            connection.connect(urlString: serverURL, room: roomId, clientId: clientId)
+            guard !tokenServerURL.isEmpty, !livekitURL.isEmpty, !roomId.isEmpty, !clientId.isEmpty else { return }
+            connection.connect(tokenServerURL: tokenServerURL, livekitURL: livekitURL, room: roomId, identity: clientId)
         }
     }
 
@@ -164,14 +168,6 @@ struct ContentView: View {
             Text("ボタンを押している間だけ音声が送信されます")
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundColor(.gray)
-
-            if connection.micPermissionDenied {
-                Text("⚠️ マイクへのアクセスが許可されていません。設定アプリ → PTTClient → マイク を確認してください")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(Color(red: 1.0, green: 0.36, blue: 0.36))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 18)
-            }
         }
         .padding(.vertical, 24)
     }
@@ -224,8 +220,6 @@ private struct FlowLayoutHStackFallback: View {
     let items: [String]
 
     var body: some View {
-        // iOS17+の新Layoutプロトコルを使った折り返し実装に置き換え可能。
-        // ひとまずはScrollViewで横並び表示。
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 ForEach(items, id: \.self) { id in

@@ -3,116 +3,50 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PTT Client (Phase A 検証用)</title>
+<title>PTT Client</title>
+<script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js"></script>
 <style>
   :root {
-    --bg: #0d1210;
-    --panel: #141b18;
-    --line: #263129;
-    --text: #d8e4dd;
-    --muted: #6f8079;
-    --accent: #ff7a3c;
-    --accent-dim: #5c3520;
-    --live: #3ddc84;
-    --danger: #ff5c5c;
-    --mono: "SF Mono", "Menlo", "Consolas", monospace;
+    --bg: #0d1210; --panel: #141b18; --line: #263129; --text: #d8e4dd;
+    --muted: #6f8079; --accent: #ff7a3c; --accent-dim: #5c3520;
+    --live: #3ddc84; --danger: #ff5c5c; --mono: "SF Mono", "Menlo", "Consolas", monospace;
   }
-
   * { box-sizing: border-box; }
-
   body {
-    margin: 0;
-    min-height: 100vh;
-    min-height: 100dvh;
-    background: var(--bg);
-    color: var(--text);
-    font-family: var(--mono);
-    display: flex;
-    align-items: flex-start;
-    justify-content: center;
-    padding: 16px;
+    margin: 0; min-height: 100vh; min-height: 100dvh; background: var(--bg); color: var(--text);
+    font-family: var(--mono); display: flex; align-items: flex-start; justify-content: center; padding: 16px;
   }
-
-  @media (min-width: 480px) {
-    body { align-items: center; padding: 24px; }
-  }
-
-  .unit {
-    width: 100%; max-width: 420px;
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 4px;
-    overflow: hidden;
-  }
-
-  .unit-header {
-    padding: 14px 18px;
-    border-bottom: 1px solid var(--line);
-    display: flex; align-items: baseline; justify-content: space-between;
-  }
+  @media (min-width: 480px) { body { align-items: center; padding: 24px; } }
+  .unit { width: 100%; max-width: 420px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+  .unit-header { padding: 14px 18px; border-bottom: 1px solid var(--line); display: flex; align-items: baseline; justify-content: space-between; }
   .unit-header .label { font-size: 11px; letter-spacing: 0.12em; color: var(--muted); text-transform: uppercase; }
   .unit-header .channel { font-size: 13px; color: var(--text); }
-
-  .status-row {
-    display: flex; align-items: center; gap: 8px;
-    padding: 10px 18px; border-bottom: 1px solid var(--line); font-size: 12px;
-  }
+  .status-row { display: flex; align-items: center; gap: 8px; padding: 10px 18px; border-bottom: 1px solid var(--line); font-size: 12px; }
   .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
   .dot.connected { background: var(--live); box-shadow: 0 0 6px var(--live); }
   .dot.error { background: var(--danger); }
   .status-text { color: var(--muted); flex: 1; }
-
-  .form {
-    padding: 16px 18px; display: grid; gap: 10px; border-bottom: 1px solid var(--line);
-  }
+  .form { padding: 16px 18px; display: grid; gap: 10px; border-bottom: 1px solid var(--line); }
   .field { display: grid; gap: 4px; }
   .field label { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
-  .field input {
-    background: var(--bg); border: 1px solid var(--line); color: var(--text);
-    font-family: var(--mono); font-size: 16px; padding: 8px 10px;
-    border-radius: 2px; outline: none; width: 100%; min-width: 0;
-  }
+  .field input { background: var(--bg); border: 1px solid var(--line); color: var(--text); font-family: var(--mono); font-size: 16px; padding: 8px 10px; border-radius: 2px; outline: none; width: 100%; min-width: 0; }
   .field input:focus { border-color: var(--accent); }
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-
-  button.connect {
-    background: transparent; border: 1px solid var(--accent); color: var(--accent);
-    font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em;
-    padding: 9px 0; border-radius: 2px; cursor: pointer; text-transform: uppercase;
-  }
+  button.connect { background: transparent; border: 1px solid var(--accent); color: var(--accent); font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; padding: 9px 0; border-radius: 2px; cursor: pointer; text-transform: uppercase; }
   button.connect:hover { background: var(--accent-dim); }
   button.connect:disabled { opacity: 0.35; cursor: not-allowed; }
-
-  .talk-area {
-    padding: 26px 18px 24px; display: flex; flex-direction: column; align-items: center; gap: 14px;
-  }
-  .ptt-btn {
-    width: 160px; height: 160px; border-radius: 50%;
-    border: 2px solid var(--line);
-    background: radial-gradient(circle at 35% 30%, #1c2620, #10160f);
-    color: var(--muted); font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase;
-    cursor: pointer; transition: border-color 120ms, color 120ms, transform 80ms;
-    user-select: none; -webkit-user-select: none; touch-action: none;
-    -webkit-tap-highlight-color: transparent;
-  }
+  .talk-area { padding: 26px 18px 24px; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+  .ptt-btn { width: 160px; height: 160px; border-radius: 50%; border: 2px solid var(--line); background: radial-gradient(circle at 35% 30%, #1c2620, #10160f); color: var(--muted); font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer; transition: border-color 120ms, color 120ms, transform 80ms; user-select: none; -webkit-user-select: none; touch-action: none; -webkit-tap-highlight-color: transparent; }
   @media (min-width: 480px) { .ptt-btn { width: 140px; height: 140px; font-size: 12px; } }
   .ptt-btn:disabled { opacity: 0.3; cursor: not-allowed; }
-  .ptt-btn.active {
-    border-color: var(--accent); color: var(--accent);
-    transform: scale(0.97); box-shadow: 0 0 24px -4px var(--accent);
-  }
+  .ptt-btn.active { border-color: var(--accent); color: var(--accent); transform: scale(0.97); box-shadow: 0 0 24px -4px var(--accent); }
   .hint { font-size: 11px; color: var(--muted); text-align: center; }
-
   .talkers { width: 100%; padding: 14px 18px 18px; border-top: 1px solid var(--line); }
   .talkers .label { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
   .talker-list { display: flex; flex-wrap: wrap; gap: 6px; min-height: 22px; }
   .chip { font-size: 11px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
   .chip.live { border-color: var(--live); color: var(--live); }
-
-  .log {
-    max-height: 110px; overflow-y: auto; padding: 10px 18px;
-    border-top: 1px solid var(--line); font-size: 10px; color: var(--muted); line-height: 1.6;
-  }
+  .log { max-height: 130px; overflow-y: auto; padding: 10px 18px; border-top: 1px solid var(--line); font-size: 10px; color: var(--muted); line-height: 1.6; }
   .log div { white-space: pre-wrap; word-break: break-all; }
 </style>
 </head>
@@ -120,7 +54,7 @@
 
 <div class="unit">
   <div class="unit-header">
-    <span class="label">PTT Prototype</span>
+    <span class="label">PTT Client</span>
     <span class="channel" id="channelLabel">未接続</span>
   </div>
   <div class="status-row">
@@ -129,8 +63,12 @@
   </div>
   <div class="form">
     <div class="field">
-      <label for="serverUrl">サーバURL</label>
-      <input id="serverUrl" value="wss://ptt-server-rnn4fqay3a-an.a.run.app" />
+      <label for="tokenServerUrl">トークンサーバーURL</label>
+      <input id="tokenServerUrl" value="https://ptt-token-server-rnn4fqay3a-an.a.run.app" />
+    </div>
+    <div class="field">
+      <label for="livekitUrl">LiveKit URL (wss://)</label>
+      <input id="livekitUrl" value="wss://ubunifu-talk-wy19xst3.livekit.cloud" />
     </div>
     <div class="row2">
       <div class="field">
@@ -152,27 +90,25 @@
     <div class="label">送話中</div>
     <div class="talker-list" id="talkerList"></div>
   </div>
+  <div class="talkers">
+    <div class="label">音声統計 (RTP実測値。1.5秒ごと更新)</div>
+    <div id="statsList" style="font-size:11px; color:var(--muted); display:grid; gap:4px;">— なし —</div>
+  </div>
   <div class="log" id="log"></div>
 </div>
 
+<!-- 受信音声の再生先。画面には出さないがDOMに存在させる必要がある -->
+<div id="remoteAudioContainer" style="display:none"></div>
+
 <script>
-const SAMPLE_RATE = 48000;
-const CHANNELS = 1;
-const FRAME_DURATION_US = 20000; // 20ms
+const { Room, RoomEvent, Track, ConnectionState } = LivekitClient;
 
-let ws = null;
-let audioEncoder = null;
-let audioDecoder = null;
-let micStream = null;
-let micProcessor = null;
-let micReader = null;
-let isSending = false;
-let myClientId = null;
-
-let audioCtx = null;
-let nextPlayTime = 0;
-
+let room = null;
+let myIdentity = null;
+let localMicTrack = null;   // 送話中のLocalAudioTrack (bytesSent確認用)
+let statsTimer = null;
 const talkers = new Set();
+const remoteAudioTracks = new Map(); // identity -> RemoteAudioTrack (bytesReceived確認用)
 
 const $ = (id) => document.getElementById(id);
 const logEl = $('log');
@@ -182,6 +118,8 @@ const channelLabel = $('channelLabel');
 const connectBtn = $('connectBtn');
 const pttBtn = $('pttBtn');
 const talkerList = $('talkerList');
+const remoteAudioContainer = $('remoteAudioContainer');
+const statsList = $('statsList');
 
 function log(msg) {
   const line = document.createElement('div');
@@ -214,285 +152,228 @@ function renderTalkers() {
 }
 renderTalkers();
 
-// ---------- WebSocket / 制御メッセージ ----------
+// ---------- 音声統計 (getStatsで実際にRTPが流れているかを数値で確認する) ----------
 
-function connect() {
-  const url = $('serverUrl').value.trim();
-  const room = $('roomId').value.trim();
+// 音声が「本当に届いているか」を耳ではなく、WebRTCの受信バイト数(bytesReceived)
+// / 送信バイト数(bytesSent)で確認するためのポーリング。
+// 同一端末での確認(マイク競合・ハウリングでリスニングが当てにならない)向けの手段。
+async function updateStats() {
+  const lines = [];
+
+  for (const [identity, track] of remoteAudioTracks.entries()) {
+    try {
+      const report = await track.getRTCStatsReport();
+      let bytesReceived = null;
+      let packetsReceived = null;
+      report.forEach((v) => {
+        if (v.type === 'inbound-rtp' && (v.kind === 'audio' || v.mediaType === 'audio')) {
+          bytesReceived = v.bytesReceived ?? bytesReceived;
+          packetsReceived = v.packetsReceived ?? packetsReceived;
+        }
+      });
+      lines.push(`↓ ${identity}: ${bytesReceived ?? '?'} bytes / ${packetsReceived ?? '?'} pkts`);
+    } catch (e) {
+      lines.push(`↓ ${identity}: stats取得失敗 (${e.message})`);
+    }
+  }
+
+  if (localMicTrack) {
+    try {
+      const report = await localMicTrack.getRTCStatsReport();
+      let bytesSent = null;
+      report.forEach((v) => {
+        if (v.type === 'outbound-rtp' && (v.kind === 'audio' || v.mediaType === 'audio')) {
+          bytesSent = v.bytesSent ?? bytesSent;
+        }
+      });
+      lines.push(`↑ 自分(送信中): ${bytesSent ?? '?'} bytes`);
+    } catch (e) {
+      lines.push(`↑ 自分: stats取得失敗 (${e.message})`);
+    }
+  }
+
+  statsList.innerHTML = lines.length
+    ? lines.map((l) => `<div>${l}</div>`).join('')
+    : '— なし —';
+}
+
+function startStatsPolling() {
+  if (statsTimer) return;
+  statsTimer = setInterval(updateStats, 1500);
+}
+
+function stopStatsPolling() {
+  if (statsTimer) {
+    clearInterval(statsTimer);
+    statsTimer = null;
+  }
+  statsList.innerHTML = '— なし —';
+}
+
+// ---------- トークン取得 ----------
+
+async function fetchToken(tokenServerUrl, room, identity) {
+  const url = `${tokenServerUrl.replace(/\/$/, '')}/token?room=${encodeURIComponent(room)}&identity=${encodeURIComponent(identity)}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`トークン取得失敗: HTTP ${res.status}`);
+  const data = await res.json();
+  return data.token;
+}
+
+// ---------- 接続 ----------
+
+async function connect() {
+  const tokenServerUrl = $('tokenServerUrl').value.trim();
+  const livekitUrl = $('livekitUrl').value.trim();
+  const roomId = $('roomId').value.trim();
   const clientId = $('clientId').value.trim();
-  if (!url || !room || !clientId) { log('サーバURL / ルームID / クライアントIDを入力してください'); return; }
 
-  myClientId = clientId;
-  setStatus(null, '接続中...');
+  if (!tokenServerUrl || !livekitUrl || !roomId || !clientId) {
+    log('すべての項目を入力してください');
+    return;
+  }
+
+  myIdentity = clientId;
+  setStatus(null, 'トークン取得中...');
   connectBtn.disabled = true;
 
-  ws = new WebSocket(url);
-  ws.binaryType = 'arraybuffer';
-
-  ws.onopen = () => { log('WebSocket接続完了。joinを送信します'); ws.send(JSON.stringify({ type: 'join', room, clientId })); };
-  ws.onmessage = (event) => {
-    if (typeof event.data === 'string') { handleControlMessage(JSON.parse(event.data)); }
-    else { handleAudioFrame(event.data); }
-  };
-  ws.onclose = () => {
-    setStatus('error', '切断されました');
-    channelLabel.textContent = '未接続';
+  let token;
+  try {
+    token = await fetchToken(tokenServerUrl, roomId, clientId);
+    log('トークン取得成功');
+  } catch (e) {
+    log(`トークン取得エラー: ${e.message}`);
+    setStatus('error', 'トークン取得失敗');
     connectBtn.disabled = false;
-    connectBtn.textContent = '接続する';
-    pttBtn.disabled = true;
-    log('WebSocket切断');
-  };
-  ws.onerror = () => { log('WebSocketエラー'); };
+    return;
+  }
+
+  room = new Room({
+    // マイクは明示的にオンにするまでは publish しない (PTTのため)
+    audioCaptureDefaults: { echoCancellation: true, noiseSuppression: true },
+  });
+
+  room
+    .on(RoomEvent.ConnectionStateChanged, (state) => {
+      log(`接続状態: ${state}`);
+      if (state === ConnectionState.Disconnected) {
+        setStatus('error', '切断されました');
+        channelLabel.textContent = '未接続';
+        connectBtn.disabled = false;
+        connectBtn.textContent = '接続する';
+        pttBtn.disabled = true;
+        talkers.clear();
+        renderTalkers();
+      }
+    })
+    .on(RoomEvent.ParticipantConnected, (p) => log(`参加: ${p.identity}`))
+    .on(RoomEvent.ParticipantDisconnected, (p) => {
+      log(`退出: ${p.identity}`);
+      talkers.delete(p.identity);
+      renderTalkers();
+    })
+    .on(RoomEvent.TrackSubscribed, (track, pub, participant) => {
+      if (track.kind === Track.Kind.Audio) {
+        const el = track.attach();
+        el.dataset.identity = participant.identity;
+        remoteAudioContainer.appendChild(el);
+        remoteAudioTracks.set(participant.identity, track);
+        log(`音声トラック購読開始: ${participant.identity}`);
+      }
+    })
+    .on(RoomEvent.TrackUnsubscribed, (track, pub, participant) => {
+      track.detach().forEach((el) => el.remove());
+      remoteAudioTracks.delete(participant.identity);
+    })
+    .on(RoomEvent.TrackMuted, (pub, participant) => {
+      if (pub.kind === Track.Kind.Audio) {
+        talkers.delete(participant.identity);
+        renderTalkers();
+      }
+    })
+    .on(RoomEvent.TrackUnmuted, (pub, participant) => {
+      if (pub.kind === Track.Kind.Audio) {
+        talkers.add(participant.identity);
+        renderTalkers();
+      }
+    })
+    .on(RoomEvent.Disconnected, (reason) => {
+      log(`切断理由: ${reason ?? '不明'}`);
+    });
+
+  try {
+    await room.connect(livekitUrl, token);
+    log(`ルーム接続完了: room=${roomId} identity=${clientId}`);
+
+    // マイクトラックを事前に確保しておくが、初期状態はミュート(publishはされるがオフ)
+    // = PTTボタンを押すまで音声は流れない
+    await room.localParticipant.setMicrophoneEnabled(false);
+
+    setStatus('connected', `接続中 (room=${roomId})`);
+    channelLabel.textContent = `room: ${roomId}`;
+    connectBtn.disabled = false;
+    connectBtn.textContent = '切断する';
+    pttBtn.disabled = false;
+    startStatsPolling();
+  } catch (e) {
+    log(`接続エラー: ${e.message}`);
+    setStatus('error', e.message);
+    connectBtn.disabled = false;
+  }
 }
 
 function disconnect() {
-  if (ws) { ws.send(JSON.stringify({ type: 'leave' })); ws.close(); }
-  stopSending();
-  teardownAudioPipeline();
-}
-
-function teardownAudioPipeline() {
-  if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
-  if (audioEncoder && audioEncoder.state !== 'closed') { try { audioEncoder.close(); } catch (_) {} audioEncoder = null; }
-  if (audioDecoder && audioDecoder.state !== 'closed') { try { audioDecoder.close(); } catch (_) {} audioDecoder = null; }
-  if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null; }
-  nextPlayTime = 0;
-}
-
-function handleControlMessage(msg) {
-  switch (msg.type) {
-    case 'joined':
-      setStatus('connected', `接続中 (members: ${msg.members.join(', ')})`);
-      channelLabel.textContent = `room: ${msg.room}`;
-      pttBtn.disabled = false;
-      connectBtn.disabled = false;
-      connectBtn.textContent = '切断する';
-      log(`参加完了: ${JSON.stringify(msg)}`);
-      initAudioPipeline();
-      break;
-    case 'member_joined': log(`参加: ${msg.clientId}`); break;
-    case 'member_left': log(`退出: ${msg.clientId}`); talkers.delete(msg.clientId); renderTalkers(); break;
-    case 'talker_start': talkers.add(msg.clientId); renderTalkers(); break;
-    case 'talker_end': talkers.delete(msg.clientId); renderTalkers(); break;
-    case 'error': log(`サーバエラー: ${msg.message}`); break;
-    default: log(`不明な制御メッセージ: ${JSON.stringify(msg)}`);
+  if (room) {
+    room.disconnect();
+    room = null;
   }
+  remoteAudioContainer.innerHTML = '';
+  remoteAudioTracks.clear();
+  localMicTrack = null;
+  stopStatsPolling();
 }
 
-// ---------- 音声パイプライン初期化 ----------
+// ---------- PTT ----------
 
-async function initAudioPipeline() {
-  audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
-  if (audioCtx.state === 'suspended') await audioCtx.resume();
-  nextPlayTime = 0;
-
-  // --- 送信用エンコーダ ---
-  audioEncoder = new AudioEncoder({
-    output: (chunk) => {
-      if (!ws || ws.readyState !== WebSocket.OPEN) return;
-      const buf = new ArrayBuffer(chunk.byteLength);
-      chunk.copyTo(buf);
-      ws.send(buf);
-    },
-    error: (e) => log(`エンコードエラー: ${e.message}`),
-  });
-  audioEncoder.configure({
-    codec: 'opus',
-    sampleRate: SAMPLE_RATE,
-    numberOfChannels: CHANNELS,
-    bitrate: 24000,
-    opus: { frameDuration: FRAME_DURATION_US },
-  });
-
-  // --- 受信用デコーダ ---
-  createAudioDecoder();
-
-  // --- マイク取得 ---
-  try {
-    micStream = await navigator.mediaDevices.getUserMedia({
-      audio: { sampleRate: SAMPLE_RATE, channelCount: CHANNELS, echoCancellation: true, noiseSuppression: true },
-    });
-    log('マイク取得完了');
-  } catch (e) {
-    log(`マイク取得失敗: ${e.message}`);
-  }
-}
-
-// ---------- 送話（PTT） ----------
-
-async function startSending() {
-  if (isSending || !micStream) return;
-  isSending = true;
+async function startTalking() {
+  if (!room || pttBtn.disabled) return;
   pttBtn.classList.add('active');
-  if (audioCtx && audioCtx.state === 'suspended') await audioCtx.resume();
-  ws.send(JSON.stringify({ type: 'ptt_start' }));
-
-  const track = micStream.getAudioTracks()[0];
-  micProcessor = new MediaStreamTrackProcessor({ track });
-  micReader = micProcessor.readable.getReader();
-  pumpMicFrames();
-}
-
-async function pumpMicFrames() {
-  while (isSending) {
-    let result;
-    try { result = await micReader.read(); } catch (e) { break; }
-    if (result.done) break;
-    const audioData = result.value;
-    try { audioEncoder.encode(audioData); } catch (e) { log(`encode呼び出しエラー: ${e.message}`); }
-    audioData.close();
-  }
-}
-
-function stopSending() {
-  if (!isSending) return;
-  isSending = false;
-  pttBtn.classList.remove('active');
-  if (micReader) { micReader.cancel().catch(() => {}); micReader = null; }
-  micProcessor = null;
-  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ptt_end' }));
-  if (audioEncoder) audioEncoder.flush().catch(() => {});
-}
-
-// ---------- 受話 ----------
-
-/**
- * [FIX] WebCodecs AudioDecoder に渡す OpusHead (description) を生成する。
- *
- * alta/swift-opus (libopus) が出力するのは raw Opus パケットだが、
- * Chrome の WebCodecs AudioDecoder は codec='opus' 時に description として
- * OpusHead バイナリを要求する場合がある。
- * Chrome↔Chrome では WebCodecs AudioEncoder が送るパケットに
- * 暗黙的にヘッダ情報が付随しているため問題が起きないが、
- * iOS (libopus raw) → Chrome では description なしだとデコーダが
- * パケットを無視して無音になる。
- *
- * OpusHead フォーマット (19バイト):
- *   0-7:  magic "OpusHead"
- *   8:    version = 1
- *   9:    channel count
- *   10-11: pre-skip (LE uint16) = 312 (libopus デフォルト)
- *   12-15: input sample rate (LE uint32)
- *   16-17: output gain (LE int16) = 0
- *   18:   channel mapping family = 0 (mono/stereo)
- */
-function buildOpusHead(channels, sampleRate) {
-  const buf = new ArrayBuffer(19);
-  const view = new DataView(buf);
-  // magic signature
-  const magic = 'OpusHead';
-  for (let i = 0; i < 8; i++) view.setUint8(i, magic.charCodeAt(i));
-  view.setUint8(8, 1);                        // version
-  view.setUint8(9, channels);                 // channel count
-  view.setUint16(10, 312, true);              // pre-skip (LE)
-  view.setUint32(12, sampleRate, true);       // sample rate (LE)
-  view.setInt16(16, 0, true);                 // output gain (LE)
-  view.setUint8(18, 0);                       // channel mapping family
-  return buf;
-}
-
-function createAudioDecoder() {
-  if (audioDecoder && audioDecoder.state !== 'closed') {
-    try { audioDecoder.close(); } catch (_) {}
-  }
-  audioDecoder = new AudioDecoder({
-    output: (audioData) => playDecodedAudio(audioData),
-    error: (e) => {
-      logThrottled(`デコーダエラー(自動リセット): ${e.message}`);
-      createAudioDecoder();
-    },
-  });
-  // [FIX] description に OpusHead を渡す。
-  // iOS (libopus raw Opus) → Chrome でデコーダがパケットを無視する問題を修正。
-  audioDecoder.configure({
-    codec: 'opus',
-    sampleRate: SAMPLE_RATE,
-    numberOfChannels: CHANNELS,
-    description: buildOpusHead(CHANNELS, SAMPLE_RATE),
-  });
-}
-
-let lastLogTime = 0;
-function logThrottled(msg) {
-  const now = Date.now();
-  if (now - lastLogTime > 1000) { log(msg); lastLogTime = now; }
-}
-
-function handleAudioFrame(arrayBuffer) {
-  if (!audioDecoder) return;
-  if (audioDecoder.state === 'closed') createAudioDecoder();
-  if (audioDecoder.state !== 'configured') return;
-
-  const chunk = new EncodedAudioChunk({
-    type: 'key',
-    timestamp: performance.now() * 1000,
-    data: arrayBuffer,
-  });
   try {
-    audioDecoder.decode(chunk);
+    await room.localParticipant.setMicrophoneEnabled(true);
+    // setMicrophoneEnabled(false)後は前のLocalAudioTrackが破棄されるため、
+    // 有効化のたびに publication から取り直す(bytesSent確認用)
+    const pub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
+    localMicTrack = pub?.track ?? null;
   } catch (e) {
-    logThrottled(`decode呼び出しエラー: ${e.message}`);
-    createAudioDecoder();
+    log(`マイク有効化エラー: ${e.message}`);
+    pttBtn.classList.remove('active');
   }
 }
 
-// 受信キュー：iOSは4800サンプル(100ms)まとめて送るため
-// フレームがバースト状に届く。定周期スケジューラで均等に再生する。
-const playQueue = [];
-let playSchedulerRunning = false;
-
-function playDecodedAudio(audioData) {
-  if (!audioCtx) { audioData.close(); return; }
-  const numFrames = audioData.numberOfFrames;
-  const numChannels = audioData.numberOfChannels;
-  const buffer = audioCtx.createBuffer(numChannels, numFrames, audioData.sampleRate);
-  for (let ch = 0; ch < numChannels; ch++) {
-    const channelData = new Float32Array(numFrames);
-    audioData.copyTo(channelData, { planeIndex: ch });
-    buffer.copyToChannel(channelData, ch);
+async function stopTalking() {
+  if (!room) return;
+  pttBtn.classList.remove('active');
+  try {
+    await room.localParticipant.setMicrophoneEnabled(false);
+  } catch (e) {
+    log(`マイク無効化エラー: ${e.message}`);
+  } finally {
+    localMicTrack = null;
   }
-  audioData.close();
-  playQueue.push(buffer);
-  if (!playSchedulerRunning) {
-    playSchedulerRunning = true;
-    schedulePlayback();
-  }
-}
-
-function schedulePlayback() {
-  if (!audioCtx) { playSchedulerRunning = false; return; }
-  const now = audioCtx.currentTime;
-  // 200ms のジッタバッファ。nextPlayTime が過去になったらリセット。
-  if (nextPlayTime < now + 0.005) {
-    nextPlayTime = now + 0.20;
-    if (playQueue.length > 25) {
-      playQueue.splice(0, playQueue.length - 10);
-    }
-  }
-  // 300ms先までスケジュール済みにする
-  while (playQueue.length > 0 && nextPlayTime < now + 0.30) {
-    const buf = playQueue.shift();
-    const src = audioCtx.createBufferSource();
-    src.buffer = buf;
-    src.connect(audioCtx.destination);
-    src.start(nextPlayTime);
-    nextPlayTime += buf.duration;
-  }
-  setTimeout(schedulePlayback, 20);
 }
 
 // ---------- イベント ----------
 
 connectBtn.addEventListener('click', () => {
-  if (ws && ws.readyState === WebSocket.OPEN) { disconnect(); }
-  else { connect(); }
+  if (room) disconnect();
+  else connect();
 });
 
-pttBtn.addEventListener('mousedown', startSending);
-pttBtn.addEventListener('mouseup', stopSending);
-pttBtn.addEventListener('mouseleave', stopSending);
-pttBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startSending(); });
-pttBtn.addEventListener('touchend', (e) => { e.preventDefault(); stopSending(); });
+pttBtn.addEventListener('mousedown', startTalking);
+pttBtn.addEventListener('mouseup', stopTalking);
+pttBtn.addEventListener('mouseleave', stopTalking);
+pttBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startTalking(); });
+pttBtn.addEventListener('touchend', (e) => { e.preventDefault(); stopTalking(); });
 </script>
 
 </body>
