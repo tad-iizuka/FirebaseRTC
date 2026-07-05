@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		32E549102FE7C1D400966874 /* Opus in Frameworks */ = {isa = PBXBuildFile; productRef = 32E5490F2FE7C1D400966874 /* Opus */; };
+		32BD805C2FFA9A5100AA58E6 /* LiveKit in Frameworks */ = {isa = PBXBuildFile; productRef = 32BD805B2FFA9A5100AA58E6 /* LiveKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -33,9 +33,22 @@
 		32E548E92FE7907500966874 /* ptt-iosUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "ptt-iosUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		32BD805E2FFA9BC700AA58E6 /* Exceptions for "ptt-ios" folder in "ptt-ios" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 32E548D12FE7907400966874 /* ptt-ios */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		32E548D42FE7907400966874 /* ptt-ios */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				32BD805E2FFA9BC700AA58E6 /* Exceptions for "ptt-ios" folder in "ptt-ios" target */,
+			);
 			path = "ptt-ios";
 			sourceTree = "<group>";
 		};
@@ -56,7 +69,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				32E549102FE7C1D400966874 /* Opus in Frameworks */,
+				32BD805C2FFA9A5100AA58E6 /* LiveKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -77,12 +90,20 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		32BD805A2FFA9A5100AA58E6 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		32E548C92FE7907400966874 = {
 			isa = PBXGroup;
 			children = (
 				32E548D42FE7907400966874 /* ptt-ios */,
 				32E548E22FE7907500966874 /* ptt-iosTests */,
 				32E548EC2FE7907500966874 /* ptt-iosUITests */,
+				32BD805A2FFA9A5100AA58E6 /* Frameworks */,
 				32E548D32FE7907400966874 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -117,7 +138,7 @@
 			);
 			name = "ptt-ios";
 			packageProductDependencies = (
-				32E5490F2FE7C1D400966874 /* Opus */,
+				32BD805B2FFA9A5100AA58E6 /* LiveKit */,
 			);
 			productName = "ptt-ios";
 			productReference = 32E548D22FE7907400966874 /* ptt-ios.app */;
@@ -202,7 +223,7 @@
 			mainGroup = 32E548C92FE7907400966874;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				32E5490E2FE7C1D400966874 /* XCRemoteSwiftPackageReference "swift-opus" */,
+				32BD80532FFA997200AA58E6 /* XCRemoteSwiftPackageReference "client-sdk-swift" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 32E548D32FE7907400966874 /* Products */;
@@ -409,6 +430,7 @@
 				DEVELOPMENT_TEAM = MTP6LLLBBQ;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "ptt-ios/Info.plist";
 				INFOPLIST_KEY_LSApplicationCategoryType = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "音声のプッシュトゥトークのためにマイクを使用します";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -443,6 +465,7 @@
 				DEVELOPMENT_TEAM = MTP6LLLBBQ;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "ptt-ios/Info.plist";
 				INFOPLIST_KEY_LSApplicationCategoryType = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "音声のプッシュトゥトークのためにマイクを使用します";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -593,21 +616,21 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		32E5490E2FE7C1D400966874 /* XCRemoteSwiftPackageReference "swift-opus" */ = {
+		32BD80532FFA997200AA58E6 /* XCRemoteSwiftPackageReference "client-sdk-swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/alta/swift-opus";
+			repositoryURL = "https://github.com/livekit/client-sdk-swift";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 0.0.2;
+				minimumVersion = 2.15.1;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		32E5490F2FE7C1D400966874 /* Opus */ = {
+		32BD805B2FFA9A5100AA58E6 /* LiveKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 32E5490E2FE7C1D400966874 /* XCRemoteSwiftPackageReference "swift-opus" */;
-			productName = Opus;
+			package = 32BD80532FFA997200AA58E6 /* XCRemoteSwiftPackageReference "client-sdk-swift" */;
+			productName = LiveKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
