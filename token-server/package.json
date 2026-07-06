@@ -9,10 +9,7 @@
   "license": "ISC",
   "dependencies": {
     "express": "^4.19.2",
-<<<<<<< HEAD
     "express-rate-limit": "^7.4.0",
-=======
->>>>>>> e37d4c73c5b4295d0062497426a252a8e9c282f4
     "livekit-server-sdk": "^2.9.2"
   }
 }
