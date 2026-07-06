@@ -52,8 +52,12 @@
   .talkers { width: 100%; padding: 14px 18px 18px; border-top: 1px solid var(--line); }
   .talkers .label { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
   .talker-list { display: flex; flex-wrap: wrap; gap: 6px; min-height: 22px; }
-  .chip { font-size: 11px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .chip { font-size: 11px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
   .chip.live { border-color: var(--live); color: var(--live); }
+  .chip-actions { display: inline-flex; gap: 4px; }
+  .chip-btn { border: none; background: none; padding: 0; font-size: 10px; letter-spacing: 0; text-transform: none; cursor: pointer; color: inherit; opacity: 0.7; text-decoration: underline; }
+  .chip-btn:hover { opacity: 1; background: none; }
+  .chip-btn.danger { color: var(--danger); }
   .log { max-height: 130px; overflow-y: auto; padding: 10px 18px; border-top: 1px solid var(--line); font-size: 10px; color: var(--muted); line-height: 1.6; }
   .log div { white-space: pre-wrap; word-break: break-all; }
 </style>
@@ -106,12 +110,14 @@
       </div>
     </div>
     <button id="joinRoomBtn">招待コードで参加する</button>
+  </div>
 
-    <div class="invite-box hidden" id="inviteBox">
-      <span>このルームの招待コード(参加者に共有してください):</span>
-      <span class="code" id="inviteCodeText"></span>
-      <span>ルームID: <span id="inviteRoomIdText"></span></span>
-    </div>
+  <!-- 招待コード表示: ルーム作成者に対して、ルーム選択画面/通話画面のどちらでも
+       見えるよう、roomSection/voiceSectionとは独立した要素にしている -->
+  <div class="invite-box hidden" id="inviteBox">
+    <span>このルームの招待コード(参加者に共有してください):</span>
+    <span class="code" id="inviteCodeText"></span>
+    <span>ルームID: <span id="inviteRoomIdText"></span></span>
   </div>
 
   <!-- ③ 入室後: PTT本体 -->
@@ -123,7 +129,7 @@
     <div class="hint">ボタンを押している間だけ音声が送信されます</div>
   </div>
   <div class="talkers hidden" id="talkerSection">
-    <div class="label">送話中</div>
+    <div class="label">参加者(緑=送話中)</div>
     <div class="talker-list" id="talkerList"></div>
   </div>
   <div class="talkers hidden" id="statsSection">
@@ -146,6 +152,12 @@ import {
   signOut as firebaseSignOut,
   onAuthStateChanged,
 } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
+import {
+  getFirestore,
+  doc,
+  getDoc,
+  onSnapshot,
+} from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 // [Phase1: Firebase Auth]
 // このアプリで実際に使っているFirebaseプロジェクトの設定(公開情報。秘密鍵ではない)。
@@ -158,6 +170,7 @@ const firebaseConfig = {
 
 const firebaseApp = initializeApp(firebaseConfig);
 const firebaseAuth = getAuth(firebaseApp);
+const firestoreDb = getFirestore(firebaseApp);
 
 // サーバー側の token.js は ttl:'10m' 固定で発行するため、クライアント側もこれに合わせる。
 // (サーバーのレスポンスに expiresIn は含まれていないため、既知の固定値としてハードコードしている)
@@ -167,12 +180,16 @@ const { Room, RoomEvent, Track, ConnectionState } = LivekitClient;
 
 let currentUser = null;
 let currentRoomId = null;
+let currentInviteCode = null; // 自分がルーム作成者の場合のみセットされる、共有用の招待コード
+let myRole = null; // 'owner' | 'moderator' | 'member' (このルームでの自分のロール)
+let banListenerUnsub = null; // 自分がBANされたことを即座に検知するリアルタイムリスナーの解除関数
 let room = null;
 let localMicTrack = null;
 let statsTimer = null;
 let tokenRefreshTimer = null;
 let manuallyDisconnected = false;
-const talkers = new Set();
+// identity(uid) -> { name: string, muted: boolean } — 送話中の判定と、BAN/通報の対象指定の両方に使う
+const participants = new Map();
 const remoteAudioTracks = new Map();
 
 const $ = (id) => document.getElementById(id);
@@ -225,7 +242,6 @@ function showRoomSelectionScreen() {
   talkArea.classList.add('hidden');
   talkerSection.classList.add('hidden');
   statsSection.classList.add('hidden');
-  inviteBox.classList.add('hidden');
   channelLabel.textContent = '未接続';
   setStatus(null, 'ルーム未選択');
   $('userNameLabel').textContent = currentUser.displayName || currentUser.email || currentUser.uid;
@@ -238,6 +254,17 @@ function showVoiceScreen() {
   talkArea.classList.remove('hidden');
   talkerSection.classList.remove('hidden');
   statsSection.classList.remove('hidden');
+}
+
+// roomSection/voiceSectionのどちらが表示中でも、招待コードがある間は表示し続ける
+function renderInviteBox() {
+  if (currentInviteCode && currentRoomId) {
+    $('inviteCodeText').textContent = currentInviteCode;
+    $('inviteRoomIdText').textContent = currentRoomId;
+    inviteBox.classList.remove('hidden');
+  } else {
+    inviteBox.classList.add('hidden');
+  }
 }
 
 // ---------- 認証 ----------
@@ -309,9 +336,9 @@ $('createRoomBtn').addEventListener('click', async () => {
       body: JSON.stringify({}),
     });
     log(`ルーム作成成功: roomId=${data.roomId}`);
-    $('inviteCodeText').textContent = data.inviteCode;
-    $('inviteRoomIdText').textContent = data.roomId;
-    inviteBox.classList.remove('hidden');
+    currentInviteCode = data.inviteCode;
+    currentRoomId = data.roomId;
+    renderInviteBox();
     await enterRoom(data.roomId);
   } catch (e) {
     log(`ルーム作成エラー: ${e.message}`);
@@ -336,6 +363,8 @@ $('joinRoomBtn').addEventListener('click', async () => {
       body: JSON.stringify({ inviteCode }),
     });
     log('ルーム参加成功');
+    currentInviteCode = null;
+    renderInviteBox();
     await enterRoom(roomId);
   } catch (e) {
     log(`ルーム参加エラー: ${e.message}`);
@@ -358,12 +387,52 @@ async function enterRoom(roomId) {
   setStatus(null, 'トークン取得中...');
 
   try {
+    await loadMyRole(roomId);
+    startBanListener(roomId);
     const data = await authedFetch(`/token?room=${encodeURIComponent(roomId)}`);
     await connectLiveKit(data.token);
     scheduleTokenRefresh();
   } catch (e) {
     log(`トークン取得エラー: ${e.message}`);
     setStatus('error', 'トークン取得失敗');
+  }
+}
+
+// 自分のmembersドキュメントを読み、BAN/通報ボタンの表示可否に使うroleを取得する。
+// firestore.rulesで「自分のuidのドキュメントのみ読み取り可」に限定しているため、
+// これはクライアントから直接Firestoreを読む唯一の箇所。
+async function loadMyRole(roomId) {
+  try {
+    const snap = await getDoc(doc(firestoreDb, 'rooms', roomId, 'members', currentUser.uid));
+    myRole = snap.exists() ? (snap.data().role || 'member') : null;
+  } catch (e) {
+    log(`ロール取得エラー: ${e.message}`);
+    myRole = null;
+  }
+}
+
+// [BAN即時反映] 自分のmembersドキュメントをリアルタイム監視し、statusが'banned'に
+// なった瞬間にルームから強制退出させる。BAN自体の強制力はLiveKit側の即時キックが担うが、
+// UI側でも「排除されました」と即座に表示するための補助。
+function startBanListener(roomId) {
+  stopBanListener();
+  banListenerUnsub = onSnapshot(
+    doc(firestoreDb, 'rooms', roomId, 'members', currentUser.uid),
+    (snap) => {
+      if (snap.exists() && snap.data().status === 'banned' && !manuallyDisconnected) {
+        log('このルームから排除されました');
+        setStatus('error', '排除されました');
+        disconnectVoice();
+      }
+    },
+    (e) => log(`BAN監視エラー: ${e.message}`)
+  );
+}
+
+function stopBanListener() {
+  if (banListenerUnsub) {
+    banListenerUnsub();
+    banListenerUnsub = null;
   }
 }
 
@@ -380,15 +449,19 @@ async function connectLiveKit(token) {
       if (state === ConnectionState.Disconnected && !manuallyDisconnected) {
         setStatus('error', '切断されました');
         pttBtn.disabled = true;
-        talkers.clear();
-        renderTalkers();
+        participants.clear();
+        renderParticipants();
       }
     })
-    .on(RoomEvent.ParticipantConnected, (p) => log(`参加: ${p.name || p.identity}`))
+    .on(RoomEvent.ParticipantConnected, (p) => {
+      log(`参加: ${p.name || p.identity}`);
+      participants.set(p.identity, { name: p.name || p.identity, muted: true });
+      renderParticipants();
+    })
     .on(RoomEvent.ParticipantDisconnected, (p) => {
       log(`退出: ${p.name || p.identity}`);
-      talkers.delete(p.identity);
-      renderTalkers();
+      participants.delete(p.identity);
+      renderParticipants();
     })
     .on(RoomEvent.TrackSubscribed, (track, pub, participant) => {
       if (track.kind === Track.Kind.Audio) {
@@ -403,21 +476,30 @@ async function connectLiveKit(token) {
       remoteAudioTracks.delete(participant.identity);
     })
     .on(RoomEvent.TrackMuted, (pub, participant) => {
-      if (pub.kind === Track.Kind.Audio) {
-        talkers.delete(participant.name || participant.identity);
-        renderTalkers();
+      if (pub.kind === Track.Kind.Audio && participants.has(participant.identity)) {
+        participants.get(participant.identity).muted = true;
+        renderParticipants();
       }
     })
     .on(RoomEvent.TrackUnmuted, (pub, participant) => {
-      if (pub.kind === Track.Kind.Audio) {
-        talkers.add(participant.name || participant.identity);
-        renderTalkers();
+      if (pub.kind === Track.Kind.Audio && participants.has(participant.identity)) {
+        participants.get(participant.identity).muted = false;
+        renderParticipants();
       }
     });
 
   await room.connect(livekitUrl, token);
   log(`ルーム接続完了: room=${currentRoomId}`);
   await room.localParticipant.setMicrophoneEnabled(false);
+
+  // 接続時点ですでに他の参加者がいる場合、ParticipantConnectedイベントは発火しないため
+  // room.remoteParticipants から初期状態を取り込む
+  participants.clear();
+  for (const p of room.remoteParticipants.values()) {
+    const pub = p.getTrackPublication(Track.Source.Microphone);
+    participants.set(p.identity, { name: p.name || p.identity, muted: !pub || pub.isMuted });
+  }
+  renderParticipants();
 
   setStatus('connected', `接続中 (room=${currentRoomId})`);
   pttBtn.disabled = false;
@@ -449,6 +531,7 @@ function scheduleTokenRefresh() {
 
 async function disconnectVoice() {
   manuallyDisconnected = true;
+  stopBanListener();
   if (tokenRefreshTimer) {
     clearTimeout(tokenRefreshTimer);
     tokenRefreshTimer = null;
@@ -460,30 +543,91 @@ async function disconnectVoice() {
   remoteAudioContainer.innerHTML = '';
   remoteAudioTracks.clear();
   localMicTrack = null;
-  talkers.clear();
-  renderTalkers();
+  participants.clear();
+  renderParticipants();
   stopStatsPolling();
   currentRoomId = null;
+  myRole = null;
   showRoomSelectionScreen();
 }
 
-function renderTalkers() {
+function renderParticipants() {
   talkerList.innerHTML = '';
-  if (talkers.size === 0) {
+  if (participants.size === 0) {
     const chip = document.createElement('span');
     chip.className = 'chip';
     chip.textContent = '— なし —';
     talkerList.appendChild(chip);
     return;
   }
-  for (const id of talkers) {
+  for (const [uid, info] of participants.entries()) {
     const chip = document.createElement('span');
-    chip.className = 'chip live';
-    chip.textContent = id;
+    chip.className = 'chip' + (info.muted ? '' : ' live');
+
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = info.name;
+    chip.appendChild(nameSpan);
+
+    const actions = document.createElement('span');
+    actions.className = 'chip-actions';
+
+    const reportBtn = document.createElement('button');
+    reportBtn.type = 'button';
+    reportBtn.className = 'chip-btn';
+    reportBtn.textContent = '通報';
+    reportBtn.addEventListener('click', () => reportParticipant(uid, info.name));
+    actions.appendChild(reportBtn);
+
+    // BANはowner/moderatorのみに表示する
+    if (myRole === 'owner' || myRole === 'moderator') {
+      const banBtn = document.createElement('button');
+      banBtn.type = 'button';
+      banBtn.className = 'chip-btn danger';
+      banBtn.textContent = 'BAN';
+      banBtn.addEventListener('click', () => banParticipant(uid, info.name));
+      actions.appendChild(banBtn);
+    }
+
+    chip.appendChild(actions);
     talkerList.appendChild(chip);
   }
 }
-renderTalkers();
+renderParticipants();
+
+// ---------- BAN / 通報 ----------
+
+async function banParticipant(targetUid, displayName) {
+  if (!confirm(`${displayName} をこのルームからBANしますか?\nこの操作は取り消せません。`)) return;
+  try {
+    await authedFetch(`/rooms/${encodeURIComponent(currentRoomId)}/members/${encodeURIComponent(targetUid)}/ban`, {
+      method: 'POST',
+    });
+    log(`BANしました: ${displayName}`);
+    // LiveKit側の即時キックによりParticipantDisconnectedイベントが発火し、
+    // participants からも自動的に消える
+  } catch (e) {
+    log(`BANエラー: ${e.message}`);
+  }
+}
+
+async function reportParticipant(reportedUid, displayName) {
+  const reason = prompt(`${displayName} を通報する理由を入力してください`, '');
+  if (reason === null) return; // キャンセル
+  if (!reason.trim()) {
+    log('通報理由が空のため送信を中止しました');
+    return;
+  }
+  try {
+    await authedFetch('/reports', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ roomId: currentRoomId, reportedUid, reason: reason.trim() }),
+    });
+    log(`通報を送信しました: ${displayName}`);
+  } catch (e) {
+    log(`通報エラー: ${e.message}`);
+  }
+}
 
 // ---------- 音声統計 ----------
 

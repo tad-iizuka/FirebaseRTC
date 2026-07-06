@@ -1,4 +1,12 @@
 {
+  "hosting": {
+    "public": "ptt-client/public",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ]
+  },
   "firestore": {
     "rules": "firestore.rules"
   }
