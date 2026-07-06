@@ -1,7 +1,7 @@
 {
   "name": "ptt-token-server",
-  "version": "1.0.0",
-  "description": "LiveKit用のアクセストークン発行サーバー (旧ptt-server/server.jsの後継)",
+  "version": "1.1.0",
+  "description": "LiveKit接続用トークン発行 + 招待制ルーム管理(作成/参加/BAN)/通報受付を行うバックエンド。Firebase AuthのID Token検証必須 (旧ptt-server/server.jsの後継)",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -10,6 +10,10 @@
   "dependencies": {
     "express": "^4.19.2",
     "express-rate-limit": "^7.4.0",
+    "firebase-admin": "^12.7.0",
     "livekit-server-sdk": "^2.9.2"
+  },
+  "devDependencies": {
+    "dotenv": "^17.4.2"
   }
 }

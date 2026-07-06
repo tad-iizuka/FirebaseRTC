@@ -1,0 +1,30 @@
+rules_version = '2';
+
+// [設計方針]
+// ルーム作成・参加(招待コード検証)・BAN・通報は全てtoken-server(Admin SDK)経由の
+// APIでのみ行わせる。Admin SDKはセキュリティルールをバイパスするため、
+// ここでのルールは「クライアント(ブラウザ/アプリ)からの直接アクセス」だけを対象にする。
+//
+// 例外として、自分自身のmembersドキュメントの読み取りだけは許可している。
+// これはクライアントがFirestoreのリアルタイムリスナーで
+// 「自分がBANされたこと」を即座に検知してUIに反映できるようにするため。
+// (BAN自体はLiveKit側の即時キックで強制されるが、UI表示の即時性のための補助)
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /rooms/{roomId} {
+      // inviteCodeを含むため、ルーム情報自体はAPI経由でのみ取得させる。
+      allow read: if false;
+      allow write: if false;
+
+      match /members/{uid} {
+        allow read: if request.auth != null && request.auth.uid == uid;
+        allow write: if false;
+      }
+    }
+
+    match /reports/{reportId} {
+      allow read, write: if false;
+    }
+  }
+}

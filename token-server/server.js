@@ -1,100 +1,78 @@
 /**
- * PTT Token Server
+ * PTT Token Server — エントリーポイント
  *
- * 役割はこれだけ:
- *   room + identity を受け取り、LiveKitに接続するためのJWTを発行する。
- * 実際のメディア転送(音声のSFU中継)はLiveKitサーバー側が担当するので、
- * このサーバーはWebSocketもOpusも一切扱わない。
+ * 役割:
+ *   1. Firebase AuthのID Tokenを検証する (全エンドポイント共通)
+ *   2. ルームの作成・招待コードによる参加・BAN・通報受付を管理する (routes/rooms.js, routes/reports.js)
+ *   3. ルームのメンバーであることを確認した上でLiveKit接続用JWTを発行する (routes/token.js)
  *
- * 旧 ptt-server/server.js (join/leave/ptt_start/ptt_end のWS制御 + Opusミキシング)
- * はLiveKitサーバー本体に役割が移り、廃止される。
+ * [経緯]
+ * 旧 ptt-server/server.js (WS制御 + Opusミキシング) はLiveKitサーバー本体に
+ * 役割が移り廃止された。その後継として作られたこのサーバーも、当初は
+ * 「認証なしでトークンだけ発行する」役割だったが、
+ *   フェーズ1: Firebase Authによるなりすまし防止
+ *   フェーズ2: 招待制ルーム管理・BAN・通報機能
+ * を経て、実質的に「ルーム管理を持つ小さなバックエンド」に拡張されている。
  */
 
 const express = require('express');
-const rateLimit = require('express-rate-limit');
-const { AccessToken } = require('livekit-server-sdk');
+
+require('./lib/firebaseAdmin'); // 初期化を実行するためにrequire (副作用目的)
+
+const roomsRouter = require('./routes/rooms');
+const tokenRouter = require('./routes/token');
+const reportsRouter = require('./routes/reports');
 
 const PORT = process.env.PORT || 8080;
-const LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY;
-const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET;
 
-if (!LIVEKIT_API_KEY || !LIVEKIT_API_SECRET) {
+// カンマ区切りで許可オリジンを指定 (例: "https://ptt-client.example.com")
+// 未設定時は空配列 = ブラウザからのクロスオリジンfetchは全て拒否される(安全側のデフォルト)。
+// iOSアプリはOriginヘッダーを送らないため、この設定の影響を受けない。
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+if (!process.env.LIVEKIT_API_KEY || !process.env.LIVEKIT_API_SECRET) {
   console.error('[起動エラー] LIVEKIT_API_KEY / LIVEKIT_API_SECRET が未設定です');
   process.exit(1);
+}
+if (!process.env.LIVEKIT_HOST) {
+  console.error('[起動エラー] LIVEKIT_HOST が未設定です (BAN時の即時キックに使用するLiveKit管理APIのhttps URL)');
+  process.exit(1);
+}
+if (ALLOWED_ORIGINS.length === 0) {
+  console.warn('[警告] ALLOWED_ORIGINS が未設定です。Webクライアントからのアクセスは全て拒否されます');
 }
 
 const app = express();
 
-// [Phase 0] Cloud Run はリバースプロキシ経由でリクエストが来るため、
+// Cloud Run はリバースプロキシ(GFE)を1段経由するため、
 // これを設定しないと req.ip が常にプロキシのIP(=全リクエスト同一IP)になり、
 // IPベースのレート制限が機能しない。
-// 値は1(1ホップ)。Cloud Runは1段のプロキシを経由するため。
 app.set('trust proxy', 1);
 
-// [CORS] Web版クライアント(ptt-client)からのクロスオリジンfetchを許可。
-// 本番では allowedOrigins を実際のホスティング先ドメインに絞ること。
+app.use(express.json());
+
+// [CORS] ホワイトリスト化。ptt-client(Web版)の実ドメインのみ許可する。
 app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  const origin = req.headers.origin;
+  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
 
-// [Phase 0: セキュリティ緊急対応]
-// /token はIPベースのレート制限をかけ、無制限のトークン発行を防ぐ。
-// - 1分あたり10回まで (通常利用は接続時に1回、再接続時に数回程度のはず)
-// - ヘルスチェック('/')には適用しない
-const tokenRateLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1分
-  max: 10,
-  standardHeaders: true, // RateLimit-* ヘッダーを返す
-  legacyHeaders: false,
-  message: { error: 'リクエストが多すぎます。しばらく待ってから再試行してください' },
-  // identity単位ではなくIP単位。将来的にidentity単位の制限も検討可。
-  keyGenerator: (req) => req.ip,
-});
-
-// Cloud Run のヘルスチェック用
+// Cloud Run のヘルスチェック用 (認証不要)
 app.get('/', (req, res) => res.send('ptt-token-server OK'));
 
-/**
- * GET /token?room=room1&identity=alice
- *
- * room  : 入室するルームID (旧プロトコルのroomIdに相当)
- * identity : クライアントの識別子 (旧プロトコルのclientIdに相当)
- *
- * 同一identityで既に接続中の場合、LiveKit側の既定動作として
- * 古い接続が切断され新しい接続に置き換わる(重複joinエラーは発生しない)。
- */
-app.get('/token', tokenRateLimiter, async (req, res) => {
-  const room = String(req.query.room || '').trim();
-  const identity = String(req.query.identity || '').trim();
-
-  if (!room || !identity) {
-    return res.status(400).json({ error: 'room と identity は必須です' });
-  }
-
-  try {
-    const at = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
-      identity,
-      ttl: '10m', // 接続後は毎回の再取得不要。切れる前に再接続するなら短めでOK
-    });
-    at.addGrant({
-      room,
-      roomJoin: true,
-      canPublish: true,
-      canSubscribe: true,
-      canPublishData: true, // 将来talker状態などをdata channelで送る場合用
-    });
-
-    const token = await at.toJwt();
-    console.log(`[token発行] room=${room} identity=${identity}`);
-    res.json({ token, room, identity });
-  } catch (e) {
-    console.error('[token発行エラー]', e.message);
-    res.status(500).json({ error: 'トークン発行に失敗しました' });
-  }
-});
+app.use('/rooms', roomsRouter);
+app.use('/token', tokenRouter);
+app.use('/reports', reportsRouter);
 
 app.listen(PORT, () => {
   console.log(`ptt-token-server listening on :${PORT}`);

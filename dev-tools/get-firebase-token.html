@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>[開発用] Firebase ID Token取得ツール</title>
+<style>
+  body { font-family: -apple-system, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
+  button { font-size: 14px; padding: 10px 16px; margin-right: 8px; cursor: pointer; }
+  textarea { width: 100%; height: 140px; margin-top: 16px; font-family: monospace; font-size: 12px; }
+  .warn { background: #fff3cd; border: 1px solid #ffe69c; padding: 10px; border-radius: 4px; font-size: 13px; }
+  .info { font-size: 13px; color: #555; }
+</style>
+</head>
+<body>
+  <h2>[開発用] Firebase ID Token取得ツール</h2>
+  <p class="warn">
+    これは本番クライアントの一部ではありません。curlでtoken-serverのAPIを手動テストするために
+    ID Tokenをコピーするためだけの、ローカル専用の開発ツールです。公開ホスティングには含めないでください。
+  </p>
+
+  <p class="info">
+    下の <code>firebaseConfig</code> を、Firebase Console &gt; プロジェクトの設定 &gt;
+    全般 &gt; マイアプリ（ウェブアプリ）から取得した値で書き換えてから使ってください。
+  </p>
+
+  <button id="googleBtn">Googleでサインイン</button>
+  <button id="appleBtn">Appleでサインイン</button>
+  <button id="signOutBtn">サインアウト</button>
+
+  <p id="status" class="info">未サインイン</p>
+
+  <textarea id="tokenBox" readonly placeholder="サインインするとID Tokenがここに表示されます"></textarea>
+  <p class="info">
+    curlでの使い方:<br>
+    <code>TOKEN="$(pbpaste)"</code> のようにクリップボード経由で貼り付けるか、上のテキストエリアから直接コピーしてください。
+  </p>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-app.js";
+    import {
+      getAuth,
+      GoogleAuthProvider,
+      OAuthProvider,
+      signInWithPopup,
+      signOut,
+      onAuthStateChanged,
+    } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
+
+    // ↓ Firebase Console > プロジェクトの設定 > 全般 > マイアプリ から取得した値に書き換える
+    const firebaseConfig = {
+      apiKey: "AIzaSyD8TErGVlJFrn3Sldgr3junEvFufz_7wW0",
+      authDomain: "fir-rtc-de1f4.firebaseapp.com",
+      projectId: "fir-rtc-de1f4",
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+
+    const statusEl = document.getElementById("status");
+    const tokenBox = document.getElementById("tokenBox");
+
+    async function showToken(user) {
+      if (!user) {
+        statusEl.textContent = "未サインイン";
+        tokenBox.value = "";
+        return;
+      }
+      const token = await user.getIdToken();
+      statusEl.textContent = `サインイン中: ${user.displayName || user.email || user.uid}`;
+      tokenBox.value = token;
+      tokenBox.select();
+    }
+
+    onAuthStateChanged(auth, showToken);
+
+    document.getElementById("googleBtn").addEventListener("click", async () => {
+      try {
+        await signInWithPopup(auth, new GoogleAuthProvider());
+      } catch (e) {
+        statusEl.textContent = `エラー: ${e.message}`;
+      }
+    });
+
+    document.getElementById("appleBtn").addEventListener("click", async () => {
+      try {
+        // Firebase Console側でApple providerの設定(Service ID等)が済んでいる必要がある
+        await signInWithPopup(auth, new OAuthProvider("apple.com"));
+      } catch (e) {
+        statusEl.textContent = `エラー: ${e.message}`;
+      }
+    });
+
+    document.getElementById("signOutBtn").addEventListener("click", () => signOut(auth));
+  </script>
+</body>
+</html>
