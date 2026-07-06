@@ -484,6 +484,7 @@ async function connectLiveKit(token) {
       } catch (e) {
         currentTalkerUid = null;
       }
+      log(`[診断] メタデータ更新受信: currentTalker=${currentTalkerUid ?? 'null'}`);
       updatePttButtonState();
     })
     .on(RoomEvent.ParticipantConnected, (p) => {
@@ -733,6 +734,9 @@ function stopStatsPolling() {
 
 // ---------- PTT (送話ロック連携) ----------
 
+let pttHeld = false; // 現在ボタンが押されているか(startTalkingのawait中に離された場合を検知するため)
+let talkRequestToken = 0; // startTalking呼び出しごとに増分し、古い呼び出しの結果を無視するために使う
+
 function stopTalkHeartbeat() {
   if (talkHeartbeatTimer) {
     clearInterval(talkHeartbeatTimer);
@@ -757,12 +761,23 @@ function startTalkHeartbeat() {
 
 async function startTalking() {
   if (!room || pttBtn.disabled) return;
+  pttHeld = true;
+  const myToken = ++talkRequestToken;
+
   try {
     await authedFetch(`/rooms/${encodeURIComponent(currentRoomId)}/talk/start`, { method: 'POST' });
   } catch (e) {
     // 他人が発話中(409 talk_locked)など。RoomMetadataChangedでほぼ同時にボタンも
     // 無効化されるはずだが、競合(ほぼ同時押下)によるレースは起こりうるため、ここでも弾く。
     log(`発話を開始できませんでした: ${e.message}`);
+    return;
+  }
+
+  // [レース対策] talk/start の応答待ち(Cloud Runのコールドスタート等で1秒近くかかることがある)の
+  // 間にボタンが離されていた場合、ここで送話を開始してしまうと「離したのに喋り続ける」状態になる。
+  // ロックは既に取得できてしまっているので、使わないままサーバー側に解放を伝える。
+  if (!pttHeld || myToken !== talkRequestToken) {
+    authedFetch(`/rooms/${encodeURIComponent(currentRoomId)}/talk/stop`, { method: 'POST' }).catch(() => {});
     return;
   }
 
@@ -783,6 +798,8 @@ async function startTalking() {
 // forced=true は heartbeat失敗などサーバー側で既にロックを失っている場合に呼ばれる
 // (この場合 talk/stop の呼び出し自体は冪等なので害はないが、二重に呼ぶ必要はない)。
 async function stopTalking(forced = false) {
+  pttHeld = false;
+  talkRequestToken++; // 進行中のstartTalkingがあれば、その結果を無視させる
   if (!room) return;
   stopTalkHeartbeat();
   pttBtn.classList.remove('active');
@@ -800,8 +817,8 @@ async function stopTalking(forced = false) {
 }
 
 pttBtn.addEventListener('mousedown', startTalking);
-pttBtn.addEventListener('mouseup', stopTalking);
-pttBtn.addEventListener('mouseleave', stopTalking);
+pttBtn.addEventListener('mouseup', () => stopTalking());
+pttBtn.addEventListener('mouseleave', () => stopTalking());
 pttBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startTalking(); });
 pttBtn.addEventListener('touchend', (e) => { e.preventDefault(); stopTalking(); });
 </script>
