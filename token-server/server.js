@@ -5,13 +5,14 @@
  *   1. Firebase AuthのID Tokenを検証する (全エンドポイント共通)
  *   2. ルームの作成・招待コードによる参加・BAN・通報受付を管理する (routes/rooms.js, routes/reports.js)
  *   3. ルームのメンバーであることを確認した上でLiveKit接続用JWTを発行する (routes/token.js)
+ *   4. 送話ロック(排他制御)を管理する (routes/talk.js) [Phase 2で追加]
  *
  * [経緯]
  * 旧 ptt-server/server.js (WS制御 + Opusミキシング) はLiveKitサーバー本体に
  * 役割が移り廃止された。その後継として作られたこのサーバーも、当初は
  * 「認証なしでトークンだけ発行する」役割だったが、
  *   フェーズ1: Firebase Authによるなりすまし防止
- *   フェーズ2: 招待制ルーム管理・BAN・通報機能
+ *   フェーズ2: 招待制ルーム管理・BAN・通報機能・送話ロック
  * を経て、実質的に「ルーム管理を持つ小さなバックエンド」に拡張されている。
  */
 
@@ -20,6 +21,7 @@ const express = require('express');
 require('./lib/firebaseAdmin'); // 初期化を実行するためにrequire (副作用目的)
 
 const roomsRouter = require('./routes/rooms');
+const talkRouter = require('./routes/talk');
 const tokenRouter = require('./routes/token');
 const reportsRouter = require('./routes/reports');
 
@@ -38,7 +40,7 @@ if (!process.env.LIVEKIT_API_KEY || !process.env.LIVEKIT_API_SECRET) {
   process.exit(1);
 }
 if (!process.env.LIVEKIT_HOST) {
-  console.error('[起動エラー] LIVEKIT_HOST が未設定です (BAN時の即時キックに使用するLiveKit管理APIのhttps URL)');
+  console.error('[起動エラー] LIVEKIT_HOST が未設定です (BAN時の即時キック・送話ロックのメタデータ更新に使用するLiveKit管理APIのhttps URL)');
   process.exit(1);
 }
 if (ALLOWED_ORIGINS.length === 0) {
@@ -71,6 +73,7 @@ app.use((req, res, next) => {
 app.get('/', (req, res) => res.send('ptt-token-server OK'));
 
 app.use('/rooms', roomsRouter);
+app.use('/rooms', talkRouter); // POST /rooms/:roomId/talk/{start,heartbeat,stop}
 app.use('/token', tokenRouter);
 app.use('/reports', reportsRouter);
 
