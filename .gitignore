@@ -1,3 +1,5 @@
 node_modules/
 .env
 token-server/.env
+check.sh
+service-account.json
