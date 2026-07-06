@@ -23,6 +23,7 @@ curl "http://localhost:8080/token?room=room1&identity=alice"
 返ってきた `token` と、LiveKit CloudのプロジェクトURL（`wss://xxxx.livekit.cloud`）を使って
 Web/iOSクライアントから `room.connect(url, token)` できるか確認する。
 
+<<<<<<< HEAD
 ## Cloud Runへのデプロイ
 
 ### 1. Secret Manager にシークレットを登録（初回のみ）
@@ -47,6 +48,9 @@ gcloud secrets add-iam-policy-binding livekit-api-secret \
 キーをローテーションする場合は`gcloud secrets versions add livekit-api-key --data-file=-`で新バージョンを追加する。
 
 ### 2. デプロイ（`--set-secrets` でシークレットを注入）
+=======
+## Cloud Runへのデプロイ（既存ptt-serverと同じ要領）
+>>>>>>> e37d4c73c5b4295d0062497426a252a8e9c282f4
 
 ```bash
 cd token-server
@@ -54,6 +58,7 @@ gcloud run deploy ptt-token-server \
   --source . \
   --region asia-northeast1 \
   --allow-unauthenticated \
+<<<<<<< HEAD
   --set-secrets LIVEKIT_API_KEY=livekit-api-key:latest,LIVEKIT_API_SECRET=livekit-api-secret:latest
 ```
 
@@ -72,6 +77,13 @@ gcloud run deploy ptt-token-server \
   `req.ip`が実クライアントIPになるようにしている。これがないと全リクエストが
   プロキシの同一IP扱いになり、レート制限が機能しない。
 * 現状はIP単位。閾値（1分10回）はプロトタイプ向けの暫定値のため、実運用の接続頻度に応じて調整する。
+=======
+  --set-env-vars LIVEKIT_API_KEY=xxxx,LIVEKIT_API_SECRET=xxxx
+```
+
+* `--allow-unauthenticated` はプロトタイプ用。本番では認証やレート制限を検討すること。
+* シークレットは環境変数直書きではなく Secret Manager 経由推奨（`--set-secrets`）。
+>>>>>>> e37d4c73c5b4295d0062497426a252a8e9c282f4
 
 ## 動作確認チェックリスト
 
@@ -79,5 +91,8 @@ gcloud run deploy ptt-token-server \
 - [ ] 発行したJWTでWeb版から`room.connect()`が成功する
 - [ ] 同じJWTでiOS版からも`room.connect()`が成功する
 - [ ] 存在しないroom名でも新規ルームとして自動作成される（LiveKitの既定動作）
+<<<<<<< HEAD
 - [ ] 同一IPから11回連続で`/token`を叩くと11回目以降が`429`になる
 - [ ] `gcloud run services describe ptt-token-server`の出力にAPIキーの値が平文で出てこない
+=======
+>>>>>>> e37d4c73c5b4295d0062497426a252a8e9c282f4

@@ -1,2 +1,7 @@
 node_modules/
 .env
+<<<<<<< HEAD
+=======
+token-server/.env
+.env
+>>>>>>> e37d4c73c5b4295d0062497426a252a8e9c282f4
