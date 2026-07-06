@@ -6,13 +6,16 @@
  * (かつBANされていない)ことを確認した上でのみ発行する」状態に変更した。
  * メンバーシップの確立(=招待コード検証)は routes/rooms.js の
  * POST /rooms/:roomId/join が担当する。
+ *
+ * メンバーシップ確認自体は requireRoomMembership ミドルウェア
+ * (middleware/requireAuth.js) に切り出してあり、routes/talk.js とも
+ * 共有している。
  */
 
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const { AccessToken } = require('livekit-server-sdk');
-const { db } = require('../lib/firebaseAdmin');
-const { requireFirebaseAuth, isValidRoomId } = require('../middleware/requireAuth');
+const { requireFirebaseAuth, requireRoomMembership } = require('../middleware/requireAuth');
 
 const router = express.Router();
 
@@ -44,47 +47,51 @@ const uidRateLimiter = rateLimit({
 /**
  * GET /token?room=roomId
  * Header: Authorization: Bearer <Firebase ID Token>
+ *
+ * [注意] このルートは他のルート(例: /rooms/:roomId/...)と異なり、roomIdを
+ * パスパラメータではなくクエリパラメータ(?room=)で受け取る。
+ * requireRoomMembership は req.params.roomId を見るため、そのままでは
+ * 効かない。ここでは req.params.roomId に詰め替えてから使う。
  */
-router.get('/', ipRateLimiter, requireFirebaseAuth, uidRateLimiter, async (req, res) => {
-  const room = String(req.query.room || '').trim();
-  const uid = req.firebaseUser.uid;
+router.get(
+  '/',
+  ipRateLimiter,
+  requireFirebaseAuth,
+  uidRateLimiter,
+  (req, res, next) => {
+    req.params.roomId = String(req.query.room || '').trim();
+    next();
+  },
+  requireRoomMembership,
+  async (req, res) => {
+    const room = req.params.roomId;
+    const uid = req.firebaseUser.uid;
+    const member = req.roomMember;
 
-  if (!isValidRoomId(room)) {
-    return res.status(400).json({ error: 'room が不正です' });
-  }
+    try {
+      const displayName = member.displayName || req.firebaseUser.email || uid;
 
-  try {
-    const memberSnap = await db.doc(`rooms/${room}/members/${uid}`).get();
-    if (!memberSnap.exists) {
-      return res.status(403).json({ error: 'このルームのメンバーではありません' });
+      const at = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
+        identity: uid,
+        name: displayName,
+        ttl: '10m',
+      });
+      at.addGrant({
+        room,
+        roomJoin: true,
+        canPublish: true,
+        canSubscribe: true,
+        canPublishData: false,
+      });
+
+      const token = await at.toJwt();
+      console.log(`[token発行] room=${room} identity=${uid}`);
+      res.json({ token, room, identity: uid });
+    } catch (e) {
+      console.error('[token発行エラー]', e.message);
+      res.status(500).json({ error: 'トークン発行に失敗しました' });
     }
-    const member = memberSnap.data();
-    if (member.status === 'banned') {
-      return res.status(403).json({ error: 'このルームから排除されています' });
-    }
-
-    const displayName = member.displayName || req.firebaseUser.email || uid;
-
-    const at = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
-      identity: uid,
-      name: displayName,
-      ttl: '10m',
-    });
-    at.addGrant({
-      room,
-      roomJoin: true,
-      canPublish: true,
-      canSubscribe: true,
-      canPublishData: false,
-    });
-
-    const token = await at.toJwt();
-    console.log(`[token発行] room=${room} identity=${uid}`);
-    res.json({ token, room, identity: uid });
-  } catch (e) {
-    console.error('[token発行エラー]', e.message);
-    res.status(500).json({ error: 'トークン発行に失敗しました' });
   }
-});
+);
 
 module.exports = router;

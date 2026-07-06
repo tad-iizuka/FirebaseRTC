@@ -188,6 +188,12 @@ let localMicTrack = null;
 let statsTimer = null;
 let tokenRefreshTimer = null;
 let manuallyDisconnected = false;
+let roomConnected = false;
+// サーバー(routes/talk.js)がLiveKitのRoom Metadataに書き込む { currentTalker, updatedAt } を
+// RoomMetadataChangedイベント経由で反映する。自分以外がロックを保持している間はPTTボタンを無効化する。
+let currentTalkerUid = null;
+let talkHeartbeatTimer = null; // ロック保持中、失効(TTL)前に延長し続けるためのタイマー
+const TALK_LOCK_HEARTBEAT_MS = 5000; // サーバー側 LOCK_TTL_MS(15s) より十分短い間隔で延長する
 // identity(uid) -> { name: string, muted: boolean } — 送話中の判定と、BAN/通報の対象指定の両方に使う
 const participants = new Map();
 const remoteAudioTracks = new Map();
@@ -220,6 +226,19 @@ function log(msg) {
 function setStatus(state, text) {
   statusDot.className = 'dot' + (state ? ' ' + state : '');
   statusText.textContent = text;
+}
+
+// PTTボタンの disabled は「ルームに接続しているか」と「他人が発話ロックを
+// 保持中か」の2条件で決まるため、呼び出し箇所を分散させず一箇所にまとめる。
+function updatePttButtonState() {
+  const someoneElseIsTalking = currentTalkerUid && currentTalkerUid !== currentUser?.uid;
+  pttBtn.disabled = !roomConnected || someoneElseIsTalking;
+  if (someoneElseIsTalking) {
+    const name = participants.get(currentTalkerUid)?.name || currentTalkerUid;
+    pttBtn.textContent = `${name} が送話中`;
+  } else if (!pttBtn.classList.contains('active')) {
+    pttBtn.textContent = '押して送話';
+  }
 }
 
 // ---------- 画面遷移 ----------
@@ -448,10 +467,24 @@ async function connectLiveKit(token) {
       log(`接続状態: ${state}`);
       if (state === ConnectionState.Disconnected && !manuallyDisconnected) {
         setStatus('error', '切断されました');
-        pttBtn.disabled = true;
+        roomConnected = false;
+        stopTalkHeartbeat();
+        currentTalkerUid = null;
+        updatePttButtonState();
         participants.clear();
         renderParticipants();
       }
+    })
+    .on(RoomEvent.RoomMetadataChanged, (metadata) => {
+      // routes/talk.js が RoomServiceClient.updateRoomMetadata() で書き込む
+      // { currentTalker, updatedAt } を反映する。他人が発話中ならPTTボタンを無効化する。
+      try {
+        const parsed = metadata ? JSON.parse(metadata) : {};
+        currentTalkerUid = parsed.currentTalker || null;
+      } catch (e) {
+        currentTalkerUid = null;
+      }
+      updatePttButtonState();
     })
     .on(RoomEvent.ParticipantConnected, (p) => {
       log(`参加: ${p.name || p.identity}`);
@@ -491,6 +524,16 @@ async function connectLiveKit(token) {
   await room.connect(livekitUrl, token);
   log(`ルーム接続完了: room=${currentRoomId}`);
   await room.localParticipant.setMicrophoneEnabled(false);
+  roomConnected = true;
+
+  // 接続時点で既に誰かが発話ロックを保持していた場合に備え、room.metadataから初期状態を読み込む
+  // (RoomMetadataChangedは「変化した瞬間」のイベントなので、接続前からの既存状態は別途拾う必要がある)。
+  try {
+    const parsed = room.metadata ? JSON.parse(room.metadata) : {};
+    currentTalkerUid = parsed.currentTalker || null;
+  } catch (e) {
+    currentTalkerUid = null;
+  }
 
   // 接続時点ですでに他の参加者がいる場合、ParticipantConnectedイベントは発火しないため
   // room.remoteParticipants から初期状態を取り込む
@@ -502,7 +545,7 @@ async function connectLiveKit(token) {
   renderParticipants();
 
   setStatus('connected', `接続中 (room=${currentRoomId})`);
-  pttBtn.disabled = false;
+  updatePttButtonState();
   startStatsPolling();
 }
 
@@ -532,6 +575,13 @@ function scheduleTokenRefresh() {
 async function disconnectVoice() {
   manuallyDisconnected = true;
   stopBanListener();
+  stopTalkHeartbeat();
+  // 自分がロックを保持したまま切断すると、サーバー側はTTL(15秒)経過まで
+  // 他の人をブロックし続けてしまうため、ベストエフォートで明示的に解放しておく。
+  // (失敗しても実害はTTL経過まで待つだけなので、エラーは握りつぶしてよい)
+  if (currentRoomId) {
+    authedFetch(`/rooms/${encodeURIComponent(currentRoomId)}/talk/stop`, { method: 'POST' }).catch(() => {});
+  }
   if (tokenRefreshTimer) {
     clearTimeout(tokenRefreshTimer);
     tokenRefreshTimer = null;
@@ -546,6 +596,8 @@ async function disconnectVoice() {
   participants.clear();
   renderParticipants();
   stopStatsPolling();
+  roomConnected = false;
+  currentTalkerUid = null;
   currentRoomId = null;
   myRole = null;
   showRoomSelectionScreen();
@@ -679,23 +731,60 @@ function stopStatsPolling() {
   statsList.innerHTML = '— なし —';
 }
 
-// ---------- PTT ----------
+// ---------- PTT (送話ロック連携) ----------
+
+function stopTalkHeartbeat() {
+  if (talkHeartbeatTimer) {
+    clearInterval(talkHeartbeatTimer);
+    talkHeartbeatTimer = null;
+  }
+}
+
+function startTalkHeartbeat() {
+  stopTalkHeartbeat();
+  talkHeartbeatTimer = setInterval(async () => {
+    if (!currentRoomId) return;
+    try {
+      await authedFetch(`/rooms/${encodeURIComponent(currentRoomId)}/talk/heartbeat`, { method: 'POST' });
+    } catch (e) {
+      // サーバー側で最大発話時間(MAX_HOLD_MS)を超えた等、ロックを失った場合はここに来る。
+      // 本来は次のRoomMetadataChangedでUIも追従するが、念のため即座に強制的に送話を止める。
+      log(`発話ロックの延長に失敗しました。送話を終了します: ${e.message}`);
+      await stopTalking(true);
+    }
+  }, TALK_LOCK_HEARTBEAT_MS);
+}
 
 async function startTalking() {
   if (!room || pttBtn.disabled) return;
+  try {
+    await authedFetch(`/rooms/${encodeURIComponent(currentRoomId)}/talk/start`, { method: 'POST' });
+  } catch (e) {
+    // 他人が発話中(409 talk_locked)など。RoomMetadataChangedでほぼ同時にボタンも
+    // 無効化されるはずだが、競合(ほぼ同時押下)によるレースは起こりうるため、ここでも弾く。
+    log(`発話を開始できませんでした: ${e.message}`);
+    return;
+  }
+
   pttBtn.classList.add('active');
+  pttBtn.textContent = '送話中';
   try {
     await room.localParticipant.setMicrophoneEnabled(true);
     const pub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
     localMicTrack = pub?.track ?? null;
+    startTalkHeartbeat();
   } catch (e) {
     log(`マイク有効化エラー: ${e.message}`);
     pttBtn.classList.remove('active');
+    authedFetch(`/rooms/${encodeURIComponent(currentRoomId)}/talk/stop`, { method: 'POST' }).catch(() => {});
   }
 }
 
-async function stopTalking() {
+// forced=true は heartbeat失敗などサーバー側で既にロックを失っている場合に呼ばれる
+// (この場合 talk/stop の呼び出し自体は冪等なので害はないが、二重に呼ぶ必要はない)。
+async function stopTalking(forced = false) {
   if (!room) return;
+  stopTalkHeartbeat();
   pttBtn.classList.remove('active');
   try {
     await room.localParticipant.setMicrophoneEnabled(false);
@@ -704,6 +793,10 @@ async function stopTalking() {
   } finally {
     localMicTrack = null;
   }
+  if (!forced && currentRoomId) {
+    authedFetch(`/rooms/${encodeURIComponent(currentRoomId)}/talk/stop`, { method: 'POST' }).catch(() => {});
+  }
+  updatePttButtonState();
 }
 
 pttBtn.addEventListener('mousedown', startTalking);

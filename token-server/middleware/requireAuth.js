@@ -1,4 +1,4 @@
-const { auth } = require('../lib/firebaseAdmin');
+const { auth, db } = require('../lib/firebaseAdmin');
 
 /**
  * Authorization: Bearer <Firebase ID Token> を検証するミドルウェア。
@@ -35,4 +35,38 @@ function isValidRoomId(roomId) {
   return typeof roomId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(roomId);
 }
 
-module.exports = { requireFirebaseAuth, isValidRoomId };
+/**
+ * ルームのメンバー(かつBANされていない)であることを確認するミドルウェア。
+ * requireFirebaseAuthの後段で使う想定 (req.firebaseUser が必要)。
+ *
+ * [経緯] 元々 routes/token.js にインライン実装されていた判定ロジックを、
+ * routes/talk.js でも同一の判定が必要になったため、判定ロジックの重複・
+ * 将来の乖離を避ける目的でここに切り出した。roomId は req.params.roomId
+ * から読む前提 (呼び出し側のルート定義で :roomId パスパラメータを使うこと)。
+ */
+async function requireRoomMembership(req, res, next) {
+  const { roomId } = req.params;
+  const uid = req.firebaseUser.uid;
+
+  if (!isValidRoomId(roomId)) {
+    return res.status(400).json({ error: 'roomId が不正です' });
+  }
+
+  try {
+    const memberSnap = await db.doc(`rooms/${roomId}/members/${uid}`).get();
+    if (!memberSnap.exists) {
+      return res.status(403).json({ error: 'このルームのメンバーではありません' });
+    }
+    const member = memberSnap.data();
+    if (member.status === 'banned') {
+      return res.status(403).json({ error: 'このルームから排除されています' });
+    }
+    req.roomMember = member;
+    next();
+  } catch (e) {
+    console.error('[メンバーシップ確認エラー]', e.message);
+    res.status(500).json({ error: 'メンバーシップの確認に失敗しました' });
+  }
+}
+
+module.exports = { requireFirebaseAuth, isValidRoomId, requireRoomMembership };
