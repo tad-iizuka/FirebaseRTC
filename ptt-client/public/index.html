@@ -26,15 +26,23 @@
   .dot.connected { background: var(--live); box-shadow: 0 0 6px var(--live); }
   .dot.error { background: var(--danger); }
   .status-text { color: var(--muted); flex: 1; }
-  .form { padding: 16px 18px; display: grid; gap: 10px; border-bottom: 1px solid var(--line); }
+  .section { padding: 16px 18px; display: grid; gap: 10px; border-bottom: 1px solid var(--line); }
+  .section.hidden { display: none; }
   .field { display: grid; gap: 4px; }
   .field label { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
   .field input { background: var(--bg); border: 1px solid var(--line); color: var(--text); font-family: var(--mono); font-size: 16px; padding: 8px 10px; border-radius: 2px; outline: none; width: 100%; min-width: 0; }
   .field input:focus { border-color: var(--accent); }
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  button.connect { background: transparent; border: 1px solid var(--accent); color: var(--accent); font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; padding: 9px 0; border-radius: 2px; cursor: pointer; text-transform: uppercase; }
-  button.connect:hover { background: var(--accent-dim); }
-  button.connect:disabled { opacity: 0.35; cursor: not-allowed; }
+  button { background: transparent; border: 1px solid var(--accent); color: var(--accent); font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; padding: 9px 0; border-radius: 2px; cursor: pointer; text-transform: uppercase; }
+  button:hover { background: var(--accent-dim); }
+  button:disabled { opacity: 0.35; cursor: not-allowed; }
+  button.secondary { border-color: var(--line); color: var(--muted); }
+  button.secondary:hover { background: rgba(255,255,255,0.04); }
+  .divider { text-align: center; font-size: 10px; color: var(--muted); letter-spacing: 0.1em; }
+  .user-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .user-row .name { font-size: 12px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .invite-box { background: var(--bg); border: 1px dashed var(--accent); border-radius: 2px; padding: 10px; font-size: 13px; display: grid; gap: 6px; }
+  .invite-box .code { font-size: 18px; letter-spacing: 0.15em; color: var(--accent); }
   .talk-area { padding: 26px 18px 24px; display: flex; flex-direction: column; align-items: center; gap: 14px; }
   .ptt-btn { width: 160px; height: 160px; border-radius: 50%; border: 2px solid var(--line); background: radial-gradient(circle at 35% 30%, #1c2620, #10160f); color: var(--muted); font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer; transition: border-color 120ms, color 120ms, transform 80ms; user-select: none; -webkit-user-select: none; touch-action: none; -webkit-tap-highlight-color: transparent; }
   @media (min-width: 480px) { .ptt-btn { width: 140px; height: 140px; font-size: 12px; } }
@@ -59,9 +67,11 @@
   </div>
   <div class="status-row">
     <span class="dot" id="statusDot"></span>
-    <span class="status-text" id="statusText">サーバ未接続</span>
+    <span class="status-text" id="statusText">サインインしていません</span>
   </div>
-  <div class="form">
+
+  <!-- ① サインイン前: Google/Appleサインインボタンのみ -->
+  <div class="section" id="authSection">
     <div class="field">
       <label for="tokenServerUrl">トークンサーバーURL</label>
       <input id="tokenServerUrl" value="https://ptt-token-server-rnn4fqay3a-an.a.run.app" />
@@ -70,27 +80,53 @@
       <label for="livekitUrl">LiveKit URL (wss://)</label>
       <input id="livekitUrl" value="wss://ubunifu-talk-wy19xst3.livekit.cloud" />
     </div>
+    <button id="googleSignInBtn">Googleでサインイン</button>
+    <button id="appleSignInBtn">Appleでサインイン</button>
+  </div>
+
+  <!-- ② サインイン後・未入室: ルーム作成 or 招待コードで参加 -->
+  <div class="section hidden" id="roomSection">
+    <div class="user-row">
+      <span class="name" id="userNameLabel"></span>
+      <button class="secondary" id="signOutBtn" style="width:auto; padding:6px 10px;">サインアウト</button>
+    </div>
+
+    <button id="createRoomBtn">新しいルームを作成する</button>
+
+    <div class="divider">— または —</div>
+
     <div class="row2">
       <div class="field">
-        <label for="roomId">ルームID</label>
-        <input id="roomId" value="room1" />
+        <label for="joinRoomId">ルームID</label>
+        <input id="joinRoomId" placeholder="招待された側が入力" />
       </div>
       <div class="field">
-        <label for="clientId">クライアントID</label>
-        <input id="clientId" value="" placeholder="例: alice" />
+        <label for="joinInviteCode">招待コード</label>
+        <input id="joinInviteCode" placeholder="8文字のコード" />
       </div>
     </div>
-    <button class="connect" id="connectBtn">接続する</button>
+    <button id="joinRoomBtn">招待コードで参加する</button>
+
+    <div class="invite-box hidden" id="inviteBox">
+      <span>このルームの招待コード(参加者に共有してください):</span>
+      <span class="code" id="inviteCodeText"></span>
+      <span>ルームID: <span id="inviteRoomIdText"></span></span>
+    </div>
   </div>
-  <div class="talk-area">
+
+  <!-- ③ 入室後: PTT本体 -->
+  <div class="section hidden" id="voiceSection" style="border-bottom:none; padding-bottom:0;">
+    <button class="secondary" id="leaveRoomBtn">ルームを退出する</button>
+  </div>
+  <div class="talk-area hidden" id="talkArea">
     <button class="ptt-btn" id="pttBtn" disabled>押して送話</button>
     <div class="hint">ボタンを押している間だけ音声が送信されます</div>
   </div>
-  <div class="talkers">
+  <div class="talkers hidden" id="talkerSection">
     <div class="label">送話中</div>
     <div class="talker-list" id="talkerList"></div>
   </div>
-  <div class="talkers">
+  <div class="talkers hidden" id="statsSection">
     <div class="label">音声統計 (RTP実測値。1.5秒ごと更新)</div>
     <div id="statsList" style="font-size:11px; color:var(--muted); display:grid; gap:4px;">— なし —</div>
   </div>
@@ -100,22 +136,57 @@
 <!-- 受信音声の再生先。画面には出さないがDOMに存在させる必要がある -->
 <div id="remoteAudioContainer" style="display:none"></div>
 
-<script>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-app.js";
+import {
+  getAuth,
+  GoogleAuthProvider,
+  OAuthProvider,
+  signInWithPopup,
+  signOut as firebaseSignOut,
+  onAuthStateChanged,
+} from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
+
+// [Phase1: Firebase Auth]
+// このアプリで実際に使っているFirebaseプロジェクトの設定(公開情報。秘密鍵ではない)。
+// dev-tools/get-firebase-token.html と同じプロジェクトを指している。
+const firebaseConfig = {
+  apiKey: "AIzaSyD8TErGVlJFrn3Sldgr3junEvFufz_7wW0",
+  authDomain: "fir-rtc-de1f4.firebaseapp.com",
+  projectId: "fir-rtc-de1f4",
+};
+
+const firebaseApp = initializeApp(firebaseConfig);
+const firebaseAuth = getAuth(firebaseApp);
+
+// サーバー側の token.js は ttl:'10m' 固定で発行するため、クライアント側もこれに合わせる。
+// (サーバーのレスポンスに expiresIn は含まれていないため、既知の固定値としてハードコードしている)
+const TOKEN_TTL_SECONDS = 600;
+
 const { Room, RoomEvent, Track, ConnectionState } = LivekitClient;
 
+let currentUser = null;
+let currentRoomId = null;
 let room = null;
-let myIdentity = null;
-let localMicTrack = null;   // 送話中のLocalAudioTrack (bytesSent確認用)
+let localMicTrack = null;
 let statsTimer = null;
+let tokenRefreshTimer = null;
+let manuallyDisconnected = false;
 const talkers = new Set();
-const remoteAudioTracks = new Map(); // identity -> RemoteAudioTrack (bytesReceived確認用)
+const remoteAudioTracks = new Map();
 
 const $ = (id) => document.getElementById(id);
 const logEl = $('log');
 const statusDot = $('statusDot');
 const statusText = $('statusText');
 const channelLabel = $('channelLabel');
-const connectBtn = $('connectBtn');
+const authSection = $('authSection');
+const roomSection = $('roomSection');
+const voiceSection = $('voiceSection');
+const talkArea = $('talkArea');
+const talkerSection = $('talkerSection');
+const statsSection = $('statsSection');
+const inviteBox = $('inviteBox');
 const pttBtn = $('pttBtn');
 const talkerList = $('talkerList');
 const remoteAudioContainer = $('remoteAudioContainer');
@@ -132,6 +203,268 @@ function log(msg) {
 function setStatus(state, text) {
   statusDot.className = 'dot' + (state ? ' ' + state : '');
   statusText.textContent = text;
+}
+
+// ---------- 画面遷移 ----------
+
+function showAuthScreen() {
+  authSection.classList.remove('hidden');
+  roomSection.classList.add('hidden');
+  voiceSection.classList.add('hidden');
+  talkArea.classList.add('hidden');
+  talkerSection.classList.add('hidden');
+  statsSection.classList.add('hidden');
+  channelLabel.textContent = '未接続';
+  setStatus(null, 'サインインしていません');
+}
+
+function showRoomSelectionScreen() {
+  authSection.classList.add('hidden');
+  roomSection.classList.remove('hidden');
+  voiceSection.classList.add('hidden');
+  talkArea.classList.add('hidden');
+  talkerSection.classList.add('hidden');
+  statsSection.classList.add('hidden');
+  inviteBox.classList.add('hidden');
+  channelLabel.textContent = '未接続';
+  setStatus(null, 'ルーム未選択');
+  $('userNameLabel').textContent = currentUser.displayName || currentUser.email || currentUser.uid;
+}
+
+function showVoiceScreen() {
+  authSection.classList.add('hidden');
+  roomSection.classList.add('hidden');
+  voiceSection.classList.remove('hidden');
+  talkArea.classList.remove('hidden');
+  talkerSection.classList.remove('hidden');
+  statsSection.classList.remove('hidden');
+}
+
+// ---------- 認証 ----------
+
+$('googleSignInBtn').addEventListener('click', async () => {
+  try {
+    await signInWithPopup(firebaseAuth, new GoogleAuthProvider());
+  } catch (e) {
+    log(`Googleサインインエラー: ${e.message}`);
+  }
+});
+
+$('appleSignInBtn').addEventListener('click', async () => {
+  try {
+    // Firebase Console側でApple providerの設定(Service ID等)が済んでいる必要がある
+    await signInWithPopup(firebaseAuth, new OAuthProvider('apple.com'));
+  } catch (e) {
+    log(`Appleサインインエラー: ${e.message}`);
+  }
+});
+
+$('signOutBtn').addEventListener('click', async () => {
+  if (room) await disconnectVoice();
+  await firebaseSignOut(firebaseAuth);
+});
+
+onAuthStateChanged(firebaseAuth, (user) => {
+  currentUser = user;
+  if (user) {
+    log(`サインイン中: ${user.displayName || user.email || user.uid}`);
+    showRoomSelectionScreen();
+  } else {
+    log('未サインイン');
+    showAuthScreen();
+  }
+});
+
+// ---------- トークンサーバーへの認証付きリクエスト ----------
+// [Phase1] 全エンドポイントが Authorization: Bearer <Firebase IDトークン> を要求する。
+
+async function authedFetch(path, options = {}) {
+  if (!currentUser) throw new Error('サインインしていません');
+  const idToken = await currentUser.getIdToken();
+  const tokenServerUrl = $('tokenServerUrl').value.trim().replace(/\/$/, '');
+  const res = await fetch(`${tokenServerUrl}${path}`, {
+    ...options,
+    headers: {
+      ...(options.headers || {}),
+      'Authorization': `Bearer ${idToken}`,
+    },
+  });
+  if (!res.ok) {
+    let err = {};
+    try { err = await res.json(); } catch (e) { /* ignore */ }
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+// ---------- ルーム作成・参加 ----------
+
+$('createRoomBtn').addEventListener('click', async () => {
+  $('createRoomBtn').disabled = true;
+  try {
+    log('ルームを作成しています...');
+    const data = await authedFetch('/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    log(`ルーム作成成功: roomId=${data.roomId}`);
+    $('inviteCodeText').textContent = data.inviteCode;
+    $('inviteRoomIdText').textContent = data.roomId;
+    inviteBox.classList.remove('hidden');
+    await enterRoom(data.roomId);
+  } catch (e) {
+    log(`ルーム作成エラー: ${e.message}`);
+  } finally {
+    $('createRoomBtn').disabled = false;
+  }
+});
+
+$('joinRoomBtn').addEventListener('click', async () => {
+  const roomId = $('joinRoomId').value.trim();
+  const inviteCode = $('joinInviteCode').value.trim();
+  if (!roomId || !inviteCode) {
+    log('ルームIDと招待コードを入力してください');
+    return;
+  }
+  $('joinRoomBtn').disabled = true;
+  try {
+    log('ルームに参加しています...');
+    await authedFetch(`/rooms/${encodeURIComponent(roomId)}/join`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ inviteCode }),
+    });
+    log('ルーム参加成功');
+    await enterRoom(roomId);
+  } catch (e) {
+    log(`ルーム参加エラー: ${e.message}`);
+  } finally {
+    $('joinRoomBtn').disabled = false;
+  }
+});
+
+$('leaveRoomBtn').addEventListener('click', () => {
+  disconnectVoice();
+});
+
+// ---------- LiveKit接続 ----------
+
+async function enterRoom(roomId) {
+  currentRoomId = roomId;
+  manuallyDisconnected = false;
+  showVoiceScreen();
+  channelLabel.textContent = `room: ${roomId}`;
+  setStatus(null, 'トークン取得中...');
+
+  try {
+    const data = await authedFetch(`/token?room=${encodeURIComponent(roomId)}`);
+    await connectLiveKit(data.token);
+    scheduleTokenRefresh();
+  } catch (e) {
+    log(`トークン取得エラー: ${e.message}`);
+    setStatus('error', 'トークン取得失敗');
+  }
+}
+
+async function connectLiveKit(token) {
+  const livekitUrl = $('livekitUrl').value.trim();
+
+  room = new Room({
+    audioCaptureDefaults: { echoCancellation: true, noiseSuppression: true },
+  });
+
+  room
+    .on(RoomEvent.ConnectionStateChanged, (state) => {
+      log(`接続状態: ${state}`);
+      if (state === ConnectionState.Disconnected && !manuallyDisconnected) {
+        setStatus('error', '切断されました');
+        pttBtn.disabled = true;
+        talkers.clear();
+        renderTalkers();
+      }
+    })
+    .on(RoomEvent.ParticipantConnected, (p) => log(`参加: ${p.name || p.identity}`))
+    .on(RoomEvent.ParticipantDisconnected, (p) => {
+      log(`退出: ${p.name || p.identity}`);
+      talkers.delete(p.identity);
+      renderTalkers();
+    })
+    .on(RoomEvent.TrackSubscribed, (track, pub, participant) => {
+      if (track.kind === Track.Kind.Audio) {
+        const el = track.attach();
+        remoteAudioContainer.appendChild(el);
+        remoteAudioTracks.set(participant.identity, track);
+        log(`音声トラック購読開始: ${participant.name || participant.identity}`);
+      }
+    })
+    .on(RoomEvent.TrackUnsubscribed, (track, pub, participant) => {
+      track.detach().forEach((el) => el.remove());
+      remoteAudioTracks.delete(participant.identity);
+    })
+    .on(RoomEvent.TrackMuted, (pub, participant) => {
+      if (pub.kind === Track.Kind.Audio) {
+        talkers.delete(participant.name || participant.identity);
+        renderTalkers();
+      }
+    })
+    .on(RoomEvent.TrackUnmuted, (pub, participant) => {
+      if (pub.kind === Track.Kind.Audio) {
+        talkers.add(participant.name || participant.identity);
+        renderTalkers();
+      }
+    });
+
+  await room.connect(livekitUrl, token);
+  log(`ルーム接続完了: room=${currentRoomId}`);
+  await room.localParticipant.setMicrophoneEnabled(false);
+
+  setStatus('connected', `接続中 (room=${currentRoomId})`);
+  pttBtn.disabled = false;
+  startStatsPolling();
+}
+
+// [自動再取得] TOKEN_TTL_SECONDSの90%が経過したら新トークンを取得し再接続する。
+// LiveKitは接続中のトークン差し替えができないため、disconnect→再connectで対応する
+// (PTT用途では瞬断は許容範囲という前提の簡易実装)。
+function scheduleTokenRefresh() {
+  if (tokenRefreshTimer) clearTimeout(tokenRefreshTimer);
+  const refreshInMs = TOKEN_TTL_SECONDS * 0.9 * 1000;
+  tokenRefreshTimer = setTimeout(async () => {
+    if (!room || manuallyDisconnected) return;
+    log('トークン有効期限が近いため再接続します');
+    try {
+      const data = await authedFetch(`/token?room=${encodeURIComponent(currentRoomId)}`);
+      await room.disconnect();
+      await room.connect($('livekitUrl').value.trim(), data.token);
+      await room.localParticipant.setMicrophoneEnabled(false);
+      log('トークン更新・再接続に成功しました');
+      scheduleTokenRefresh();
+    } catch (e) {
+      log(`トークン更新エラー: ${e.message}`);
+      setStatus('error', 'トークン更新失敗');
+    }
+  }, refreshInMs);
+}
+
+async function disconnectVoice() {
+  manuallyDisconnected = true;
+  if (tokenRefreshTimer) {
+    clearTimeout(tokenRefreshTimer);
+    tokenRefreshTimer = null;
+  }
+  if (room) {
+    await room.disconnect();
+    room = null;
+  }
+  remoteAudioContainer.innerHTML = '';
+  remoteAudioTracks.clear();
+  localMicTrack = null;
+  talkers.clear();
+  renderTalkers();
+  stopStatsPolling();
+  currentRoomId = null;
+  showRoomSelectionScreen();
 }
 
 function renderTalkers() {
@@ -152,14 +485,10 @@ function renderTalkers() {
 }
 renderTalkers();
 
-// ---------- 音声統計 (getStatsで実際にRTPが流れているかを数値で確認する) ----------
+// ---------- 音声統計 ----------
 
-// 音声が「本当に届いているか」を耳ではなく、WebRTCの受信バイト数(bytesReceived)
-// / 送信バイト数(bytesSent)で確認するためのポーリング。
-// 同一端末での確認(マイク競合・ハウリングでリスニングが当てにならない)向けの手段。
 async function updateStats() {
   const lines = [];
-
   for (const [identity, track] of remoteAudioTracks.entries()) {
     try {
       const report = await track.getRTCStatsReport();
@@ -176,7 +505,6 @@ async function updateStats() {
       lines.push(`↓ ${identity}: stats取得失敗 (${e.message})`);
     }
   }
-
   if (localMicTrack) {
     try {
       const report = await localMicTrack.getRTCStatsReport();
@@ -191,10 +519,7 @@ async function updateStats() {
       lines.push(`↑ 自分: stats取得失敗 (${e.message})`);
     }
   }
-
-  statsList.innerHTML = lines.length
-    ? lines.map((l) => `<div>${l}</div>`).join('')
-    : '— なし —';
+  statsList.innerHTML = lines.length ? lines.map((l) => `<div>${l}</div>`).join('') : '— なし —';
 }
 
 function startStatsPolling() {
@@ -210,129 +535,6 @@ function stopStatsPolling() {
   statsList.innerHTML = '— なし —';
 }
 
-// ---------- トークン取得 ----------
-
-async function fetchToken(tokenServerUrl, room, identity) {
-  const url = `${tokenServerUrl.replace(/\/$/, '')}/token?room=${encodeURIComponent(room)}&identity=${encodeURIComponent(identity)}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`トークン取得失敗: HTTP ${res.status}`);
-  const data = await res.json();
-  return data.token;
-}
-
-// ---------- 接続 ----------
-
-async function connect() {
-  const tokenServerUrl = $('tokenServerUrl').value.trim();
-  const livekitUrl = $('livekitUrl').value.trim();
-  const roomId = $('roomId').value.trim();
-  const clientId = $('clientId').value.trim();
-
-  if (!tokenServerUrl || !livekitUrl || !roomId || !clientId) {
-    log('すべての項目を入力してください');
-    return;
-  }
-
-  myIdentity = clientId;
-  setStatus(null, 'トークン取得中...');
-  connectBtn.disabled = true;
-
-  let token;
-  try {
-    token = await fetchToken(tokenServerUrl, roomId, clientId);
-    log('トークン取得成功');
-  } catch (e) {
-    log(`トークン取得エラー: ${e.message}`);
-    setStatus('error', 'トークン取得失敗');
-    connectBtn.disabled = false;
-    return;
-  }
-
-  room = new Room({
-    // マイクは明示的にオンにするまでは publish しない (PTTのため)
-    audioCaptureDefaults: { echoCancellation: true, noiseSuppression: true },
-  });
-
-  room
-    .on(RoomEvent.ConnectionStateChanged, (state) => {
-      log(`接続状態: ${state}`);
-      if (state === ConnectionState.Disconnected) {
-        setStatus('error', '切断されました');
-        channelLabel.textContent = '未接続';
-        connectBtn.disabled = false;
-        connectBtn.textContent = '接続する';
-        pttBtn.disabled = true;
-        talkers.clear();
-        renderTalkers();
-      }
-    })
-    .on(RoomEvent.ParticipantConnected, (p) => log(`参加: ${p.identity}`))
-    .on(RoomEvent.ParticipantDisconnected, (p) => {
-      log(`退出: ${p.identity}`);
-      talkers.delete(p.identity);
-      renderTalkers();
-    })
-    .on(RoomEvent.TrackSubscribed, (track, pub, participant) => {
-      if (track.kind === Track.Kind.Audio) {
-        const el = track.attach();
-        el.dataset.identity = participant.identity;
-        remoteAudioContainer.appendChild(el);
-        remoteAudioTracks.set(participant.identity, track);
-        log(`音声トラック購読開始: ${participant.identity}`);
-      }
-    })
-    .on(RoomEvent.TrackUnsubscribed, (track, pub, participant) => {
-      track.detach().forEach((el) => el.remove());
-      remoteAudioTracks.delete(participant.identity);
-    })
-    .on(RoomEvent.TrackMuted, (pub, participant) => {
-      if (pub.kind === Track.Kind.Audio) {
-        talkers.delete(participant.identity);
-        renderTalkers();
-      }
-    })
-    .on(RoomEvent.TrackUnmuted, (pub, participant) => {
-      if (pub.kind === Track.Kind.Audio) {
-        talkers.add(participant.identity);
-        renderTalkers();
-      }
-    })
-    .on(RoomEvent.Disconnected, (reason) => {
-      log(`切断理由: ${reason ?? '不明'}`);
-    });
-
-  try {
-    await room.connect(livekitUrl, token);
-    log(`ルーム接続完了: room=${roomId} identity=${clientId}`);
-
-    // マイクトラックを事前に確保しておくが、初期状態はミュート(publishはされるがオフ)
-    // = PTTボタンを押すまで音声は流れない
-    await room.localParticipant.setMicrophoneEnabled(false);
-
-    setStatus('connected', `接続中 (room=${roomId})`);
-    channelLabel.textContent = `room: ${roomId}`;
-    connectBtn.disabled = false;
-    connectBtn.textContent = '切断する';
-    pttBtn.disabled = false;
-    startStatsPolling();
-  } catch (e) {
-    log(`接続エラー: ${e.message}`);
-    setStatus('error', e.message);
-    connectBtn.disabled = false;
-  }
-}
-
-function disconnect() {
-  if (room) {
-    room.disconnect();
-    room = null;
-  }
-  remoteAudioContainer.innerHTML = '';
-  remoteAudioTracks.clear();
-  localMicTrack = null;
-  stopStatsPolling();
-}
-
 // ---------- PTT ----------
 
 async function startTalking() {
@@ -340,8 +542,6 @@ async function startTalking() {
   pttBtn.classList.add('active');
   try {
     await room.localParticipant.setMicrophoneEnabled(true);
-    // setMicrophoneEnabled(false)後は前のLocalAudioTrackが破棄されるため、
-    // 有効化のたびに publication から取り直す(bytesSent確認用)
     const pub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
     localMicTrack = pub?.track ?? null;
   } catch (e) {
@@ -361,13 +561,6 @@ async function stopTalking() {
     localMicTrack = null;
   }
 }
-
-// ---------- イベント ----------
-
-connectBtn.addEventListener('click', () => {
-  if (room) disconnect();
-  else connect();
-});
 
 pttBtn.addEventListener('mousedown', startTalking);
 pttBtn.addEventListener('mouseup', stopTalking);

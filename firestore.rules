@@ -1,0 +1,37 @@
+rules_version = '2';
+
+// [設計方針]
+// token-server/README.md に記載の設計をそのまま強制する:
+//   - ルーム作成・参加(招待コード検証)・BAN・通報の書き込みは、すべて
+//     token-server が Admin SDK 経由で行う(Admin SDKはこのルールをバイパスする)。
+//   - クライアントからの直接書き込みは一切許可しない。
+//   - 例外として、自分自身の members/{uid} ドキュメントの読み取りだけは許可する。
+//     これはリアルタイムリスナーで「自分がBANされたこと」を即座にUIへ
+//     反映するための補助であり、BAN自体の強制力はLiveKit側の即時キックが担う。
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /rooms/{roomId} {
+      // ルーム本体(inviteCode含む)はクライアントに一切公開しない。
+      // 招待コードの検証は必ず token-server の POST /rooms/:roomId/join を通す。
+      allow read, write: if false;
+
+      match /members/{uid} {
+        // 自分自身のメンバードキュメントのみ読み取り可(BAN即時反映のUI用)。
+        allow read: if request.auth != null && request.auth.uid == uid;
+        // role/status の変更(参加・BAN・BAN解除等)はすべてサーバーAPI経由に限定。
+        allow write: if false;
+      }
+    }
+
+    match /reports/{reportId} {
+      // 通報の受付・閲覧はサーバー(モデレーター運用)のみ。
+      allow read, write: if false;
+    }
+
+    // 上記以外のコレクション/ドキュメントへのアクセスはデフォルトで拒否。
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -126,11 +126,18 @@ curl -X POST "http://localhost:8080/rooms/xxxx/members/<OTHER_UID>/ban" \
 
 ## Firestoreセキュリティルールのデプロイ
 
+リポジトリルートに `firebase.json` と `firestore.rules` を追加済み。
+初回のみプロジェクトを紐付けてから、通常のデプロイコマンドでルールを反映する。
+
 ```bash
+# リポジトリルートで実行
+firebase use --add   # 対象のFirebaseプロジェクトを選択・.firebaserc生成(初回のみ)
 firebase deploy --only firestore:rules
 ```
 
-（Firebase CLIのセットアップ、`firebase.json`でのfirestore.rulesパス指定は別途必要）
+デプロイ後、`rooms`・`rooms/{roomId}/members`・`reports` への直接書き込みが
+クライアントSDKから一切できなくなっていることを確認する
+(下の動作確認チェックリストの該当項目を参照)。
 
 ## Cloud Runへのデプロイ
 
