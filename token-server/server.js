@@ -6,6 +6,7 @@
  *   2. ルームの作成・招待コードによる参加・BAN・通報受付を管理する (routes/rooms.js, routes/reports.js)
  *   3. ルームのメンバーであることを確認した上でLiveKit接続用JWTを発行する (routes/token.js)
  *   4. 送話ロック(排他制御)を管理する (routes/talk.js) [Phase 2で追加]
+ *   5. LiveKitのWebhookを受信し、利用状況をログ/Firestoreに記録する (routes/webhooks.js) [Phase 4で追加]
  *
  * [経緯]
  * 旧 ptt-server/server.js (WS制御 + Opusミキシング) はLiveKitサーバー本体に
@@ -13,6 +14,7 @@
  * 「認証なしでトークンだけ発行する」役割だったが、
  *   フェーズ1: Firebase Authによるなりすまし防止
  *   フェーズ2: 招待制ルーム管理・BAN・通報機能・送話ロック
+ *   フェーズ4: LiveKit Webhook受信による可観測性・運用
  * を経て、実質的に「ルーム管理を持つ小さなバックエンド」に拡張されている。
  */
 
@@ -24,6 +26,7 @@ const roomsRouter = require('./routes/rooms');
 const talkRouter = require('./routes/talk');
 const tokenRouter = require('./routes/token');
 const reportsRouter = require('./routes/reports');
+const webhooksRouter = require('./routes/webhooks');
 
 const PORT = process.env.PORT || 8080;
 
@@ -53,6 +56,12 @@ const app = express();
 // これを設定しないと req.ip が常にプロキシのIP(=全リクエスト同一IP)になり、
 // IPベースのレート制限が機能しない。
 app.set('trust proxy', 1);
+
+// [Phase 4] LiveKit Webhookの署名検証(routes/webhooks.js)には生のリクエストボディが
+// 必要なため、このパスだけはグローバルな express.json() より前に、
+// express.raw() で生ボディのまま渡す。LiveKitはOriginヘッダーを送らないサーバー間通信
+// なので、以降のCORSミドルウェアの影響も受けない。
+app.use('/webhooks', express.raw({ type: '*/*' }), webhooksRouter);
 
 app.use(express.json());
 

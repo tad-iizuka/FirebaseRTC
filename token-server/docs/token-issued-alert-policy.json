@@ -1,0 +1,33 @@
+{
+  "displayName": "PTT token発行の異常急増",
+  "documentation": {
+    "content": "token-server の /token エンドポイントでのトークン発行数が5分間で閾値を超えた場合に通知する。スキャン・トークン乱発・アカウント乗っ取り等の兆候を検知するためのアラート。",
+    "mimeType": "text/markdown"
+  },
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "5分間でtoken発行が閾値超",
+      "conditionThreshold": {
+        "filter": "metric.type=\"logging.googleapis.com/user/ptt_token_issued_count\" AND resource.type=\"cloud_run_revision\"",
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 100,
+        "duration": "0s",
+        "aggregations": [
+          {
+            "alignmentPeriod": "300s",
+            "perSeriesAligner": "ALIGN_SUM",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "groupByFields": []
+          }
+        ],
+        "trigger": {
+          "count": 1
+        }
+      }
+    }
+  ],
+  "notificationChannels": [
+    "projects/fir-rtc-de1f4/notificationChannels/13710855803860249385"
+  ]
+}
