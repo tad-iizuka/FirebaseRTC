@@ -2,24 +2,34 @@
 //  ContentView.swift
 //  PTTClient
 //
-//  [LiveKit移行 + Firebase Auth対応]
+//  [LiveKit移行 + Firebase Auth対応 + 招待制ルーム対応]
 //  Web版(ptt-client/public/index.html)と同等のUI:
-//  Googleサインイン → 接続フォーム(トークンサーバーURL / LiveKit URL / ルームID)
-//  → PTTボタン → 送話中リスト → ログ
+//  Googleサインイン → ルーム作成/招待コード参加 → PTTボタン → 送話中リスト → ログ
 //  クライアントIDの手入力は廃止(token-serverは常にFirebase ID Token由来のuidを
 //  identityとして使うため、クライアントが自己申告する値は元々使われていなかった)。
+//  ルームIDの直接入力による接続も廃止し、token-serverのinvite_only設計
+//  (POST /rooms でルーム作成、POST /rooms/:roomId/join で招待コード検証)に合わせた。
 //
 
 import SwiftUI
+import FirebaseAuth
 
 struct ContentView: View {
 
     @StateObject private var auth = PTTAuthManager()
+    @StateObject private var roomManager = PTTRoomManager()
+    @StateObject private var savedRooms = PTTSavedRoomsStore()
     @StateObject private var connection = PTTConnectionManager()
 
     @State private var tokenServerURL: String = "https://ptt-token-server-rnn4fqay3a-an.a.run.app"
     @State private var livekitURL: String = "wss://ubunifu-talk-wy19xst3.livekit.cloud"
-    @State private var roomId: String = "room1"
+    @State private var joinRoomId: String = ""
+    @State private var joinInviteCode: String = ""
+
+    /// 実際に作成/参加してLiveKit接続に進んだルームID。nilの間はルーム選択画面を表示する。
+    @State private var activeRoomId: String?
+    /// 自分がルーム作成者(owner)の場合のみセットされる、参加者への共有用招待コード。
+    @State private var currentInviteCode: String?
 
     var body: some View {
         ScrollView {
@@ -27,17 +37,23 @@ struct ContentView: View {
                 header
                 if auth.currentUser == nil {
                     authSection
-                } else {
+                } else if activeRoomId != nil {
                     statusRow
-                    form
+                    inviteBox
+                    voiceSection
                     talkArea
                     talkerSection
                     logSection
+                } else {
+                    roomSelectionSection
                 }
             }
         }
         .background(Color(red: 0.05, green: 0.07, blue: 0.06))
         .foregroundColor(Color(red: 0.85, green: 0.89, blue: 0.86))
+        .onChange(of: auth.currentUser?.uid, initial: true) { _, newUid in
+            savedRooms.load(forUid: newUid)
+        }
     }
 
     // MARK: - Auth
@@ -83,7 +99,7 @@ struct ContentView: View {
                     .font(.system(size: 12, design: .monospaced))
                     .lineLimit(1)
                 Button("サインアウト") {
-                    if connection.status != .disconnected { connection.disconnect() }
+                    leaveRoom()
                     auth.signOut()
                 }
                 .font(.system(size: 11, design: .monospaced))
@@ -140,27 +156,126 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Form
+    // MARK: - Room selection (作成 / 招待コードで参加)
 
-    private var form: some View {
+    /// サインイン済み・未入室時の画面。Web版のroomSectionに相当。
+    private var roomSelectionSection: some View {
         VStack(spacing: 10) {
             field(label: "トークンサーバーURL", text: $tokenServerURL)
             field(label: "LiveKit URL (wss://)", text: $livekitURL)
-            field(label: "ルームID", text: $roomId)
-            Button(action: toggleConnection) {
-                Text(isSessionActive ? "切断する" : "接続する")
+
+            Button(action: handleCreateRoom) {
+                Text(roomManager.isWorking ? "作成中..." : "新しいルームを作成する")
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 9)
             }
             .buttonStyle(.plain)
+            .overlay(RoundedRectangle(cornerRadius: 2).stroke(Color.orange, lineWidth: 1))
+            .foregroundColor(.orange)
+            .disabled(roomManager.isWorking)
+
+            Text("— または —")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(.gray)
+                .frame(maxWidth: .infinity)
+
+            HStack(spacing: 10) {
+                field(label: "ルームID", text: $joinRoomId, placeholder: "招待された側が入力")
+                field(label: "招待コード", text: $joinInviteCode, placeholder: "8文字のコード")
+            }
+            Button(action: handleJoinRoom) {
+                Text(roomManager.isWorking ? "参加中..." : "招待コードで参加する")
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 9)
+            }
+            .buttonStyle(.plain)
+            .overlay(RoundedRectangle(cornerRadius: 2).stroke(Color.gray.opacity(0.5), lineWidth: 1))
+            .foregroundColor(.gray)
+            .disabled(roomManager.isWorking)
+
+            if let message = roomManager.lastErrorMessage {
+                Text(message)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(Color(red: 1.0, green: 0.36, blue: 0.36))
+            }
+
+            if !savedRooms.rooms.isEmpty {
+                Text("— 最近使ったルーム —")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.gray)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 4)
+
+                VStack(spacing: 6) {
+                    ForEach(savedRooms.rooms) { saved in
+                        savedRoomRow(saved)
+                    }
+                }
+            }
+        }
+        .padding(14)
+    }
+
+    private func savedRoomRow(_ saved: PTTSavedRoomsStore.SavedRoom) -> some View {
+        HStack(spacing: 8) {
+            Button {
+                rejoinSavedRoom(saved)
+            } label: {
+                Text("\(saved.label) (\(saved.roomId))")
+                    .font(.system(size: 12, design: .monospaced))
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+            }
+            .buttonStyle(.plain)
+            .background(Color.black.opacity(0.3))
+
+            Button("削除") {
+                savedRooms.remove(roomId: saved.roomId)
+            }
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundColor(.gray)
+        }
+    }
+
+    /// 招待コード表示。自分がowner(ルーム作成者)の場合のみ表示される。
+    @ViewBuilder
+    private var inviteBox: some View {
+        if let code = currentInviteCode, let roomId = activeRoomId {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("このルームの招待コード(参加者に共有してください):")
+                    .font(.system(size: 12, design: .monospaced))
+                Text(code)
+                    .font(.system(size: 18, weight: .bold, design: .monospaced))
+                    .foregroundColor(.orange)
+                Text("ルームID: \(roomId)")
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(.gray)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
             .overlay(
                 RoundedRectangle(cornerRadius: 2)
-                    .stroke(Color.orange, lineWidth: 1)
+                    .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4]))
+                    .foregroundColor(.orange)
             )
-            .foregroundColor(.orange)
-            .disabled(connection.status == .connecting)
+            .padding(14)
         }
+    }
+
+    /// 入室後: 退出ボタン。Web版のleaveRoomBtnに相当。
+    private var voiceSection: some View {
+        Button(action: leaveRoom) {
+            Text("ルームを退出する")
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 9)
+        }
+        .buttonStyle(.plain)
+        .overlay(RoundedRectangle(cornerRadius: 2).stroke(Color.gray.opacity(0.4), lineWidth: 1))
+        .foregroundColor(.gray)
         .padding(14)
     }
 
@@ -183,28 +298,63 @@ struct ContentView: View {
         return false
     }
 
-    /// 接続ボタンの表示・切断操作用。再接続中も「セッションは継続中」として扱い、
-    /// 「切断する」ボタンでいつでも明示的に切断できるようにする
-    /// (isConnectedはPTTボタンの活性化条件専用。再接続中は送話不可のままにしたいので分離している)。
-    private var isSessionActive: Bool {
-        switch connection.status {
-        case .connected, .reconnecting: return true
-        default: return false
+    private func handleCreateRoom() {
+        roomManager.clearError()
+        Task {
+            do {
+                let idToken = try await auth.fetchIDToken()
+                let (roomId, inviteCode) = try await roomManager.createRoom(tokenServerURL: tokenServerURL, idToken: idToken)
+                currentInviteCode = inviteCode
+                savedRooms.upsert(roomId: roomId, label: "自分が作成したルーム", inviteCode: inviteCode)
+                enterRoom(roomId)
+            } catch {
+                // roomManager.lastErrorMessage に理由がセットされているのでUIには既に反映済み
+            }
         }
     }
 
-    private func toggleConnection() {
-        if isSessionActive {
-            connection.disconnect()
-        } else {
-            guard !tokenServerURL.isEmpty, !livekitURL.isEmpty, !roomId.isEmpty else { return }
-            connection.connect(
-                tokenServerURL: tokenServerURL,
-                livekitURL: livekitURL,
-                room: roomId,
-                idTokenProvider: { try await auth.fetchIDToken() }
-            )
+    private func handleJoinRoom() {
+        let roomId = joinRoomId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let inviteCode = joinInviteCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !roomId.isEmpty, !inviteCode.isEmpty else { return }
+        roomManager.clearError()
+        Task {
+            do {
+                let idToken = try await auth.fetchIDToken()
+                try await roomManager.joinRoom(tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId, inviteCode: inviteCode)
+                currentInviteCode = nil
+                savedRooms.upsert(roomId: roomId, label: "招待コードで参加したルーム", inviteCode: nil)
+                enterRoom(roomId)
+            } catch {
+                // roomManager.lastErrorMessage に理由がセットされているのでUIには既に反映済み
+            }
         }
+    }
+
+    /// 保存済みのルームをタップした場合: 招待コード検証(/rooms/:id/join)は経由せず、
+    /// 既にメンバーである前提でそのままトークン取得〜接続に進む。
+    /// (メンバーでなくなっていた場合 = BAN等 は /token が403を返すのでconnection側のエラー表示に出る)
+    private func rejoinSavedRoom(_ saved: PTTSavedRoomsStore.SavedRoom) {
+        currentInviteCode = saved.inviteCode
+        enterRoom(saved.roomId)
+    }
+
+    private func enterRoom(_ roomId: String) {
+        activeRoomId = roomId
+        connection.connect(
+            tokenServerURL: tokenServerURL,
+            livekitURL: livekitURL,
+            room: roomId,
+            idTokenProvider: { try await auth.fetchIDToken() }
+        )
+    }
+
+    private func leaveRoom() {
+        if connection.status != .disconnected { connection.disconnect() }
+        activeRoomId = nil
+        currentInviteCode = nil
+        joinRoomId = ""
+        joinInviteCode = ""
     }
 
     // MARK: - Talk area (PTT button)

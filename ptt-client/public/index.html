@@ -110,6 +110,9 @@
       </div>
     </div>
     <button id="joinRoomBtn">招待コードで参加する</button>
+
+    <div class="divider hidden" id="savedRoomsDivider">— 最近使ったルーム —</div>
+    <div id="savedRoomsList" style="display:grid; gap:6px;"></div>
   </div>
 
   <!-- 招待コード表示: ルーム作成者に対して、ルーム選択画面/通話画面のどちらでも
@@ -210,6 +213,8 @@ const talkArea = $('talkArea');
 const talkerSection = $('talkerSection');
 const statsSection = $('statsSection');
 const inviteBox = $('inviteBox');
+const savedRoomsDivider = $('savedRoomsDivider');
+const savedRoomsList = $('savedRoomsList');
 const pttBtn = $('pttBtn');
 const talkerList = $('talkerList');
 const remoteAudioContainer = $('remoteAudioContainer');
@@ -286,6 +291,101 @@ function renderInviteBox() {
   }
 }
 
+// ---------- 最近使ったルーム(localStorage) ----------
+// [設計方針]
+// サーバー側にはルーム一覧を返すAPIが無く(招待制のため、そもそも「一覧」という概念が薄い)、
+// あくまで「自分が過去に作成/参加したルームにワンタップで戻れる」ためのローカルな履歴として
+// 実装する。複数のFirebaseアカウントで同じブラウザを使うケースを考慮し、
+// uidごとに別のlocalStorageキーに保存する(サインアウト/別アカウントでの汚染を防ぐため)。
+
+const MAX_SAVED_ROOMS = 20;
+
+function savedRoomsKey() {
+  return currentUser ? `pttSavedRooms:${currentUser.uid}` : null;
+}
+
+function loadSavedRooms() {
+  const key = savedRoomsKey();
+  if (!key) return [];
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function persistSavedRooms(rooms) {
+  const key = savedRoomsKey();
+  if (!key) return;
+  try {
+    localStorage.setItem(key, JSON.stringify(rooms));
+  } catch (e) {
+    log(`ルーム履歴の保存に失敗しました: ${e.message}`);
+  }
+}
+
+/// ルームに作成/参加するたびに呼ぶ。同じroomIdが既にあれば更新して先頭に移動する。
+function upsertSavedRoom(roomId, label, inviteCode) {
+  if (!savedRoomsKey()) return;
+  let rooms = loadSavedRooms().filter((r) => r.roomId !== roomId);
+  rooms.unshift({ roomId, label, inviteCode: inviteCode || null, lastUsedAt: Date.now() });
+  if (rooms.length > MAX_SAVED_ROOMS) rooms = rooms.slice(0, MAX_SAVED_ROOMS);
+  persistSavedRooms(rooms);
+  renderSavedRooms();
+}
+
+function removeSavedRoom(roomId) {
+  const rooms = loadSavedRooms().filter((r) => r.roomId !== roomId);
+  persistSavedRooms(rooms);
+  renderSavedRooms();
+}
+
+function renderSavedRooms() {
+  const rooms = loadSavedRooms();
+  savedRoomsList.innerHTML = '';
+  if (rooms.length === 0) {
+    savedRoomsDivider.classList.add('hidden');
+    return;
+  }
+  savedRoomsDivider.classList.remove('hidden');
+  for (const r of rooms) {
+    const row = document.createElement('div');
+    row.className = 'user-row';
+
+    const openBtn = document.createElement('button');
+    openBtn.type = 'button';
+    openBtn.className = 'secondary';
+    openBtn.style.textAlign = 'left';
+    openBtn.style.flex = '1';
+    openBtn.textContent = `${r.label} (${r.roomId})`;
+    openBtn.addEventListener('click', () => rejoinSavedRoom(r));
+
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'secondary';
+    delBtn.style.width = 'auto';
+    delBtn.textContent = '削除';
+    delBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      removeSavedRoom(r.roomId);
+    });
+
+    row.appendChild(openBtn);
+    row.appendChild(delBtn);
+    savedRoomsList.appendChild(row);
+  }
+}
+
+/// 保存済みのルームを直接タップした場合: 招待コード検証(/rooms/:id/join)は経由せず、
+/// 既にメンバーである前提でそのままトークン取得〜接続に進む。
+/// (メンバーでなくなっていた場合 = BAN等 は /token が403を返すのでenterRoom側で弾かれる)
+async function rejoinSavedRoom(saved) {
+  currentInviteCode = saved.inviteCode || null;
+  renderInviteBox();
+  await enterRoom(saved.roomId);
+}
+
 // ---------- 認証 ----------
 
 $('googleSignInBtn').addEventListener('click', async () => {
@@ -319,6 +419,7 @@ onAuthStateChanged(firebaseAuth, (user) => {
     log('未サインイン');
     showAuthScreen();
   }
+  renderSavedRooms(); // savedRoomsKey()がcurrentUserを見るため、サインイン/アウトのどちらでも呼び直す
 });
 
 // ---------- トークンサーバーへの認証付きリクエスト ----------
@@ -358,6 +459,7 @@ $('createRoomBtn').addEventListener('click', async () => {
     currentInviteCode = data.inviteCode;
     currentRoomId = data.roomId;
     renderInviteBox();
+    upsertSavedRoom(data.roomId, '自分が作成したルーム', data.inviteCode);
     await enterRoom(data.roomId);
   } catch (e) {
     log(`ルーム作成エラー: ${e.message}`);
@@ -384,6 +486,7 @@ $('joinRoomBtn').addEventListener('click', async () => {
     log('ルーム参加成功');
     currentInviteCode = null;
     renderInviteBox();
+    upsertSavedRoom(roomId, '招待コードで参加したルーム', null);
     await enterRoom(roomId);
   } catch (e) {
     log(`ルーム参加エラー: ${e.message}`);
