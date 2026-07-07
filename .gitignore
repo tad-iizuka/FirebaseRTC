@@ -3,3 +3,4 @@ node_modules/
 token-server/.env
 check.sh
 service-account.json
+GoogleService-Info.plist
