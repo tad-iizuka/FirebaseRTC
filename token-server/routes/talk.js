@@ -104,7 +104,11 @@ router.post('/:roomId/talk/start', requireFirebaseAuth, requireRoomMembership, a
       return talkLock;
     });
 
-    await broadcastCurrentTalker(roomId, uid);
+    // LiveKit管理APIへのメタデータ更新(broadcastCurrentTalker)は、他クライアントへの
+    // 周知が目的の副作用にすぎず、ロックの成否(=Firestoreトランザクションの結果)には
+    // 影響しない。実測でこの呼び出しに1〜2秒かかることが分かったため、
+    // クライアントへのレスポンスをブロックしないよう意図的にawaitしない。
+    broadcastCurrentTalker(roomId, uid);
     console.log(`[talk/start] room=${roomId} uid=${uid}`);
     res.json({ acquired: true, expiresInMs: LOCK_TTL_MS });
   } catch (e) {
@@ -148,7 +152,7 @@ router.post('/:roomId/talk/heartbeat', requireFirebaseAuth, requireRoomMembershi
   } catch (e) {
     if (e && e.httpStatus) {
       if (e.code === 'talk_max_hold_exceeded') {
-        await broadcastCurrentTalker(roomId, null);
+        broadcastCurrentTalker(roomId, null);
       }
       return res.status(e.httpStatus).json({ error: e.message, code: e.code });
     }
@@ -177,7 +181,8 @@ router.post('/:roomId/talk/stop', requireFirebaseAuth, requireRoomMembership, as
       }
       // 自分のロックでなければ何もしない(既に他人が取得済み or 元々空)
     });
-    await broadcastCurrentTalker(roomId, null);
+    // start と同様、レスポンスをブロックしないよう意図的にawaitしない。
+    broadcastCurrentTalker(roomId, null);
     console.log(`[talk/stop] room=${roomId} uid=${uid}`);
     res.json({ released: true });
   } catch (e) {
