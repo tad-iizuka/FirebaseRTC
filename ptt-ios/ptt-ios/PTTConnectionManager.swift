@@ -32,11 +32,13 @@ final class PTTConnectionManager: NSObject, ObservableObject {
     private var tokenServerURL = ""
     private var livekitURL = ""
     private var roomName = ""
-    private var identity = ""
+    private var idTokenProvider: (() async throws -> String)?
 
     // MARK: - Public API
 
-    func connect(tokenServerURL: String, livekitURL: String, room roomName: String, identity: String) {
+    /// - Parameter idTokenProvider: token-server呼び出し時に都度呼ばれ、有効なFirebase ID Tokenを
+    ///   返すクロージャ。呼び出し側(PTTAuthManager)が期限切れ検知・自動リフレッシュを担う。
+    func connect(tokenServerURL: String, livekitURL: String, room roomName: String, idTokenProvider: @escaping () async throws -> String) {
         guard room == nil else {
             appendLog("すでに接続中/接続試行中です")
             return
@@ -45,7 +47,7 @@ final class PTTConnectionManager: NSObject, ObservableObject {
         self.tokenServerURL = tokenServerURL
         self.livekitURL = livekitURL
         self.roomName = roomName
-        self.identity = identity
+        self.idTokenProvider = idTokenProvider
         status = .connecting
 
         Task {
@@ -63,7 +65,7 @@ final class PTTConnectionManager: NSObject, ObservableObject {
                 try await newRoom.localParticipant.setMicrophone(enabled: false)
 
                 status = .connected(room: roomName)
-                appendLog("ルーム接続完了: room=\(roomName) identity=\(identity)")
+                appendLog("ルーム接続完了: room=\(roomName)")
             } catch {
                 appendLog("接続エラー: \(error.localizedDescription)")
                 status = .error(error.localizedDescription)
@@ -117,19 +119,48 @@ final class PTTConnectionManager: NSObject, ObservableObject {
         let token: String
     }
 
+    /// token-serverが返すエラーレスポンス `{ "error": "..." }` をデコードするための型。
+    /// これを拾うことで、以前のように "NSURLErrorDomain error -1011" という不親切な
+    /// エラーではなく、「このルームのメンバーではありません」等の具体的な理由を表示できる。
+    private struct ServerErrorResponse: Decodable {
+        let error: String?
+    }
+
+    private enum TokenFetchError: LocalizedError {
+        case serverError(statusCode: Int, message: String?)
+
+        var errorDescription: String? {
+            switch self {
+            case let .serverError(statusCode, message):
+                return message ?? "トークン取得に失敗しました (HTTP \(statusCode))"
+            }
+        }
+    }
+
     private func fetchToken() async throws -> String {
+        guard let idTokenProvider else {
+            throw TokenFetchError.serverError(statusCode: 401, message: "サインインしていません")
+        }
+        let idToken = try await idTokenProvider()
+
         guard var components = URLComponents(string: "\(tokenServerURL)/token") else {
             throw URLError(.badURL)
         }
         components.queryItems = [
             URLQueryItem(name: "room", value: roomName),
-            URLQueryItem(name: "identity", value: identity),
         ]
         guard let url = components.url else { throw URLError(.badURL) }
 
-        let (data, response) = try await URLSession.shared.data(from: url)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
             throw URLError(.badServerResponse)
+        }
+        guard http.statusCode == 200 else {
+            let serverMessage = try? JSONDecoder().decode(ServerErrorResponse.self, from: data).error
+            throw TokenFetchError.serverError(statusCode: http.statusCode, message: serverMessage)
         }
         return try JSONDecoder().decode(TokenResponse.self, from: data).token
     }
@@ -161,6 +192,45 @@ extension PTTConnectionManager: RoomDelegate {
                 } else {
                     self.status = .disconnected
                 }
+            }
+        }
+    }
+
+    /// 再接続開始。SDKドキュメント上、こちらは quick(ICE再起動)/full どちらのモードでも
+    /// 確実に呼ばれる (`didUpdateConnectionState`はquickモードでは呼ばれないため代用不可)。
+    /// ネットワーク瞬断からの自動復旧中であることをUIに反映するためのフック。
+    nonisolated func room(_ room: Room, didStartReconnectWithMode reconnectMode: ReconnectMode) {
+        Task { @MainActor in
+            self.appendLog("再接続を開始しました (mode=\(reconnectMode))")
+            if case .error = self.status {
+                // 既にエラー表示中ならそのまま維持する
+            } else {
+                self.status = .reconnecting(room: self.roomName)
+            }
+        }
+    }
+
+    /// 再接続成功。
+    nonisolated func room(_ room: Room, didCompleteReconnectWithMode reconnectMode: ReconnectMode) {
+        Task { @MainActor in
+            self.appendLog("再接続に成功しました (mode=\(reconnectMode))")
+            if case .error = self.status {
+                // 既にエラー表示中ならそのまま維持する
+            } else {
+                self.status = .connected(room: self.roomName)
+            }
+        }
+    }
+
+    /// 再接続を試みた末に失敗した場合や、サーバー側から切断された場合に呼ばれる。
+    /// 実際のクリーンアップは `didUpdateConnectionState` 側の `.disconnected` 遷移で
+    /// 行われる(こちらは主に理由をログに残すため)。
+    nonisolated func room(_ room: Room, didDisconnectWithError error: LiveKitError?) {
+        Task { @MainActor in
+            if let error {
+                self.appendLog("予期しない切断: \(error.localizedDescription)")
+            } else {
+                self.appendLog("切断されました")
             }
         }
     }

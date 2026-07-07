@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		3294D6582FFC8AAD0022325C /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 3294D6572FFC8AAD0022325C /* FirebaseAuth */; };
+		3294D65A2FFC8AAD0022325C /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 3294D6592FFC8AAD0022325C /* FirebaseCore */; };
+		3294D65D2FFC8B090022325C /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 3294D65C2FFC8B090022325C /* GoogleSignIn */; };
 		32BD805C2FFA9A5100AA58E6 /* LiveKit in Frameworks */ = {isa = PBXBuildFile; productRef = 32BD805B2FFA9A5100AA58E6 /* LiveKit */; };
 /* End PBXBuildFile section */
 
@@ -34,7 +37,7 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		32BD805E2FFA9BC700AA58E6 /* Exceptions for "ptt-ios" folder in "ptt-ios" target */ = {
+		3294D6622FFC8CA40022325C /* Exceptions for "ptt-ios" folder in "ptt-ios" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
@@ -47,7 +50,7 @@
 		32E548D42FE7907400966874 /* ptt-ios */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				32BD805E2FFA9BC700AA58E6 /* Exceptions for "ptt-ios" folder in "ptt-ios" target */,
+				3294D6622FFC8CA40022325C /* Exceptions for "ptt-ios" folder in "ptt-ios" target */,
 			);
 			path = "ptt-ios";
 			sourceTree = "<group>";
@@ -70,6 +73,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				32BD805C2FFA9A5100AA58E6 /* LiveKit in Frameworks */,
+				3294D65D2FFC8B090022325C /* GoogleSignIn in Frameworks */,
+				3294D65A2FFC8AAD0022325C /* FirebaseCore in Frameworks */,
+				3294D6582FFC8AAD0022325C /* FirebaseAuth in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -139,6 +145,9 @@
 			name = "ptt-ios";
 			packageProductDependencies = (
 				32BD805B2FFA9A5100AA58E6 /* LiveKit */,
+				3294D6572FFC8AAD0022325C /* FirebaseAuth */,
+				3294D6592FFC8AAD0022325C /* FirebaseCore */,
+				3294D65C2FFC8B090022325C /* GoogleSignIn */,
 			);
 			productName = "ptt-ios";
 			productReference = 32E548D22FE7907400966874 /* ptt-ios.app */;
@@ -202,6 +211,7 @@
 				TargetAttributes = {
 					32E548D12FE7907400966874 = {
 						CreatedOnToolsVersion = 26.5;
+						LastSwiftMigration = 2660;
 					};
 					32E548DE2FE7907500966874 = {
 						CreatedOnToolsVersion = 26.5;
@@ -224,6 +234,8 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				32BD80532FFA997200AA58E6 /* XCRemoteSwiftPackageReference "client-sdk-swift" */,
+				3294D6562FFC8AAD0022325C /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+				3294D65B2FFC8B090022325C /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 32E548D32FE7907400966874 /* Products */;
@@ -425,6 +437,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = MTP6LLLBBQ;
@@ -449,6 +462,7 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -460,6 +474,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = MTP6LLLBBQ;
@@ -616,6 +631,22 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		3294D6562FFC8AAD0022325C /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.15.0;
+			};
+		};
+		3294D65B2FFC8B090022325C /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/GoogleSignIn-iOS";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 9.2.0;
+			};
+		};
 		32BD80532FFA997200AA58E6 /* XCRemoteSwiftPackageReference "client-sdk-swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/livekit/client-sdk-swift";
@@ -627,6 +658,21 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		3294D6572FFC8AAD0022325C /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 3294D6562FFC8AAD0022325C /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+		3294D6592FFC8AAD0022325C /* FirebaseCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 3294D6562FFC8AAD0022325C /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCore;
+		};
+		3294D65C2FFC8B090022325C /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 3294D65B2FFC8B090022325C /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignIn;
+		};
 		32BD805B2FFA9A5100AA58E6 /* LiveKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 32BD80532FFA997200AA58E6 /* XCRemoteSwiftPackageReference "client-sdk-swift" */;

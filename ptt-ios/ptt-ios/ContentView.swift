@@ -2,36 +2,72 @@
 //  ContentView.swift
 //  PTTClient
 //
-//  [LiveKit移行]
-//  Web版(ptt-client/public/index.html)のLiveKit版と同等のUI:
-//  接続フォーム(トークンサーバーURL / LiveKit URL / ルームID / クライアントID)
+//  [LiveKit移行 + Firebase Auth対応]
+//  Web版(ptt-client/public/index.html)と同等のUI:
+//  Googleサインイン → 接続フォーム(トークンサーバーURL / LiveKit URL / ルームID)
 //  → PTTボタン → 送話中リスト → ログ
+//  クライアントIDの手入力は廃止(token-serverは常にFirebase ID Token由来のuidを
+//  identityとして使うため、クライアントが自己申告する値は元々使われていなかった)。
 //
 
 import SwiftUI
 
 struct ContentView: View {
 
+    @StateObject private var auth = PTTAuthManager()
     @StateObject private var connection = PTTConnectionManager()
 
     @State private var tokenServerURL: String = "https://ptt-token-server-rnn4fqay3a-an.a.run.app"
     @State private var livekitURL: String = "wss://ubunifu-talk-wy19xst3.livekit.cloud"
     @State private var roomId: String = "room1"
-    @State private var clientId: String = ""
 
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
                 header
-                statusRow
-                form
-                talkArea
-                talkerSection
-                logSection
+                if auth.currentUser == nil {
+                    authSection
+                } else {
+                    statusRow
+                    form
+                    talkArea
+                    talkerSection
+                    logSection
+                }
             }
         }
         .background(Color(red: 0.05, green: 0.07, blue: 0.06))
         .foregroundColor(Color(red: 0.85, green: 0.89, blue: 0.86))
+    }
+
+    // MARK: - Auth
+
+    /// 未サインイン時の画面。Web版のauthSectionに相当。
+    private var authSection: some View {
+        VStack(spacing: 14) {
+            Button {
+                Task { await auth.signInWithGoogle() }
+            } label: {
+                Text(auth.isSigningIn ? "サインイン中..." : "Googleでサインイン")
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 9)
+            }
+            .buttonStyle(.plain)
+            .overlay(
+                RoundedRectangle(cornerRadius: 2)
+                    .stroke(Color.orange, lineWidth: 1)
+            )
+            .foregroundColor(.orange)
+            .disabled(auth.isSigningIn)
+
+            if let message = auth.lastErrorMessage {
+                Text(message)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(Color(red: 1.0, green: 0.36, blue: 0.36))
+            }
+        }
+        .padding(14)
     }
 
     // MARK: - Header
@@ -42,6 +78,19 @@ struct ContentView: View {
                 .font(.system(size: 11, weight: .regular, design: .monospaced))
                 .foregroundColor(.gray)
             Spacer()
+            if auth.currentUser != nil {
+                Text(auth.displayName ?? "")
+                    .font(.system(size: 12, design: .monospaced))
+                    .lineLimit(1)
+                Button("サインアウト") {
+                    if connection.status != .disconnected { connection.disconnect() }
+                    auth.signOut()
+                }
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.gray)
+                .padding(.leading, 8)
+            }
+            Spacer()
             Text(channelLabel)
                 .font(.system(size: 13, design: .monospaced))
         }
@@ -51,6 +100,7 @@ struct ContentView: View {
     private var channelLabel: String {
         switch connection.status {
         case .connected(let room): return "room: \(room)"
+        case .reconnecting(let room): return "room: \(room)"
         default: return "未接続"
         }
     }
@@ -74,6 +124,7 @@ struct ContentView: View {
     private var statusColor: Color {
         switch connection.status {
         case .connected: return Color(red: 0.24, green: 0.86, blue: 0.52)
+        case .reconnecting: return Color(red: 0.95, green: 0.72, blue: 0.2) // 黄色系: 再接続試行中であることを目立たせる
         case .error: return Color(red: 1.0, green: 0.36, blue: 0.36)
         default: return .gray
         }
@@ -84,6 +135,7 @@ struct ContentView: View {
         case .disconnected: return "サーバ未接続"
         case .connecting: return "接続中..."
         case .connected(let room): return "接続中 (room=\(room))"
+        case .reconnecting(let room): return "再接続中... (room=\(room))"
         case .error(let message): return "エラー: \(message)"
         }
     }
@@ -94,12 +146,9 @@ struct ContentView: View {
         VStack(spacing: 10) {
             field(label: "トークンサーバーURL", text: $tokenServerURL)
             field(label: "LiveKit URL (wss://)", text: $livekitURL)
-            HStack(spacing: 10) {
-                field(label: "ルームID", text: $roomId)
-                field(label: "クライアントID", text: $clientId, placeholder: "例: alice")
-            }
+            field(label: "ルームID", text: $roomId)
             Button(action: toggleConnection) {
-                Text(isConnected ? "切断する" : "接続する")
+                Text(isSessionActive ? "切断する" : "接続する")
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 9)
@@ -134,12 +183,27 @@ struct ContentView: View {
         return false
     }
 
+    /// 接続ボタンの表示・切断操作用。再接続中も「セッションは継続中」として扱い、
+    /// 「切断する」ボタンでいつでも明示的に切断できるようにする
+    /// (isConnectedはPTTボタンの活性化条件専用。再接続中は送話不可のままにしたいので分離している)。
+    private var isSessionActive: Bool {
+        switch connection.status {
+        case .connected, .reconnecting: return true
+        default: return false
+        }
+    }
+
     private func toggleConnection() {
-        if isConnected {
+        if isSessionActive {
             connection.disconnect()
         } else {
-            guard !tokenServerURL.isEmpty, !livekitURL.isEmpty, !roomId.isEmpty, !clientId.isEmpty else { return }
-            connection.connect(tokenServerURL: tokenServerURL, livekitURL: livekitURL, room: roomId, identity: clientId)
+            guard !tokenServerURL.isEmpty, !livekitURL.isEmpty, !roomId.isEmpty else { return }
+            connection.connect(
+                tokenServerURL: tokenServerURL,
+                livekitURL: livekitURL,
+                room: roomId,
+                idTokenProvider: { try await auth.fetchIDToken() }
+            )
         }
     }
 

@@ -16,5 +16,8 @@ enum ConnectionStatus: Equatable {
     case disconnected
     case connecting
     case connected(room: String)
+    /// 接続済みだったが、ネットワーク問題で再接続を試行中(LiveKit SDKが自動的に行う)。
+    /// quick(ICE再起動)/full(再接続)どちらのモードでも遷移する。
+    case reconnecting(room: String)
     case error(String)
 }
