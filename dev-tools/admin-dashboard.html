@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>[開発者用] PTT 管理者ダッシュボード</title>
+<style>
+  :root {
+    --bg: #0d1210; --panel: #141b18; --line: #263129; --text: #d8e4dd;
+    --muted: #6f8079; --accent: #ff7a3c; --live: #3ddc84; --danger: #ff5c5c;
+    --mono: "SF Mono", "Menlo", "Consolas", monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--mono); padding: 24px; }
+  h1 { font-size: 15px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+  .warn { background: #fff3cd; color: #3a2e00; border: 1px solid #ffe69c; padding: 8px 10px; border-radius: 4px; font-size: 12px; margin-bottom: 16px; max-width: 720px; }
+  .controls { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+  input { background: var(--panel); border: 1px solid var(--line); color: var(--text); font-family: var(--mono); font-size: 13px; padding: 7px 9px; border-radius: 2px; }
+  input#tokenServerUrl { width: 420px; max-width: 100%; }
+  button { background: transparent; border: 1px solid var(--accent); color: var(--accent); font-family: var(--mono); font-size: 12px; padding: 7px 12px; border-radius: 2px; cursor: pointer; }
+  button:hover { background: rgba(255,122,60,0.1); }
+  button.secondary { border-color: var(--line); color: var(--muted); }
+  table { border-collapse: collapse; width: 100%; margin-top: 8px; font-size: 12px; }
+  th, td { border-bottom: 1px solid var(--line); padding: 8px 10px; text-align: left; white-space: nowrap; }
+  th { color: var(--muted); font-weight: normal; text-transform: uppercase; letter-spacing: 0.06em; font-size: 10px; }
+  tr.clickable { cursor: pointer; }
+  tr.clickable:hover { background: rgba(255,255,255,0.03); }
+  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; background: var(--muted); }
+  .dot.live { background: var(--live); box-shadow: 0 0 6px var(--live); }
+  .badge { font-size: 10px; padding: 2px 6px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .badge.rec { border-color: var(--danger); color: var(--danger); }
+  .badge.lock { border-color: var(--accent); color: var(--accent); }
+  #detail { margin-top: 24px; padding-top: 16px; border-top: 1px dashed var(--line); }
+  #detail h2 { font-size: 13px; color: var(--text); }
+  #status { font-size: 12px; color: var(--muted); margin: 8px 0; }
+  #status.error { color: var(--danger); }
+</style>
+</head>
+<body>
+
+<h1>PTT 管理者ダッシュボード(開発者用)</h1>
+<p class="warn">
+  これは本番クライアントの一部ではありません。/admin/rooms API を手動で確認するための
+  ローカル専用の開発ツールです。公開ホスティングには含めないでください。
+  閲覧には <code>adminUsers/{uid}.permissions</code> に <code>rooms:monitor</code> が
+  付与されているFirebaseアカウントでのサインインが必要です
+  (dev-tools/grant-admin-permission.js で付与)。<br>
+  <strong>注意:</strong> このファイルを <code>file://</code> で直接開くと
+  Firebase Authが <code>auth/unauthorized-domain</code> エラーを返しサインインできません。
+  <code>cd dev-tools &amp;&amp; python3 -m http.server 8000</code> 等でローカルサーバーを立て、
+  <code>http://localhost:8000/admin-dashboard.html</code> として開いてください。
+</p>
+
+<div class="controls">
+  <input id="tokenServerUrl" value="https://ptt-token-server-rnn4fqay3a-an.a.run.app" />
+  <button id="signInBtn">Googleでサインイン</button>
+  <button class="secondary" id="refreshBtn">再読み込み</button>
+</div>
+<div id="status">未サインイン</div>
+
+<table id="roomsTable" style="display:none">
+  <thead>
+    <tr>
+      <th></th>
+      <th>Room ID</th>
+      <th>Owner UID</th>
+      <th>作成日時</th>
+      <th>接続中人数</th>
+      <th>メンバー数(active)</th>
+      <th>状態</th>
+    </tr>
+  </thead>
+  <tbody id="roomsBody"></tbody>
+</table>
+<button class="secondary" id="nextPageBtn" style="display:none; margin-top:10px;">次のページ</button>
+
+<div id="detail"></div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-app.js";
+import {
+  getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged,
+} from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
+
+// dev-tools/get-firebase-token.html, ptt-client/public/index.html と同じFirebaseプロジェクト。
+const firebaseConfig = {
+  apiKey: "AIzaSyD8TErGVlJFrn3Sldgr3junEvFufz_7wW0",
+  authDomain: "fir-rtc-de1f4.firebaseapp.com",
+  projectId: "fir-rtc-de1f4",
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+
+const $ = (id) => document.getElementById(id);
+const statusEl = $('status');
+const roomsTable = $('roomsTable');
+const roomsBody = $('roomsBody');
+const nextPageBtn = $('nextPageBtn');
+const detailEl = $('detail');
+
+let currentUser = null;
+let nextCursor = null;
+let cursorStack = [];
+
+function setStatus(text, isError = false) {
+  statusEl.textContent = text;
+  statusEl.className = isError ? 'error' : '';
+}
+
+function fmtTime(ms) {
+  return ms ? new Date(ms).toLocaleString() : '—';
+}
+
+async function authedFetch(path) {
+  if (!currentUser) throw new Error('サインインしていません');
+  const idToken = await currentUser.getIdToken();
+  const base = $('tokenServerUrl').value.trim().replace(/\/$/, '');
+  const res = await fetch(`${base}${path}`, {
+    headers: { Authorization: `Bearer ${idToken}` },
+  });
+  if (!res.ok) {
+    let err = {};
+    try { err = await res.json(); } catch (e) { /* ignore */ }
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+$('signInBtn').addEventListener('click', async () => {
+  try {
+    await signInWithPopup(auth, new GoogleAuthProvider());
+  } catch (e) {
+    setStatus(`サインインエラー: ${e.message}`, true);
+  }
+});
+
+$('refreshBtn').addEventListener('click', () => loadRooms(null));
+nextPageBtn.addEventListener('click', () => {
+  if (nextCursor) {
+    cursorStack.push(nextCursor);
+    loadRooms(nextCursor);
+  }
+});
+
+onAuthStateChanged(auth, (user) => {
+  currentUser = user;
+  if (user) {
+    setStatus(`サインイン中: ${user.displayName || user.email || user.uid}`);
+    cursorStack = [];
+    loadRooms(null);
+  } else {
+    setStatus('未サインイン');
+    roomsTable.style.display = 'none';
+    nextPageBtn.style.display = 'none';
+    detailEl.innerHTML = '';
+  }
+});
+
+async function loadRooms(cursor) {
+  try {
+    setStatus('ルーム一覧を取得中...');
+    const qs = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
+    const data = await authedFetch(`/admin/rooms${qs}`);
+    renderRooms(data.rooms);
+    nextCursor = data.nextCursor;
+    nextPageBtn.style.display = nextCursor ? 'inline-block' : 'none';
+    setStatus(`${data.rooms.length}件のルームを表示中`);
+  } catch (e) {
+    setStatus(`ルーム一覧の取得に失敗しました: ${e.message}`, true);
+  }
+}
+
+function renderRooms(rooms) {
+  roomsTable.style.display = rooms.length ? 'table' : 'none';
+  roomsBody.innerHTML = '';
+  for (const r of rooms) {
+    const tr = document.createElement('tr');
+    tr.className = 'clickable';
+    tr.addEventListener('click', () => loadDetail(r.roomId));
+
+    const badges = [];
+    if (r.recording?.active) badges.push('<span class="badge rec">録音中</span>');
+    if (r.talkLock) badges.push(`<span class="badge lock">発話中: ${r.talkLock.uid}</span>`);
+
+    tr.innerHTML = `
+      <td><span class="dot ${r.live.isLive ? 'live' : ''}"></span></td>
+      <td>${r.roomId}</td>
+      <td>${r.ownerUid}</td>
+      <td>${fmtTime(r.createdAt)}</td>
+      <td>${r.live.numParticipants}</td>
+      <td>${r.activeMemberCount ?? '—'}</td>
+      <td>${badges.join(' ') || '—'}</td>
+    `;
+    roomsBody.appendChild(tr);
+  }
+}
+
+async function loadDetail(roomId) {
+  detailEl.innerHTML = `<h2>room: ${roomId}</h2><div>読み込み中...</div>`;
+  try {
+    const d = await authedFetch(`/admin/rooms/${encodeURIComponent(roomId)}`);
+    const memberRows = d.members.map((m) => `
+      <tr>
+        <td>${m.uid}</td>
+        <td>${m.displayName}</td>
+        <td>${m.role}</td>
+        <td>${m.status}</td>
+        <td>${fmtTime(m.joinedAt)}</td>
+      </tr>
+    `).join('');
+
+    const liveRows = d.liveParticipants.map((p) => `
+      <tr><td>${p.identity}</td><td>${fmtTime(p.joinedAt)}</td><td>${p.isPublishingAudio ? '送話中' : '—'}</td></tr>
+    `).join('') || '<tr><td colspan="3">— 現在接続なし —</td></tr>';
+
+    detailEl.innerHTML = `
+      <h2>room: ${d.roomId}</h2>
+      <div style="font-size:12px; color:var(--muted); margin-bottom:10px;">
+        owner=${d.ownerUid} / 作成=${fmtTime(d.createdAt)} / 定員=${d.maxMembers}
+        ${d.recording.active ? ' / <span class="badge rec">録音中</span>' : ''}
+        ${d.talkLock ? ` / <span class="badge lock">発話中: ${d.talkLock.uid}</span>` : ''}
+      </div>
+      <h3 style="font-size:12px;">メンバー台帳(Firestore)</h3>
+      <table><thead><tr><th>UID</th><th>表示名</th><th>role</th><th>status</th><th>参加日時</th></tr></thead>
+      <tbody>${memberRows}</tbody></table>
+      <h3 style="font-size:12px; margin-top:16px;">現在の接続(LiveKit)</h3>
+      <table><thead><tr><th>identity</th><th>接続日時</th><th>状態</th></tr></thead>
+      <tbody>${liveRows}</tbody></table>
+    `;
+  } catch (e) {
+    detailEl.innerHTML = `<div style="color:var(--danger)">詳細の取得に失敗しました: ${e.message}</div>`;
+  }
+}
+</script>
+
+</body>
+</html>

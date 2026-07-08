@@ -8,6 +8,7 @@
  *   4. 送話ロック(排他制御)を管理する (routes/talk.js) [Phase 2で追加]
  *   5. LiveKitのWebhookを受信し、利用状況をログ/Firestoreに記録する (routes/webhooks.js) [Phase 4で追加]
  *   6. テキストチャット(履歴付き)を管理する (routes/messages.js) [Phase 5で追加]
+ *   7. 管理者向けの複数ルーム横断監視API (routes/admin.js) [Phase 5で追加]
  *
  * [経緯]
  * 旧 ptt-server/server.js (WS制御 + Opusミキシング) はLiveKitサーバー本体に
@@ -16,7 +17,7 @@
  *   フェーズ1: Firebase Authによるなりすまし防止
  *   フェーズ2: 招待制ルーム管理・BAN・通報機能・送話ロック
  *   フェーズ4: LiveKit Webhook受信による可観測性・運用
- *   フェーズ5: テキストチャット等の付加機能
+ *   フェーズ5: テキストチャット・複数ルーム横断監視ダッシュボード等の付加機能
  * を経て、実質的に「ルーム管理を持つ小さなバックエンド」に拡張されている。
  */
 
@@ -30,6 +31,7 @@ const tokenRouter = require('./routes/token');
 const reportsRouter = require('./routes/reports');
 const webhooksRouter = require('./routes/webhooks');
 const messagesRouter = require('./routes/messages');
+const adminRouter = require('./routes/admin');
 
 const PORT = process.env.PORT || 8080;
 
@@ -46,7 +48,7 @@ if (!process.env.LIVEKIT_API_KEY || !process.env.LIVEKIT_API_SECRET) {
   process.exit(1);
 }
 if (!process.env.LIVEKIT_HOST) {
-  console.error('[起動エラー] LIVEKIT_HOST が未設定です (BAN時の即時キック・送話ロックのメタデータ更新に使用するLiveKit管理APIのhttps URL)');
+  console.error('[起動エラー] LIVEKIT_HOST が未設定です (BAN時の即時キック・送話ロックのメタデータ更新・管理者ダッシュボードのライブ状態取得に使用するLiveKit管理APIのhttps URL)');
   process.exit(1);
 }
 if (ALLOWED_ORIGINS.length === 0) {
@@ -89,6 +91,7 @@ app.use('/rooms', talkRouter); // POST /rooms/:roomId/talk/{start,heartbeat,stop
 app.use('/rooms', messagesRouter); // POST /rooms/:roomId/messages
 app.use('/token', tokenRouter);
 app.use('/reports', reportsRouter);
+app.use('/admin', adminRouter); // GET /admin/rooms, GET /admin/rooms/:roomId [Phase 5]
 
 app.listen(PORT, () => {
   console.log(`ptt-token-server listening on :${PORT}`);

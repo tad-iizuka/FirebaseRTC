@@ -12,6 +12,10 @@ rules_version = '2';
 //     読み取り可能とする。BANされてstatusが'banned'に変わった瞬間、この条件を
 //     満たさなくなり読み取り権限も自動的に失う(ボイスのBAN即時キックと同じ
 //     二重の強制力を持たせる設計)。書き込みは引き続きAdmin SDK経由のみ。
+//   - [Phase5] adminUsers(管理者権限の台帳)はクライアントに一切公開しない。
+//     自分が管理者かどうかもクライアント側には開示せず、token-server側の
+//     ミドルウェア(middleware/requireAdmin.js)だけが参照する。付与/剥奪は
+//     dev-tools/grant-admin-permission.js でAdmin SDK経由・手動運用する。
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -43,6 +47,13 @@ service cloud.firestore {
 
     match /reports/{reportId} {
       // 通報の受付・閲覧はサーバー(モデレーター運用)のみ。
+      allow read, write: if false;
+    }
+
+    match /adminUsers/{uid} {
+      // 管理者権限台帳。誰が管理者か、どの権限を持つかはクライアントに一切
+      // 開示しない(自分自身のドキュメントであっても読み取り不可。
+      // rooms/members とは異なり「即時UI反映」のニーズが無いための判断)。
       allow read, write: if false;
     }
 

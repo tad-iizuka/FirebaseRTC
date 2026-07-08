@@ -1,0 +1,9 @@
+{
+  "name": "ptt-dev-tools",
+  "version": "1.0.0",
+  "description": "ローカル専用の開発・運用スクリプト置き場 (本番デプロイ対象外)",
+  "private": true,
+  "dependencies": {
+    "firebase-admin": "^12.7.0"
+  }
+}
