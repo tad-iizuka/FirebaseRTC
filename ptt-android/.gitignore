@@ -1,0 +1,13 @@
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+app/build/
+
+# iOS版と同様、Firebase設定ファイルはリポジトリに含めない
+app/google-services.json

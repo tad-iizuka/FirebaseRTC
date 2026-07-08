@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">PTT Client</string>
+    <!--
+      Google Sign-In用のWebクライアントID。
+      Firebase Console > Authentication > Sign-in method > Google > ウェブSDK構成 から取得できる
+      (dev-tools/get-firebase-token.html や ptt-ios の GIDClientID と同じFirebaseプロジェクトの値)。
+      ここに直接書かず、実際にはlocal.propertiesかSecrets Gradle Pluginなどで
+      リポジトリに含めない値として管理することを推奨する。
+    -->
+    <string name="default_web_client_id" translatable="false">REPLACE_WITH_YOUR_WEB_CLIENT_ID.apps.googleusercontent.com</string>
+</resources>

@@ -1,0 +1,4 @@
+<resources>
+    <!-- Composeで全画面描画するため、xml側は起動時のスプラッシュ的な最低限のテーマのみ -->
+    <style name="Theme.PTTAndroid" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>
