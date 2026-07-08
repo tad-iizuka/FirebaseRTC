@@ -8,6 +8,10 @@ rules_version = '2';
 //   - 例外として、自分自身の members/{uid} ドキュメントの読み取りだけは許可する。
 //     これはリアルタイムリスナーで「自分がBANされたこと」を即座にUIへ
 //     反映するための補助であり、BAN自体の強制力はLiveKit側の即時キックが担う。
+//   - [Phase5] チャットメッセージ(messages)は、ルームの「アクティブな」メンバーのみ
+//     読み取り可能とする。BANされてstatusが'banned'に変わった瞬間、この条件を
+//     満たさなくなり読み取り権限も自動的に失う(ボイスのBAN即時キックと同じ
+//     二重の強制力を持たせる設計)。書き込みは引き続きAdmin SDK経由のみ。
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -20,6 +24,19 @@ service cloud.firestore {
         // 自分自身のメンバードキュメントのみ読み取り可(BAN即時反映のUI用)。
         allow read: if request.auth != null && request.auth.uid == uid;
         // role/status の変更(参加・BAN・BAN解除等)はすべてサーバーAPI経由に限定。
+        allow write: if false;
+      }
+
+      match /messages/{messageId} {
+        // [Phase5: テキストチャット]
+        // 自分がこのルームの「アクティブな」メンバーである場合のみ履歴を読める。
+        // BANされてstatusが'banned'に変わった瞬間、この条件が false になり
+        // 読み取り権限も自動的に失う(LiveKit即時キックと同様、二重の強制力を持たせる設計)。
+        allow read: if request.auth != null &&
+          exists(/databases/$(database)/documents/rooms/$(roomId)/members/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/rooms/$(roomId)/members/$(request.auth.uid)).data.status == 'active';
+        // 書き込みはtoken-server(Admin SDK経由)のみ。クライアントからの直接書き込みは禁止
+        // (本文の長さチェック・レート制限をサーバー側で強制するため)。
         allow write: if false;
       }
     }

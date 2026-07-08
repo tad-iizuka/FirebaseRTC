@@ -1,10 +1,10 @@
 //
 //  ContentView.swift
-//  PTTClient
+//  ptt-ios
 //
-//  [LiveKit移行 + Firebase Auth対応 + 招待制ルーム対応]
+//  [LiveKit移行 + Firebase Auth対応 + 招待制ルーム対応 + Phase5テキストチャット]
 //  Web版(ptt-client/public/index.html)と同等のUI:
-//  Googleサインイン → ルーム作成/招待コード参加 → PTTボタン → 送話中リスト → ログ
+//  Googleサインイン → ルーム作成/招待コード参加 → PTTボタン → 送話中リスト → チャット → ログ
 //  クライアントIDの手入力は廃止(token-serverは常にFirebase ID Token由来のuidを
 //  identityとして使うため、クライアントが自己申告する値は元々使われていなかった)。
 //  ルームIDの直接入力による接続も廃止し、token-serverのinvite_only設計
@@ -20,11 +20,13 @@ struct ContentView: View {
     @StateObject private var roomManager = PTTRoomManager()
     @StateObject private var savedRooms = PTTSavedRoomsStore()
     @StateObject private var connection = PTTConnectionManager()
+    @StateObject private var chat = PTTChatStore()
 
     @State private var tokenServerURL: String = "https://ptt-token-server-rnn4fqay3a-an.a.run.app"
     @State private var livekitURL: String = "wss://ubunifu-talk-wy19xst3.livekit.cloud"
     @State private var joinRoomId: String = ""
     @State private var joinInviteCode: String = ""
+    @State private var chatInputText: String = ""
 
     /// 実際に作成/参加してLiveKit接続に進んだルームID。nilの間はルーム選択画面を表示する。
     @State private var activeRoomId: String?
@@ -43,6 +45,7 @@ struct ContentView: View {
                     voiceSection
                     talkArea
                     talkerSection
+                    chatSection
                     logSection
                 } else {
                     roomSelectionSection
@@ -341,6 +344,7 @@ struct ContentView: View {
 
     private func enterRoom(_ roomId: String) {
         activeRoomId = roomId
+        chat.start(roomId: roomId)
         connection.connect(
             tokenServerURL: tokenServerURL,
             livekitURL: livekitURL,
@@ -351,10 +355,12 @@ struct ContentView: View {
 
     private func leaveRoom() {
         if connection.status != .disconnected { connection.disconnect() }
+        chat.stop()
         activeRoomId = nil
         currentInviteCode = nil
         joinRoomId = ""
         joinInviteCode = ""
+        chatInputText = ""
     }
 
     // MARK: - Talk area (PTT button)
@@ -412,6 +418,73 @@ struct ContentView: View {
                 Capsule().stroke(live ? Color(red: 0.24, green: 0.86, blue: 0.52) : Color.gray.opacity(0.4))
             )
             .foregroundColor(live ? Color(red: 0.24, green: 0.86, blue: 0.52) : .gray)
+    }
+
+    // MARK: - Chat (Phase5)
+
+    /// テキストチャット。書き込みはtoken-server経由、配信・履歴はFirestoreの
+    /// リアルタイムリスナー(PTTChatStore)に任せる。BANされた瞬間、
+    /// firestore.rules側で読み取り自体もできなくなる。
+    private var chatSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("チャット")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(.gray)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(chat.messages) { message in
+                        Text("\(message.displayName): \(message.text)")
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundColor(
+                                message.uid == auth.currentUser?.uid
+                                    ? Color(red: 0.24, green: 0.86, blue: 0.52)
+                                    : Color(red: 0.85, green: 0.89, blue: 0.86)
+                            )
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+            .frame(maxHeight: 180)
+            .background(Color.black.opacity(0.15))
+
+            if let errorMessage = chat.errorMessage {
+                Text(errorMessage)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(Color(red: 1.0, green: 0.36, blue: 0.36))
+            }
+
+            HStack(spacing: 8) {
+                TextField("メッセージを入力", text: $chatInputText)
+                    .font(.system(size: 14, design: .monospaced))
+                    .padding(8)
+                    .background(Color.black.opacity(0.3))
+                    .onSubmit { sendChatMessage() }
+
+                Button("送信") { sendChatMessage() }
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundColor(.orange)
+                    .disabled(chatInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(14)
+    }
+
+    private func sendChatMessage() {
+        let text = chatInputText
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let roomId = activeRoomId else { return }
+        chatInputText = ""
+        Task {
+            do {
+                let idToken = try await auth.fetchIDToken()
+                try await chat.sendMessage(tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId, text: text)
+            } catch {
+                // chat.errorMessage に理由がセットされているのでUIには既に反映済み。
+                // 失敗時は入力内容を戻し、打ち直させずに再送しやすくする。
+                chatInputText = text
+            }
+        }
     }
 
     // MARK: - Log
