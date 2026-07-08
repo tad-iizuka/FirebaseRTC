@@ -13,6 +13,13 @@
  * 接続中の全クライアントに RoomMetadataChanged イベントとしてリアルタイムに
  * 伝播させる(クライアント側に別途Firestoreリスナーを組み込む必要をなくすため)。
  *
+ * [Phase5での変更]
+ * recording.js(録音状態)も同じRoom Metadataに自分の状態を書き込む必要が
+ * 出てきたため、「自分のフィールドだけ書く」と互いを消し合うレースを避けるべく、
+ * Metadataへの書き込みは lib/roomMetadata.js の syncRoomMetadata() に一本化した。
+ * このファイルではRoomServiceClientを直接持たず、Firestoreの talkLock を
+ * 更新した後、syncRoomMetadata(roomId) を呼ぶだけにする。
+ *
  * [将来のSTT連携を見据えて]
  * currentTalker (uid) を単一の値としてサーバーが常に把握できる状態にしておくことで、
  * 将来LiveKit EgressやサーバーサイドでのTrack購読から音声を拾ってSTTにかける際、
@@ -20,17 +27,11 @@
  */
 
 const express = require('express');
-const { RoomServiceClient } = require('livekit-server-sdk');
 const { db } = require('../lib/firebaseAdmin');
+const { syncRoomMetadata } = require('../lib/roomMetadata');
 const { requireFirebaseAuth, requireRoomMembership } = require('../middleware/requireAuth');
 
 const router = express.Router();
-
-const roomService = new RoomServiceClient(
-  process.env.LIVEKIT_HOST,
-  process.env.LIVEKIT_API_KEY,
-  process.env.LIVEKIT_API_SECRET
-);
 
 // ロックのTTL。heartbeatで延長されない限りこの秒数で自動失効する
 // (アプリkill・ネットワーク切断等でstopが呼ばれなかった場合の安全弁)。
@@ -49,22 +50,6 @@ function isStale(talkLock, at) {
   if (talkLock.expiresAt.toMillis() <= at) return true;
   if (at - talkLock.acquiredAt.toMillis() > MAX_HOLD_MS) return true;
   return false;
-}
-
-/**
- * LiveKitのRoom Metadataへ現在の話者情報を書き込む。
- * ルームがまだLiveKit側に存在しない(誰も接続していない)場合は
- * エラーになりうるが、その場合は「competeする相手がいない」ので無視してよい。
- */
-async function broadcastCurrentTalker(roomId, uid) {
-  try {
-    await roomService.updateRoomMetadata(
-      roomId,
-      JSON.stringify({ currentTalker: uid, updatedAt: nowMs() })
-    );
-  } catch (e) {
-    console.warn(`[talk] メタデータ更新スキップ room=${roomId}: ${e.message}`);
-  }
 }
 
 /**
@@ -104,11 +89,11 @@ router.post('/:roomId/talk/start', requireFirebaseAuth, requireRoomMembership, a
       return talkLock;
     });
 
-    // LiveKit管理APIへのメタデータ更新(broadcastCurrentTalker)は、他クライアントへの
+    // LiveKit管理APIへのメタデータ更新(syncRoomMetadata)は、他クライアントへの
     // 周知が目的の副作用にすぎず、ロックの成否(=Firestoreトランザクションの結果)には
     // 影響しない。実測でこの呼び出しに1〜2秒かかることが分かったため、
     // クライアントへのレスポンスをブロックしないよう意図的にawaitしない。
-    broadcastCurrentTalker(roomId, uid);
+    syncRoomMetadata(roomId);
     console.log(`[talk/start] room=${roomId} uid=${uid}`);
     res.json({ acquired: true, expiresInMs: LOCK_TTL_MS });
   } catch (e) {
@@ -152,7 +137,7 @@ router.post('/:roomId/talk/heartbeat', requireFirebaseAuth, requireRoomMembershi
   } catch (e) {
     if (e && e.httpStatus) {
       if (e.code === 'talk_max_hold_exceeded') {
-        broadcastCurrentTalker(roomId, null);
+        syncRoomMetadata(roomId);
       }
       return res.status(e.httpStatus).json({ error: e.message, code: e.code });
     }
@@ -182,7 +167,7 @@ router.post('/:roomId/talk/stop', requireFirebaseAuth, requireRoomMembership, as
       // 自分のロックでなければ何もしない(既に他人が取得済み or 元々空)
     });
     // start と同様、レスポンスをブロックしないよう意図的にawaitしない。
-    broadcastCurrentTalker(roomId, null);
+    syncRoomMetadata(roomId);
     console.log(`[talk/stop] room=${roomId} uid=${uid}`);
     res.json({ released: true });
   } catch (e) {

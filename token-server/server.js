@@ -6,7 +6,8 @@
  *   2. ルームの作成・招待コードによる参加・BAN・通報受付を管理する (routes/rooms.js, routes/reports.js)
  *   3. ルームのメンバーであることを確認した上でLiveKit接続用JWTを発行する (routes/token.js)
  *   4. 送話ロック(排他制御)を管理する (routes/talk.js) [Phase 2で追加]
- *   5. LiveKitのWebhookを受信し、利用状況をログ/Firestoreに記録する (routes/webhooks.js) [Phase 4で追加]
+ *   5. 録音(Egress)の開始/停止・LiveKit Webhook受信を管理する
+ *      (routes/recording.js, routes/webhooks.js) [Phase 5で追加]
  *
  * [経緯]
  * 旧 ptt-server/server.js (WS制御 + Opusミキシング) はLiveKitサーバー本体に
@@ -14,7 +15,7 @@
  * 「認証なしでトークンだけ発行する」役割だったが、
  *   フェーズ1: Firebase Authによるなりすまし防止
  *   フェーズ2: 招待制ルーム管理・BAN・通報機能・送話ロック
- *   フェーズ4: LiveKit Webhook受信による可観測性・運用
+ *   フェーズ5: 録音(Egress)機能
  * を経て、実質的に「ルーム管理を持つ小さなバックエンド」に拡張されている。
  */
 
@@ -26,6 +27,7 @@ const roomsRouter = require('./routes/rooms');
 const talkRouter = require('./routes/talk');
 const tokenRouter = require('./routes/token');
 const reportsRouter = require('./routes/reports');
+const recordingRouter = require('./routes/recording');
 const webhooksRouter = require('./routes/webhooks');
 
 const PORT = process.env.PORT || 8080;
@@ -43,7 +45,7 @@ if (!process.env.LIVEKIT_API_KEY || !process.env.LIVEKIT_API_SECRET) {
   process.exit(1);
 }
 if (!process.env.LIVEKIT_HOST) {
-  console.error('[起動エラー] LIVEKIT_HOST が未設定です (BAN時の即時キック・送話ロックのメタデータ更新に使用するLiveKit管理APIのhttps URL)');
+  console.error('[起動エラー] LIVEKIT_HOST が未設定です (BAN時の即時キック・送話ロック/録音状態のメタデータ更新・Egress起動に使用するLiveKit管理APIのhttps URL)');
   process.exit(1);
 }
 if (ALLOWED_ORIGINS.length === 0) {
@@ -57,11 +59,16 @@ const app = express();
 // IPベースのレート制限が機能しない。
 app.set('trust proxy', 1);
 
-// [Phase 4] LiveKit Webhookの署名検証(routes/webhooks.js)には生のリクエストボディが
-// 必要なため、このパスだけはグローバルな express.json() より前に、
-// express.raw() で生ボディのまま渡す。LiveKitはOriginヘッダーを送らないサーバー間通信
-// なので、以降のCORSミドルウェアの影響も受けない。
-app.use('/webhooks', express.raw({ type: '*/*' }), webhooksRouter);
+// [Phase5] LiveKit Webhookは署名検証(WebhookReceiver.receive)のため
+// 生のリクエストボディ文字列を必要とする。express.json()でパースされた後の
+// オブジェクトからは元のバイト列を復元できないため、このパスにだけ
+// express.json()より前に express.raw() を適用する。
+// LiveKitはWebhookをContent-Type: application/webhook+json で送信する。
+app.use(
+  '/webhooks',
+  express.raw({ type: 'application/webhook+json' }),
+  webhooksRouter
+);
 
 app.use(express.json());
 
@@ -83,6 +90,7 @@ app.get('/', (req, res) => res.send('ptt-token-server OK'));
 
 app.use('/rooms', roomsRouter);
 app.use('/rooms', talkRouter); // POST /rooms/:roomId/talk/{start,heartbeat,stop}
+app.use('/rooms', recordingRouter); // POST /rooms/:roomId/recording/{start,stop}, GET .../status
 app.use('/token', tokenRouter);
 app.use('/reports', reportsRouter);
 

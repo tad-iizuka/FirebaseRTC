@@ -1,29 +1,29 @@
 /**
- * LiveKit Webhook受信API (Phase 4: 可観測性・運用)
+ * LiveKit Webhook受信
  *
- * LiveKit CloudからPOSTされる room_started / room_finished / participant_joined /
- * participant_left / track_published / track_unpublished 等のイベントを受信し、
- *   1) Cloud Runの標準出力へ構造化ログ(JSON)として出す
- *      → Cloud Loggingでの検索や、ログベースの指標(急増検知アラート)の起点にする
- *   2) Firestoreの `events` コレクションに永続化する
- *      → 後からの利用状況の集計・調査用の生データとして残す
- * の二本立てで記録する。
+ * [設計方針]
+ * routes/recording.js の /stop は「停止を依頼する」だけであり、実際に
+ * Egressが終了した(成功/失敗いずれも含む)ことはLiveKitからの非同期
+ * Webhookでしか確実に検知できない。そのため、Firestore上の
+ * recording.active を false に確定させる処理はこのファイルに一本化する。
  *
- * [重要] LiveKitのWebhookは、ペイロードをLIVEKIT_API_SECRETで署名したJWTを
- * Authorizationヘッダーに載せてくる。この署名検証(WebhookReceiver.receive)には
- * 「express.json()でパース済みのオブジェクト」ではなく「受信した生のリクエストボディ」が
- * 必要なため、このルートだけは server.js 側で express.raw() を使って生ボディのまま
- * 渡している(グローバルな express.json() より前にマウントする必要がある)。
+ * 現状は egress_ended イベントのみ処理する。将来的に room_started /
+ * room_finished 等の他イベントを扱う場合もこのファイルに追加していく想定。
  *
- * [セットアップ]
- * LiveKit Cloud > Project Settings > Webhooks で、このエンドポイントの絶対URLを
- * 登録する (例: https://ptt-token-server-xxxx.run.app/webhooks/livekit)。
- * 追加のAPIキー等は不要(既存の LIVEKIT_API_KEY / LIVEKIT_API_SECRET を流用する)。
+ * [重要] WebhookReceiver.receive() は署名検証のため「生のリクエストボディ
+ * 文字列」を必要とする。server.js側でこのルートにだけ express.json() より
+ * 前に express.raw() を適用しておくこと(このファイル単体では効かない)。
+ *
+ * [設定] LiveKit Cloud (または自前ホストLiveKit) の Webhook設定で、
+ * このエンドポイント (https://<このサーバー>/webhooks/livekit) を
+ * 登録しておく必要がある。署名検証にはLIVEKIT_API_KEY/LIVEKIT_API_SECRETを
+ * そのまま流用するため、追加の秘密情報は不要。
  */
 
 const express = require('express');
 const { WebhookReceiver } = require('livekit-server-sdk');
 const { db } = require('../lib/firebaseAdmin');
+const { syncRoomMetadata } = require('../lib/roomMetadata');
 
 const router = express.Router();
 
@@ -38,45 +38,83 @@ const receiver = new WebhookReceiver(
 router.post('/livekit', async (req, res) => {
   let event;
   try {
-    // server.js側で express.raw() を通しているため req.body は Buffer/string のはず。
-    // 万一 express.json() 等を経由してオブジェクト化されてしまっていた場合、署名検証は
-    // 必ず失敗する(=設定ミスに早期に気付けるようにあえてフォールバックしない)。
-    const rawBody = Buffer.isBuffer(req.body) ? req.body.toString('utf8') : req.body;
-    event = await receiver.receive(rawBody, req.get('Authorization'));
+    // server.jsでexpress.raw()を適用しているため、req.bodyはBufferで届く
+    event = await receiver.receive(req.body.toString('utf8'), req.get('Authorization'));
   } catch (e) {
     console.warn('[Webhook検証エラー]', e.message);
-    return res.status(401).json({ error: 'Webhook署名の検証に失敗しました' });
+    return res.status(401).send('invalid signature');
   }
 
-  // Cloud Loggingでの検索・ログベース指標(異常な急増検知等)を想定した構造化ログ。
-  // textPayload/jsonPayloadどちらでも検索できるよう、まず1行のJSONとして出しておく。
-  console.log(JSON.stringify({
-    tag: 'livekit_webhook',
-    event: event.event,
-    room: event.room?.name ?? null,
-    roomSid: event.room?.sid ?? null,
-    participant: event.participant?.identity ?? null,
-    track: event.track?.sid ?? null,
-    createdAt: new Date().toISOString(),
-  }));
-
-  // Firestoreへの永続化はベストエフォート。
-  // LiveKit側は2xx以外の応答をリトライしてくる仕様のため、集計用DBへの書き込みが
-  // 一時的に失敗しても、Webhook自体の受信(=200応答)は妨げないようにする。
   try {
-    await db.collection('events').add({
-      type: event.event,
-      roomName: event.room?.name ?? null,
-      roomSid: event.room?.sid ?? null,
-      participantIdentity: event.participant?.identity ?? null,
-      trackSid: event.track?.sid ?? null,
-      createdAt: new Date(),
-    });
+    if (event.event === 'egress_ended') {
+      await handleEgressEnded(event.egressInfo);
+    }
+    // 他のイベント種別(room_started等)は現状無視する。
   } catch (e) {
-    console.error('[Webhookイベント保存エラー]', e.message);
+    console.error('[Webhook処理エラー]', e.message);
+    // LiveKit側の再送を招かないよう、処理側のエラーでも200を返す
+    // (再送されても egressId 不一致チェックで冪等に無視されるだけではあるが、
+    //  不要な再送ループを避けるため明示的に200で応答する)。
   }
-
   res.sendStatus(200);
 });
+
+/**
+ * LiveKitのEgressStatus(数値のenum)を人間が読める文字列に変換する。
+ * https://github.com/livekit/protocol/blob/main/protobufs/livekit_egress.proto
+ * を参照。SDKバージョンによっては`egressInfo.status`が既に文字列で
+ * 届く場合もあるため、その場合はそのまま返す。
+ */
+const EGRESS_STATUS_NAMES = [
+  'EGRESS_STARTING',
+  'EGRESS_ACTIVE',
+  'EGRESS_ENDING',
+  'EGRESS_COMPLETE',
+  'EGRESS_FAILED',
+  'EGRESS_ABORTED',
+  'EGRESS_LIMIT_REACHED',
+];
+
+function describeEgressStatus(status) {
+  if (typeof status === 'string') return status;
+  return EGRESS_STATUS_NAMES[status] ?? `UNKNOWN(${status})`;
+}
+
+/**
+ * egress_endedイベントの処理本体。
+ * Firestore上のrecording.egressIdと一致する場合のみ状態を確定させる。
+ * (古いegressの遅延イベントで、既に開始された新しい録音の状態を
+ *  誤って消してしまわないようにするためのガード)
+ */
+async function handleEgressEnded(egressInfo) {
+  const roomId = egressInfo?.roomName;
+  if (!roomId) return;
+
+  const roomRef = db.collection('rooms').doc(roomId);
+  const snap = await roomRef.get();
+  if (!snap.exists) return;
+
+  const room = snap.data();
+  if (!room.recording || room.recording.egressId !== egressInfo.egressId) {
+    // 既に別の録音が始まっている、またはFirestore側が先に別経路でクリアされている
+    return;
+  }
+
+  await roomRef.update({ recording: null });
+  await syncRoomMetadata(roomId);
+
+  const statusName = describeEgressStatus(egressInfo.status);
+  console.log(
+    `[録音終了] room=${roomId} egressId=${egressInfo.egressId} status=${statusName}`
+  );
+
+  // EGRESS_FAILED(4) の場合、egressInfo.errorに失敗理由の文字列が
+  // 入っていることが多い。原因調査のため必ずログへ出す。
+  if (statusName === 'EGRESS_FAILED' || statusName === 'EGRESS_ABORTED') {
+    console.error(
+      `[録音失敗詳細] room=${roomId} egressId=${egressInfo.egressId} error=${egressInfo.error || '(詳細情報なし)'}`
+    );
+  }
+}
 
 module.exports = router;
