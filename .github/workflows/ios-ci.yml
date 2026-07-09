@@ -51,6 +51,12 @@ jobs:
           # 'xx.x' の形で明示指定に変更すること。
           xcode-version: latest
 
+      - name: Restore GoogleService-Info.plist
+        env:
+          GOOGLE_SERVICE_INFO: ${{ secrets.IOS_GOOGLE_SERVICE_INFO_PLIST }}
+        run: |
+          echo "$GOOGLE_SERVICE_INFO" | base64 --decode > ptt-ios/ptt-ios/GoogleService-Info.plist
+
       - name: Show Xcode & SDK versions
         run: |
           xcodebuild -version
