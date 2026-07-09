@@ -1,0 +1,88 @@
+name: Android CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ptt-android/**"
+      - ".github/workflows/android-ci.yml"
+  pull_request:
+    paths:
+      - "ptt-android/**"
+      - ".github/workflows/android-ci.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: android-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: ptt-android
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-home-cache-cleanup: true
+
+      # google-services.jsonはFirebaseプロジェクトの識別情報を含むため
+      # リポジトリにはコミットせず(.gitignore済み)、Secretから復元してビルドする。
+      # 事前にGitHub Secretsに ANDROID_GOOGLE_SERVICES_JSON として
+      # `base64 -i app/google-services.json | pbcopy` の結果を登録しておくこと。
+      - name: Restore google-services.json from secret
+        run: |
+          if [ -z "${{ secrets.ANDROID_GOOGLE_SERVICES_JSON }}" ]; then
+            echo "::error::Secret ANDROID_GOOGLE_SERVICES_JSON が設定されていません。"
+            exit 1
+          fi
+          echo "${{ secrets.ANDROID_GOOGLE_SERVICES_JSON }}" | base64 --decode > app/google-services.json
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Lint
+        run: ./gradlew lintDebug --no-daemon
+
+      - name: Unit tests
+        run: ./gradlew testDebugUnitTest --no-daemon
+
+      - name: Assemble Debug APK
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Upload Debug APK
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: ptt-android/app/build/outputs/apk/debug/*.apk
+          retention-days: 14
+
+      - name: Upload lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-report
+          path: ptt-android/app/build/reports/lint-results-debug.html
+          retention-days: 14
+
+      - name: Upload unit test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-report
+          path: ptt-android/app/build/reports/tests/testDebugUnitTest
+          retention-days: 14
