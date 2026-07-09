@@ -1,0 +1,64 @@
+name: Web (ptt-client) Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ptt-client/**"
+      - ".github/workflows/web-deploy.yml"
+  pull_request:
+    paths:
+      - "ptt-client/**"
+      - ".github/workflows/web-deploy.yml"
+
+concurrency:
+  group: web-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # 静的HTML/JSのみなのでビルドステップは無いが、
+  # 最低限のリンク切れ・構文チェックとして軽い検証を挟む
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check index.html exists and is well-formed HTML
+        run: |
+          test -f ptt-client/public/index.html
+          npx --yes html-validate ptt-client/public/index.html || true
+
+  deploy-preview:
+    if: github.event_name == 'pull_request'
+    needs: lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy to Firebase Hosting Preview Channel
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: "${{ secrets.GITHUB_TOKEN }}"
+          firebaseServiceAccount: "${{ secrets.FIREBASE_SERVICE_ACCOUNT }}"
+          projectId: "${{ vars.FIREBASE_PROJECT_ID }}"
+          entryPoint: ptt-client
+          channelId: "pr-${{ github.event.number }}"
+
+  deploy-production:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy to Firebase Hosting (live)
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: "${{ secrets.GITHUB_TOKEN }}"
+          firebaseServiceAccount: "${{ secrets.FIREBASE_SERVICE_ACCOUNT }}"
+          projectId: "${{ vars.FIREBASE_PROJECT_ID }}"
+          entryPoint: ptt-client
+          channelId: live

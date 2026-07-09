@@ -1,0 +1,107 @@
+name: iOS CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ptt-ios/**"
+      - ".github/workflows/ios-ci.yml"
+  pull_request:
+    paths:
+      - "ptt-ios/**"
+      - ".github/workflows/ios-ci.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ios-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    env:
+      PROJECT: ptt-ios/ptt-ios.xcodeproj
+      SCHEME: ptt-ios
+      # PRやフォークからのビルドでも通るよう、CIでは署名を無効化する
+      # (シミュレータ向けビルド/テストなので署名は不要)
+      XCODE_FLAGS: >-
+        CODE_SIGNING_ALLOWED=NO
+        CODE_SIGNING_REQUIRED=NO
+        CODE_SIGN_IDENTITY=""
+        DEVELOPMENT_TEAM=""
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode version
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          # Info.plist / project.pbxproj が iOS 26.5 SDK を要求しているため、
+          # 対応する最新の安定版Xcodeを指定する。ランナーのプリインストール状況が
+          # 変わった場合はここを調整すること。
+          xcode-version: latest-stable
+
+      - name: Show Xcode & SDK versions
+        run: |
+          xcodebuild -version
+          xcodebuild -showsdks
+
+      - name: Install xcpretty
+        run: gem install xcpretty --no-document
+
+      - name: Resolve Swift Package dependencies
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project "$PROJECT" \
+            -scheme "$SCHEME"
+
+      - name: Pick available iOS Simulator
+        id: sim
+        run: |
+          # 環境によって手に入るランタイム/デバイス名が変わるため、
+          # 利用可能な最新のiPhoneシミュレータを動的に選択する
+          DEVICE=$(xcrun simctl list devices available | grep -E "iPhone" | tail -1 | sed -E 's/^[[:space:]]*([^(]+) \(.*/\1/' | sed -E 's/[[:space:]]+$//')
+          echo "device=$DEVICE" >> "$GITHUB_OUTPUT"
+          echo "Using simulator device: $DEVICE"
+
+      - name: Build (Debug, Simulator)
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.device }}" \
+            -configuration Debug \
+            $XCODE_FLAGS \
+            | xcpretty
+
+      - name: Unit & UI Tests
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.device }}" \
+            -configuration Debug \
+            -resultBundlePath TestResults.xcresult \
+            $XCODE_FLAGS \
+            | xcpretty --report junit --output build/reports/junit.xml
+
+      - name: Upload JUnit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-report
+          path: build/reports/junit.xml
+          retention-days: 14
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcresult
+          path: TestResults.xcresult
+          retention-days: 14
