@@ -50,6 +50,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -213,8 +214,8 @@ fun PTTApp(
                         try {
                             val idToken = authManager.fetchIdToken()
                             roomManager.joinRoom(tokenServerUrl, idToken, roomId, inviteCode)
-                            currentInviteCode = null
-                            savedRoomsStore.upsert(roomId, "招待コードで参加したルーム", null)
+                            currentInviteCode = inviteCode // 参加者自身が入力したコードをそのまま保持する(以前はnullで潰していたため招待コード欄が表示されなかった)
+                            savedRoomsStore.upsert(roomId, "招待コードで参加したルーム", inviteCode)
                             enterRoom(roomId)
                         } catch (e: Exception) {
                             // roomManager.lastErrorMessage に理由がセットされている
@@ -410,7 +411,14 @@ private fun SavedRoomRow(saved: SavedRoom, onOpen: (SavedRoom) -> Unit, onRemove
             onClick = { onOpen(saved) },
             modifier = Modifier.weight(1f),
         ) {
-            Text("${saved.label} (${saved.roomId})", fontFamily = Mono, fontSize = 12.sp, maxLines = 1)
+            Column(horizontalAlignment = Alignment.Start) {
+                Text(saved.label, fontFamily = Mono, fontSize = 12.sp, maxLines = 1)
+                Text(
+                    "(${saved.roomId})",
+                    fontFamily = Mono, fontSize = 11.sp, color = Muted,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
         Text(
             "削除",

@@ -226,11 +226,18 @@ struct ContentView: View {
             Button {
                 rejoinSavedRoom(saved)
             } label: {
-                Text("\(saved.label) (\(saved.roomId))")
-                    .font(.system(size: 12, design: .monospaced))
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(8)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(saved.label)
+                        .font(.system(size: 12, design: .monospaced))
+                        .lineLimit(1)
+                    Text("(\(saved.roomId))")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.gray)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(8)
             }
             .buttonStyle(.plain)
             .background(Color.black.opacity(0.3))
@@ -325,8 +332,8 @@ struct ContentView: View {
             do {
                 let idToken = try await auth.fetchIDToken()
                 try await roomManager.joinRoom(tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId, inviteCode: inviteCode)
-                currentInviteCode = nil
-                savedRooms.upsert(roomId: roomId, label: "招待コードで参加したルーム", inviteCode: nil)
+                currentInviteCode = inviteCode // 参加者自身が入力したコードをそのまま保持する(以前はnilで潰していたため招待コード欄が表示されなかった)
+                savedRooms.upsert(roomId: roomId, label: "招待コードで参加したルーム", inviteCode: inviteCode)
                 enterRoom(roomId)
             } catch {
                 // roomManager.lastErrorMessage に理由がセットされているのでUIには既に反映済み
