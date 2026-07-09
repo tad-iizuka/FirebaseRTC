@@ -27,7 +27,7 @@
   .dot.error { background: var(--danger); }
   .status-text { color: var(--muted); flex: 1; }
   .section { padding: 16px 18px; display: grid; gap: 10px; border-bottom: 1px solid var(--line); }
-  .section.hidden { display: none; }
+  .hidden { display: none !important; }
   .field { display: grid; gap: 4px; }
   .field label { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
   .field input { background: var(--bg); border: 1px solid var(--line); color: var(--text); font-family: var(--mono); font-size: 16px; padding: 8px 10px; border-radius: 2px; outline: none; width: 100%; min-width: 0; }
@@ -412,6 +412,7 @@ function renderSavedRooms() {
 /// (メンバーでなくなっていた場合 = BAN等 は /token が403を返すのでenterRoom側で弾かれる)
 async function rejoinSavedRoom(saved) {
   currentInviteCode = saved.inviteCode || null;
+  currentRoomId = saved.roomId; // renderInviteBox()がcurrentRoomIdも見るため、enterRoom前にセットしておく
   renderInviteBox();
   await enterRoom(saved.roomId);
 }
@@ -514,9 +515,10 @@ $('joinRoomBtn').addEventListener('click', async () => {
       body: JSON.stringify({ inviteCode }),
     });
     log('ルーム参加成功');
-    currentInviteCode = null;
+    currentInviteCode = inviteCode; // 参加者自身が入力した招待コードをそのまま保持し、以後も表示できるようにする
+    currentRoomId = roomId;
     renderInviteBox();
-    upsertSavedRoom(roomId, '招待コードで参加したルーム', null);
+    upsertSavedRoom(roomId, '招待コードで参加したルーム', inviteCode);
     await enterRoom(roomId);
   } catch (e) {
     log(`ルーム参加エラー: ${e.message}`);
@@ -534,6 +536,7 @@ $('leaveRoomBtn').addEventListener('click', () => {
 async function enterRoom(roomId) {
   currentRoomId = roomId;
   manuallyDisconnected = false;
+  renderInviteBox(); // currentRoomId確定直後に再描画しておく(呼び出し順序ミスへの保険)
   showVoiceScreen();
   channelLabel.textContent = `room: ${roomId}`;
   setStatus(null, 'トークン取得中...');
@@ -799,6 +802,8 @@ async function disconnectVoice() {
   roomConnected = false;
   currentTalkerUid = null;
   currentRoomId = null;
+  currentInviteCode = null;
+  renderInviteBox(); // 退出後は招待コード欄を消す(呼ばないと直前の表示が残り続ける)
   myRole = null;
   showRoomSelectionScreen();
 }
