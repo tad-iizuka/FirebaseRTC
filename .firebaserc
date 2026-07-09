@@ -2,6 +2,17 @@
   "projects": {
     "dev": "fir-rtc-de1f4"
   },
-  "targets": {},
+  "targets": {
+    "fir-rtc-de1f4": {
+      "hosting": {
+        "client": [
+          "fir-rtc-de1f4"
+        ],
+        "admin": [
+          "fir-rtc-de1f4-admin"
+        ]
+      }
+    }
+  },
   "etags": {}
 }

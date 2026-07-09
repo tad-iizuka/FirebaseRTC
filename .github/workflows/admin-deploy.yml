@@ -1,35 +1,38 @@
-name: Web (ptt-client) Deploy
+name: Admin Dashboard Deploy
 
+# admin-dashboard配下(またはhosting設定自体)の変更があった場合のみ動く。
+# ptt-client用のweb-deploy.ymlと同じ考え方: モノレポなので他ディレクトリの
+# 変更で無駄にデプロイが走らないようpathsで絞る。
 on:
   push:
     branches: [main]
     paths:
-      - "ptt-client/**"
+      - "admin-dashboard/**"
       - "firebase.json"
       - ".firebaserc"
-      - ".github/workflows/web-deploy.yml"
+      - ".github/workflows/admin-deploy.yml"
   pull_request:
     paths:
-      - "ptt-client/**"
+      - "admin-dashboard/**"
       - "firebase.json"
       - ".firebaserc"
-      - ".github/workflows/web-deploy.yml"
+      - ".github/workflows/admin-deploy.yml"
 
 concurrency:
-  group: web-deploy-${{ github.ref }}
+  group: admin-deploy-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   # 静的HTML/JSのみなのでビルドステップは無いが、
-  # 最低限のリンク切れ・構文チェックとして軽い検証を挟む
+  # 最低限のリンク切れ・構文チェックとして軽い検証を挟む(web-deploy.ymlと同じ)
   lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Check index.html exists and is well-formed HTML
         run: |
-          test -f ptt-client/public/index.html
-          npx --yes html-validate ptt-client/public/index.html || true
+          test -f admin-dashboard/public/index.html
+          npx --yes html-validate admin-dashboard/public/index.html || true
 
   deploy-preview:
     if: github.event_name == 'pull_request'
@@ -41,13 +44,13 @@ jobs:
       checks: write
     steps:
       - uses: actions/checkout@v4
-      - name: Deploy to Firebase Hosting Preview Channel (client target)
+      - name: Deploy to Firebase Hosting Preview Channel (admin target)
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: "${{ secrets.GITHUB_TOKEN }}"
           firebaseServiceAccount: "${{ secrets.FIREBASE_SERVICE_ACCOUNT }}"
           projectId: "${{ vars.FIREBASE_PROJECT_ID }}"
-          target: client
+          target: admin
           entryPoint: .
           channelId: "pr-${{ github.event.number }}"
 
@@ -59,12 +62,12 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - name: Deploy to Firebase Hosting (client target, live)
+      - name: Deploy to Firebase Hosting (admin target, live)
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: "${{ secrets.GITHUB_TOKEN }}"
           firebaseServiceAccount: "${{ secrets.FIREBASE_SERVICE_ACCOUNT }}"
           projectId: "${{ vars.FIREBASE_PROJECT_ID }}"
-          target: client
+          target: admin
           entryPoint: .
           channelId: live
