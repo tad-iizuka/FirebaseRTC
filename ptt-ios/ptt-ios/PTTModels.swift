@@ -21,3 +21,13 @@ enum ConnectionStatus: Equatable {
     case reconnecting(room: String)
     case error(String)
 }
+
+/// [BAN対応] 参加者1人分のUI表示用状態（名前・マイクmute状態）。
+/// Web版の `participants` Map（uid -> {name, muted}）に相当し、
+/// 参加者リストの表示とBAN対象の指定の両方に使う。ローカル参加者(自分)は含めない。
+struct PTTParticipantInfo: Identifiable, Equatable {
+    let uid: String
+    var name: String
+    var isMuted: Bool
+    var id: String { uid }
+}

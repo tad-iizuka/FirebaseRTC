@@ -22,7 +22,10 @@ final class PTTConnectionManager: NSObject, ObservableObject {
     // MARK: - Published state (UIが監視する)
 
     @Published private(set) var status: ConnectionStatus = .disconnected
-    @Published private(set) var talkers: Set<String> = []
+    /// [BAN対応] 以前は「現在送話中(unmute)のuid集合」のみを保持していたが、
+    /// BANボタンの表示にはルーム内の全参加者(名前つき)が必要なため、
+    /// uid -> 表示用情報 の辞書に置き換えた。ローカル参加者(自分)は含めない。
+    @Published private(set) var participants: [String: PTTParticipantInfo] = [:]
     @Published private(set) var logLines: [String] = []
     @Published private(set) var isSending = false
 
@@ -64,6 +67,22 @@ final class PTTConnectionManager: NSObject, ObservableObject {
                 // (トラックは作られるが送信されない = ボタンを押すまで無音)
                 try await newRoom.localParticipant.setMicrophone(enabled: false)
 
+                // 接続時点ですでに他の参加者がいる場合、参加後に発火するイベントだけでは
+                // 拾えないため room.remoteParticipants から初期状態を取り込む。
+                // TrackPublication.isMuted (LiveKit Swift SDK) はサブクラスの
+                // RemoteTrackPublicationがサーバー通知(metadata)由来のmute状態を
+                // 反映するため、track未購読の時点でも信頼できる。
+                // 音声トラック自体が存在しない(まだ一度もマイクをpublishしていない)
+                // 参加者のみ、安全側に倒して「未送話」扱いにしておく。
+                var initialParticipants: [String: PTTParticipantInfo] = [:]
+                for remote in newRoom.remoteParticipants.values {
+                    let uid = remote.identity?.stringValue ?? "?"
+                    let audioPub = remote.trackPublications.values.first(where: { $0.kind == .audio })
+                    let isMuted = audioPub?.isMuted ?? true
+                    initialParticipants[uid] = PTTParticipantInfo(uid: uid, name: remote.name ?? uid, isMuted: isMuted)
+                }
+                participants = initialParticipants
+
                 status = .connected(room: roomName)
                 appendLog("ルーム接続完了: room=\(roomName)")
             } catch {
@@ -79,7 +98,7 @@ final class PTTConnectionManager: NSObject, ObservableObject {
         Task {
             await room.disconnect()
             self.room = nil
-            talkers.removeAll()
+            participants.removeAll()
             isSending = false
             status = .disconnected
             appendLog("切断しました")
@@ -184,7 +203,7 @@ extension PTTConnectionManager: RoomDelegate {
         Task { @MainActor in
             self.appendLog("接続状態: \(oldConnectionState) → \(connectionState)")
             if connectionState == .disconnected {
-                self.talkers.removeAll()
+                self.participants.removeAll()
                 self.isSending = false
                 self.room = nil
                 if case .error = self.status {
@@ -244,7 +263,14 @@ extension PTTConnectionManager: RoomDelegate {
 
     nonisolated func room(_ room: Room, participantDidConnect participant: RemoteParticipant) {
         Task { @MainActor in
-            self.appendLog("参加: \(participant.identity?.stringValue ?? "?")")
+            let uid = participant.identity?.stringValue ?? "?"
+            self.appendLog("参加: \(uid)")
+            // participantDidConnect発火時点で既にトラック情報(publish済みか)を
+            // 持っている場合があるため、初期同期時と同じくisMutedを実際の値から取得する。
+            // 音声トラックがまだ無い参加者は安全側に倒して「未送話」扱いにする。
+            let audioPub = participant.trackPublications.values.first(where: { $0.kind == .audio })
+            let isMuted = audioPub?.isMuted ?? true
+            self.participants[uid] = PTTParticipantInfo(uid: uid, name: participant.name ?? uid, isMuted: isMuted)
         }
     }
 
@@ -252,20 +278,16 @@ extension PTTConnectionManager: RoomDelegate {
         Task { @MainActor in
             let id = participant.identity?.stringValue ?? "?"
             self.appendLog("退出: \(id)")
-            self.talkers.remove(id)
+            self.participants.removeValue(forKey: id)
         }
     }
 
-    /// 送話中表示: 音声トラックのmute/unmuteをそのまま「送話中」リストの出し入れに使う。
+    /// 送話中表示: 音声トラックのmute/unmuteをそのまま参加者の送話状態の出し入れに使う。
     /// 以前の talker_start/talker_end に相当。
     nonisolated func room(_ room: Room, participant: Participant, trackPublication: TrackPublication, didUpdateIsMuted isMuted: Bool) {
         guard trackPublication.kind == .audio, let identity = participant.identity?.stringValue else { return }
         Task { @MainActor in
-            if isMuted {
-                self.talkers.remove(identity)
-            } else {
-                self.talkers.insert(identity)
-            }
+            self.participants[identity]?.isMuted = isMuted
         }
     }
 }

@@ -27,6 +27,7 @@ import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import co.ubunifu.pttandroid.auth.PTTAuthManager
+import co.ubunifu.pttandroid.ban.PTTBanStore
 import co.ubunifu.pttandroid.chat.PTTChatStore
 import co.ubunifu.pttandroid.connection.PTTConnectionManager
 import co.ubunifu.pttandroid.room.PTTRoomManager
@@ -70,6 +71,7 @@ class MainActivity : ComponentActivity() {
             val savedRoomsStore = remember { PTTSavedRoomsStore(applicationContext) }
             val connectionManager = remember { PTTConnectionManager(applicationContext, scope) }
             val chatStore = remember { PTTChatStore() }
+            val banStore = remember { PTTBanStore() }
 
             LaunchedEffect(Unit) {
                 if (!micPermissionGranted.value) {
@@ -86,6 +88,7 @@ class MainActivity : ComponentActivity() {
                             savedRoomsStore = savedRoomsStore,
                             connectionManager = connectionManager,
                             chatStore = chatStore,
+                            banStore = banStore,
                             onRequestGoogleSignIn = { signInLauncher.launch(authManager.signInIntent()) },
                         )
                     }

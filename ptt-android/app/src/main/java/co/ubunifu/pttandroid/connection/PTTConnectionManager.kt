@@ -19,6 +19,7 @@ package co.ubunifu.pttandroid.connection
 
 import android.content.Context
 import co.ubunifu.pttandroid.model.ConnectionStatus
+import co.ubunifu.pttandroid.model.ParticipantInfo
 import io.livekit.android.LiveKit
 import io.livekit.android.events.RoomEvent
 import io.livekit.android.events.collect
@@ -53,8 +54,11 @@ class PTTConnectionManager(
     private val _status = MutableStateFlow<ConnectionStatus>(ConnectionStatus.Disconnected)
     val status: StateFlow<ConnectionStatus> = _status
 
-    private val _talkers = MutableStateFlow<Set<String>>(emptySet())
-    val talkers: StateFlow<Set<String>> = _talkers
+    // [BAN対応] 以前は「現在送話中(unmute)のidentity集合」のみを保持していたが、
+    // BANボタンの表示にはルーム内の全参加者(名前つき)が必要なため、
+    // identity -> 表示用情報 の辞書に置き換えた。ローカル参加者(自分)は含めない。
+    private val _participants = MutableStateFlow<Map<String, ParticipantInfo>>(emptyMap())
+    val participants: StateFlow<Map<String, ParticipantInfo>> = _participants
 
     private val _logLines = MutableStateFlow<List<String>>(emptyList())
     val logLines: StateFlow<List<String>> = _logLines
@@ -105,6 +109,18 @@ class PTTConnectionManager(
                 // (トラックは作られるが送信されない = ボタンを押すまで無音)
                 newRoom.localParticipant.setMicrophoneEnabled(false)
 
+                // 接続時点ですでに他の参加者がいる場合、参加後に発火するイベントだけでは
+                // 拾えないため remoteParticipants から初期状態を取り込む。
+                // TrackPublication.muted (LiveKit Android SDK) はサーバーから受け取った
+                // TrackInfo.muted で初期化されるため、トラック未購読の時点でも信頼できる。
+                // 音声トラック自体が存在しない(まだ一度もマイクをpublishしていない)
+                // 参加者のみ、安全側に倒して「未送話」扱いにしておく。
+                _participants.value = newRoom.remoteParticipants.values.associate { p ->
+                    val id = p.identity?.value ?: "?"
+                    val muted = p.trackPublications.values.firstOrNull { it.kind == Track.Kind.AUDIO }?.muted ?: true
+                    id to ParticipantInfo(identity = id, name = p.name ?: id, muted = muted)
+                }
+
                 _status.value = ConnectionStatus.Connected(roomNameParam)
                 appendLog("ルーム接続完了: room=$roomNameParam")
             } catch (e: Exception) {
@@ -121,7 +137,7 @@ class PTTConnectionManager(
             eventJob?.cancel()
             current.disconnect()
             room = null
-            _talkers.value = emptySet()
+            _participants.value = emptyMap()
             _isSending.value = false
             _status.value = ConnectionStatus.Disconnected
             appendLog("切断しました")
@@ -200,7 +216,7 @@ class PTTConnectionManager(
         when (event) {
             is RoomEvent.Disconnected -> {
                 appendLog("切断されました: ${event.reason}")
-                _talkers.value = emptySet()
+                _participants.value = emptyMap()
                 _isSending.value = false
                 room = null
                 if (_status.value !is ConnectionStatus.Error) {
@@ -228,32 +244,39 @@ class PTTConnectionManager(
             }
 
             is RoomEvent.ParticipantConnected -> {
-                appendLog("参加: ${event.participant.identity}")
+                val id = event.participant.identity?.value ?: "?"
+                appendLog("参加: $id")
+                // ParticipantConnected発火時点で既にトラック情報(publish済みか)を
+                // 持っている場合があるため、初期同期時と同じくmutedを実際の値から取得する。
+                // 音声トラックがまだ無い参加者は安全側に倒して「未送話」扱いにする。
+                val muted = event.participant.trackPublications.values
+                    .firstOrNull { it.kind == Track.Kind.AUDIO }?.muted ?: true
+                _participants.update { it + (id to ParticipantInfo(identity = id, name = event.participant.name ?: id, muted = muted)) }
             }
 
             is RoomEvent.ParticipantDisconnected -> {
                 val id = event.participant.identity?.value ?: "?"
                 appendLog("退出: $id")
-                _talkers.update { it - id }
+                _participants.update { it - id }
             }
 
             is RoomEvent.RoomMetadataChanged -> {
                 // routes/talk.jsが書き込む { currentTalker, updatedAt } はUI側では
-                // talkers(mute/unmute)だけで十分表現できるため、ここではログのみ出す。
+                // participants(mute/unmute)だけで十分表現できるため、ここではログのみ出す。
                 appendLog("[診断] メタデータ更新受信")
             }
 
             is RoomEvent.TrackMuted -> {
                 val identity = event.participant.identity?.value
                 if (event.publication.kind == Track.Kind.AUDIO && identity != null) {
-                    _talkers.update { it - identity }
+                    _participants.update { map -> map[identity]?.let { info -> map + (identity to info.copy(muted = true)) } ?: map }
                 }
             }
 
             is RoomEvent.TrackUnmuted -> {
                 val identity = event.participant.identity?.value
                 if (event.publication.kind == Track.Kind.AUDIO && identity != null) {
-                    _talkers.update { it + identity }
+                    _participants.update { map -> map[identity]?.let { info -> map + (identity to info.copy(muted = false)) } ?: map }
                 }
             }
 

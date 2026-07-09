@@ -21,6 +21,7 @@ struct ContentView: View {
     @StateObject private var savedRooms = PTTSavedRoomsStore()
     @StateObject private var connection = PTTConnectionManager()
     @StateObject private var chat = PTTChatStore()
+    @StateObject private var ban = PTTBanStore()
 
     @State private var tokenServerURL: String = "https://ptt-token-server-rnn4fqay3a-an.a.run.app"
     @State private var livekitURL: String = "wss://ubunifu-talk-wy19xst3.livekit.cloud"
@@ -32,6 +33,10 @@ struct ContentView: View {
     @State private var activeRoomId: String?
     /// 自分がルーム作成者(owner)の場合のみセットされる、参加者への共有用招待コード。
     @State private var currentInviteCode: String?
+    /// [BAN対応] BANボタン押下時の確認ダイアログの対象。
+    @State private var banTarget: PTTParticipantInfo?
+    /// [BAN対応] 自分がBANされてルームを追い出された直後に表示する通知文言。
+    @State private var banNotice: String?
 
     var body: some View {
         ScrollView {
@@ -56,6 +61,26 @@ struct ContentView: View {
         .foregroundColor(Color(red: 0.85, green: 0.89, blue: 0.86))
         .onChange(of: auth.currentUser?.uid, initial: true) { _, newUid in
             savedRooms.load(forUid: newUid)
+        }
+        // [BAN対応] 自分がBANされたことをリアルタイム検知したら、即座にルームから退出する。
+        // BAN自体の強制力はLiveKit側の即時キック(サーバー)が担うため、ここは表示のための補助。
+        .onChange(of: ban.isBanned) { _, isBanned in
+            guard isBanned else { return }
+            banNotice = "このルームから排除されました"
+            leaveRoom()
+        }
+        .alert(
+            "BANしますか?",
+            isPresented: Binding(
+                get: { banTarget != nil },
+                set: { if !$0 { banTarget = nil } }
+            ),
+            presenting: banTarget
+        ) { target in
+            Button("BANする", role: .destructive) { confirmBan(target) }
+            Button("キャンセル", role: .cancel) { banTarget = nil }
+        } message: { target in
+            Text("\(target.name) をこのルームからBANしますか?\nこの操作は取り消せません。")
         }
     }
 
@@ -164,6 +189,13 @@ struct ContentView: View {
     /// サインイン済み・未入室時の画面。Web版のroomSectionに相当。
     private var roomSelectionSection: some View {
         VStack(spacing: 10) {
+            if let banNotice {
+                Text(banNotice)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(Color(red: 1.0, green: 0.36, blue: 0.36))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             field(label: "トークンサーバーURL", text: $tokenServerURL)
             field(label: "LiveKit URL (wss://)", text: $livekitURL)
 
@@ -350,8 +382,10 @@ struct ContentView: View {
     }
 
     private func enterRoom(_ roomId: String) {
+        banNotice = nil
         activeRoomId = roomId
         chat.start(roomId: roomId)
+        ban.start(roomId: roomId, uid: auth.currentUser?.uid ?? "")
         connection.connect(
             tokenServerURL: tokenServerURL,
             livekitURL: livekitURL,
@@ -363,11 +397,26 @@ struct ContentView: View {
     private func leaveRoom() {
         if connection.status != .disconnected { connection.disconnect() }
         chat.stop()
+        ban.stop()
         activeRoomId = nil
         currentInviteCode = nil
         joinRoomId = ""
         joinInviteCode = ""
         chatInputText = ""
+    }
+
+    /// [BAN対応] BAN確認ダイアログで「BANする」を選んだ際に呼ばれる。
+    private func confirmBan(_ target: PTTParticipantInfo) {
+        banTarget = nil
+        guard let roomId = activeRoomId else { return }
+        Task {
+            do {
+                let idToken = try await auth.fetchIDToken()
+                try await ban.banParticipant(tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId, targetUid: target.uid)
+            } catch {
+                // ban.errorMessage に理由がセットされているのでUIには既に反映済み
+            }
+        }
     }
 
     // MARK: - Talk area (PTT button)
@@ -399,32 +448,57 @@ struct ContentView: View {
         .padding(.vertical, 24)
     }
 
-    // MARK: - Talkers
+    // MARK: - Talkers / Participants
 
+    /// [BAN対応] Web版の「参加者(緑=送話中)」に相当。以前は送話中の相手だけを
+    /// チップで表示していたが、BAN対象を選べるよう全参加者を一覧表示するように変更した。
     private var talkerSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("送話中")
+            Text("参加者(緑=送話中)")
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundColor(.gray)
 
-            if connection.talkers.isEmpty {
-                chip(text: "— なし —", live: false)
+            if connection.participants.isEmpty {
+                Text("— なし —")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.gray)
             } else {
-                FlowLayoutHStackFallback(items: Array(connection.talkers))
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(sortedParticipants) { info in
+                        participantRow(info)
+                    }
+                }
             }
         }
         .padding(14)
     }
 
-    private func chip(text: String, live: Bool) -> some View {
-        Text(text)
-            .font(.system(size: 11, design: .monospaced))
-            .padding(.horizontal, 9)
-            .padding(.vertical, 3)
-            .overlay(
-                Capsule().stroke(live ? Color(red: 0.24, green: 0.86, blue: 0.52) : Color.gray.opacity(0.4))
-            )
-            .foregroundColor(live ? Color(red: 0.24, green: 0.86, blue: 0.52) : .gray)
+    private var sortedParticipants: [PTTParticipantInfo] {
+        connection.participants.values.sorted { $0.name < $1.name }
+    }
+
+    /// owner/moderatorのみBANボタンを表示する(サーバー側でも権限を再チェックする)。
+    private var canBan: Bool {
+        ban.myRole == "owner" || ban.myRole == "moderator"
+    }
+
+    private func participantRow(_ info: PTTParticipantInfo) -> some View {
+        HStack(spacing: 8) {
+            Text(info.name)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(info.isMuted ? .gray : Color(red: 0.24, green: 0.86, blue: 0.52))
+                .lineLimit(1)
+
+            Spacer()
+
+            if canBan {
+                Button("BAN") {
+                    banTarget = info
+                }
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundColor(Color(red: 1.0, green: 0.36, blue: 0.36))
+            }
+        }
     }
 
     // MARK: - Chat (Phase5)
@@ -506,28 +580,6 @@ struct ContentView: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-/// シンプルな折り返しチップ表示（iOS17のWrappingHStack代替の簡易実装）
-private struct FlowLayoutHStackFallback: View {
-    let items: [String]
-
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(items, id: \.self) { id in
-                    Text(id)
-                        .font(.system(size: 11, design: .monospaced))
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 3)
-                        .overlay(
-                            Capsule().stroke(Color(red: 0.24, green: 0.86, blue: 0.52))
-                        )
-                        .foregroundColor(Color(red: 0.24, green: 0.86, blue: 0.52))
-                }
-            }
-        }
     }
 }
 

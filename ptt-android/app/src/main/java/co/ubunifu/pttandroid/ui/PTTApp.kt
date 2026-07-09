@@ -28,6 +28,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -55,9 +56,11 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import co.ubunifu.pttandroid.auth.PTTAuthManager
+import co.ubunifu.pttandroid.ban.PTTBanStore
 import co.ubunifu.pttandroid.chat.PTTChatStore
 import co.ubunifu.pttandroid.connection.PTTConnectionManager
 import co.ubunifu.pttandroid.model.ConnectionStatus
+import co.ubunifu.pttandroid.model.ParticipantInfo
 import co.ubunifu.pttandroid.room.PTTRoomManager
 import co.ubunifu.pttandroid.room.PTTSavedRoomsStore
 import co.ubunifu.pttandroid.room.SavedRoom
@@ -76,6 +79,7 @@ fun PTTApp(
     savedRoomsStore: PTTSavedRoomsStore,
     connectionManager: PTTConnectionManager,
     chatStore: PTTChatStore,
+    banStore: PTTBanStore,
     onRequestGoogleSignIn: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -86,11 +90,14 @@ fun PTTApp(
     val roomError by roomManager.lastErrorMessage.collectAsState()
     val savedRooms by savedRoomsStore.rooms.collectAsState()
     val status by connectionManager.status.collectAsState()
-    val talkers by connectionManager.talkers.collectAsState()
+    val participants by connectionManager.participants.collectAsState()
     val isSending by connectionManager.isSending.collectAsState()
     val logLines by connectionManager.logLines.collectAsState()
     val chatMessages by chatStore.messages.collectAsState()
     val chatError by chatStore.errorMessage.collectAsState()
+    val myRole by banStore.myRole.collectAsState()
+    val isBanned by banStore.isBanned.collectAsState()
+    val banError by banStore.errorMessage.collectAsState()
 
     var tokenServerUrl by remember { mutableStateOf("https://ptt-token-server-rnn4fqay3a-an.a.run.app") }
     var livekitUrl by remember { mutableStateOf("wss://ubunifu-talk-wy19xst3.livekit.cloud") }
@@ -99,14 +106,20 @@ fun PTTApp(
     var chatInput by remember { mutableStateOf("") }
     var activeRoomId by remember { mutableStateOf<String?>(null) }
     var currentInviteCode by remember { mutableStateOf<String?>(null) }
+    // [BAN対応] BANボタン押下時の確認ダイアログの対象
+    var banTarget by remember { mutableStateOf<ParticipantInfo?>(null) }
+    // [BAN対応] 自分がBANされてルームを追い出された直後に表示する通知文言
+    var banNotice by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(currentUser?.uid) {
         savedRoomsStore.load(currentUser?.uid)
     }
 
     fun enterRoom(roomId: String) {
+        banNotice = null
         activeRoomId = roomId
         chatStore.start(roomId)
+        banStore.start(roomId, currentUser?.uid ?: "")
         connectionManager.connect(
             tokenServerUrl = tokenServerUrl,
             livekitUrl = livekitUrl,
@@ -118,11 +131,34 @@ fun PTTApp(
     fun leaveRoom() {
         if (status !is ConnectionStatus.Disconnected) connectionManager.disconnect()
         chatStore.stop()
+        banStore.stop()
         activeRoomId = null
         currentInviteCode = null
         joinRoomId = ""
         joinInviteCode = ""
         chatInput = ""
+    }
+
+    // [BAN対応] 自分がBANされたことをリアルタイム検知したら、即座にルームから退出する。
+    // BAN自体の強制力はLiveKit側の即時キック(サーバー)が担うため、ここは表示のための補助。
+    LaunchedEffect(isBanned) {
+        if (isBanned) {
+            banNotice = "このルームから排除されました"
+            leaveRoom()
+        }
+    }
+
+    fun confirmBan(target: ParticipantInfo) {
+        banTarget = null
+        val roomId = activeRoomId ?: return
+        scope.launch {
+            try {
+                val idToken = authManager.fetchIdToken()
+                banStore.banParticipant(tokenServerUrl, idToken, roomId, target.identity)
+            } catch (e: Exception) {
+                // banStore.errorMessage に理由がセットされているのでUIには既に反映済み
+            }
+        }
     }
 
     Column(Modifier.fillMaxWidth().padding(16.dp)) {
@@ -131,6 +167,11 @@ fun PTTApp(
             channelLabel = channelLabel(status),
             onSignOut = { leaveRoom(); authManager.signOut() },
         )
+
+        banNotice?.let { notice ->
+            Text(notice, fontFamily = Mono, fontSize = 12.sp, color = Danger)
+            Spacer(Modifier.height(8.dp))
+        }
 
         when {
             currentUser == null -> AuthSection(
@@ -152,7 +193,12 @@ fun PTTApp(
                     onStop = { connectionManager.stopTalking() },
                 )
                 Spacer(Modifier.height(16.dp))
-                TalkersSection(talkers)
+                ParticipantsSection(
+                    participants = participants,
+                    myUid = currentUser?.uid,
+                    canBan = myRole == "owner" || myRole == "moderator",
+                    onRequestBan = { banTarget = it },
+                )
                 Spacer(Modifier.height(16.dp))
                 ChatSection(
                     messages = chatMessages,
@@ -229,6 +275,33 @@ fun PTTApp(
                 onRemoveSaved = { savedRoomsStore.remove(it) },
             )
         }
+    }
+
+    // [BAN対応] BANボタン押下時の確認ダイアログ
+    banTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { banTarget = null },
+            title = { Text("BANしますか?", fontFamily = Mono) },
+            text = {
+                Text(
+                    "${target.name} をこのルームからBANしますか?\nこの操作は取り消せません。",
+                    fontFamily = Mono,
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = { confirmBan(target) },
+                    colors = ButtonDefaults.buttonColors(containerColor = Danger),
+                ) {
+                    Text("BANする", fontFamily = Mono)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { banTarget = null }) {
+                    Text("キャンセル", fontFamily = Mono)
+                }
+            },
+        )
     }
 }
 
@@ -475,21 +548,49 @@ private fun TalkArea(isConnected: Boolean, isSending: Boolean, onStart: () -> Un
 }
 
 @Composable
-private fun TalkersSection(talkers: Set<String>) {
+private fun ParticipantsSection(
+    participants: Map<String, ParticipantInfo>,
+    myUid: String?,
+    canBan: Boolean,
+    onRequestBan: (ParticipantInfo) -> Unit,
+) {
     Column(Modifier.fillMaxWidth()) {
-        Text("送話中", fontFamily = Mono, fontSize = 10.sp, color = Muted)
+        Text("参加者(緑=送話中)", fontFamily = Mono, fontSize = 10.sp, color = Muted)
         Spacer(Modifier.height(6.dp))
-        if (talkers.isEmpty()) {
+        if (participants.isEmpty()) {
             Text("— なし —", fontFamily = Mono, fontSize = 11.sp, color = Muted)
         } else {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                talkers.forEach { id ->
-                    Text(
-                        id,
-                        fontFamily = Mono, fontSize = 11.sp, color = Live,
-                        modifier = Modifier
-                            .padding(horizontal = 9.dp, vertical = 3.dp),
-                    )
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                participants.values.sortedBy { it.name }.forEach { info ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            info.name,
+                            fontFamily = Mono,
+                            fontSize = 11.sp,
+                            color = if (!info.muted) Live else Muted,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        // [BAN対応] owner/moderatorのみBANボタンを表示する
+                        // (サーバー側でも権限を再チェックする)。自分自身は対象外。
+                        if (canBan && info.identity != myUid) {
+                            Text(
+                                "BAN",
+                                fontFamily = Mono,
+                                fontSize = 10.sp,
+                                fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                                color = Danger,
+                                modifier = Modifier
+                                    .padding(start = 8.dp)
+                                    .pointerInput(info.identity) {
+                                        detectTapGestures(onTap = { onRequestBan(info) })
+                                    },
+                            )
+                        }
+                    }
                 }
             }
         }
