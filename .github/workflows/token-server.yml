@@ -1,0 +1,93 @@
+name: token-server CI/CD
+
+# token-server配下の変更があった場合のみ動く(モノレポなので他ディレクトリの
+# 変更で無駄にデプロイが走らないようpathsで絞る)。
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'token-server/**'
+      - '.github/workflows/token-server.yml'
+  pull_request:
+    paths:
+      - 'token-server/**'
+
+# id-token: write は google-github-actions/auth (Workload Identity Federation) に必須。
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  test:
+    name: Lint & Smoke Test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: token-server
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: token-server/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # [注意] このリポジトリには現状 npm test で動くテストスイートが無い。
+      # 最低限、全JSファイルの構文エラーだけはCIで検出できるようにしておく。
+      # (server.js/lib/firebaseAdmin.js は require するだけで
+      #  admin.initializeApp() が走りADC無しのCI環境では例外になるため、
+      #  「require して実行する」形のsmoke testは意図的に避けている)
+      - name: Syntax check all JS files
+        run: |
+          find . -name "*.js" -not -path "./node_modules/*" -print0 \
+            | xargs -0 -n1 node --check
+
+      # 依存の脆弱性は可視化するが、それだけでデプロイをブロックはしない
+      # (誤検知・修正待ちの中程度issueでリリースが止まる方が実害が大きいため)。
+      # 重大な脆弱性が出た場合はActionsのログで気づける運用にする。
+      - name: npm audit (high以上を可視化。失敗しても継続)
+        run: npm audit --audit-level=high
+        continue-on-error: true
+
+  deploy:
+    name: Deploy to Cloud Run
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Google Cloud 認証 (Workload Identity Federation)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      # LIVEKIT_API_KEY等の値そのものはこのワークフローに一切登場しない。
+      # 既にSecret Managerに登録済みのシークレット名(token-server/README.md参照)を
+      # 指すだけなので、デプロイ用サービスアカウントにはSecret Manager自体への
+      # アクセス権は不要(Cloud Runランタイム側のSAにのみ付与されていればよい)。
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy ptt-token-server \
+            --source token-server \
+            --region asia-northeast1 \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --allow-unauthenticated \
+            --set-secrets LIVEKIT_API_KEY=livekit-api-key:latest,LIVEKIT_API_SECRET=livekit-api-secret:latest,RECORDING_GCS_CREDENTIALS_JSON=recording-gcs-credentials:latest \
+            --set-env-vars LIVEKIT_HOST=${{ vars.LIVEKIT_HOST }},FIREBASE_PROJECT_ID=${{ vars.FIREBASE_PROJECT_ID }},ALLOWED_ORIGINS=${{ vars.ALLOWED_ORIGINS }},RECORDING_GCS_BUCKET=${{ vars.RECORDING_GCS_BUCKET }}
+
+      - name: デプロイ後ヘルスチェック
+        run: |
+          URL=$(gcloud run services describe ptt-token-server \
+            --region asia-northeast1 \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --format='value(status.url)')
+          echo "デプロイ先: $URL"
+          curl -sf "$URL" | grep -q "OK" || (echo "::error::ヘルスチェック失敗" && exit 1)
