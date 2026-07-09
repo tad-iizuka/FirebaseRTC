@@ -43,7 +43,7 @@ jobs:
           repoToken: "${{ secrets.GITHUB_TOKEN }}"
           firebaseServiceAccount: "${{ secrets.FIREBASE_SERVICE_ACCOUNT }}"
           projectId: "${{ vars.FIREBASE_PROJECT_ID }}"
-          entryPoint: ptt-client
+          entryPoint: .
           channelId: "pr-${{ github.event.number }}"
 
   deploy-production:
@@ -60,5 +60,5 @@ jobs:
           repoToken: "${{ secrets.GITHUB_TOKEN }}"
           firebaseServiceAccount: "${{ secrets.FIREBASE_SERVICE_ACCOUNT }}"
           projectId: "${{ vars.FIREBASE_PROJECT_ID }}"
-          entryPoint: ptt-client
+          entryPoint: .
           channelId: live
