@@ -54,7 +54,8 @@ jobs:
           # ランナーに、選択中のXcodeが要求するiOS Simulatorランタイムが
           # 入っていないことがあるため、明示的にダウンロードしておく。
           # (すでに入っている場合は即座に完了する)
-          sudo xcodebuild -downloadPlatform iOS
+          sudo xcodebuild -runFirstLaunch
+          xcodebuild -downloadPlatform iOS
           xcrun simctl list runtimes
 
       - name: Install xcpretty
