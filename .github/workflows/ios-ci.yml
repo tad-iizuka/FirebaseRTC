@@ -18,7 +18,11 @@ concurrency:
 
 jobs:
   build-and-test:
-    runs-on: macos-15
+    # Xcode 26系はホストOSに macOS 26 を要求するため、macos-15ランナーでは
+    # Simulatorサービスがまともに機能しない(CoreSimulatorServiceが接続できない)。
+    # 本プロジェクトは IPHONEOS_DEPLOYMENT_TARGET = 26.5 を要求しているため、
+    # macOS 26ベースのランナーを使う。
+    runs-on: macos-26
     timeout-minutes: 30
 
     env:
@@ -39,10 +43,13 @@ jobs:
       - name: Select Xcode version
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          # Info.plist / project.pbxproj が iOS 26.5 SDK を要求しているため、
-          # 対応する最新の安定版Xcodeを指定する。ランナーのプリインストール状況が
-          # 変わった場合はここを調整すること。
-          xcode-version: latest-stable
+          # Info.plist / project.pbxproj が iOS 26.5 SDK を要求している。
+          # macos-26ランナーの既定Xcodeは段階的に上がっていく途中のため
+          # (執筆時点でSDKはiOS 26.4までの可能性がある。2026/7/21に既定が26.6へ)、
+          # betaも含めて確実に最新を掴めるよう "latest"(betaを含む)を指定する。
+          # 安定させたい場合は実際にランナーへSSHして確認したバージョンを
+          # 'xx.x' の形で明示指定に変更すること。
+          xcode-version: latest
 
       - name: Show Xcode & SDK versions
         run: |
