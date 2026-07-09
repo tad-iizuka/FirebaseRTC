@@ -49,6 +49,14 @@ jobs:
           xcodebuild -version
           xcodebuild -showsdks
 
+      - name: Ensure iOS Simulator runtime is installed
+        run: |
+          # ランナーに、選択中のXcodeが要求するiOS Simulatorランタイムが
+          # 入っていないことがあるため、明示的にダウンロードしておく。
+          # (すでに入っている場合は即座に完了する)
+          sudo xcodebuild -downloadPlatform iOS
+          xcrun simctl list runtimes
+
       - name: Install xcpretty
         run: gem install xcpretty --no-document
 
@@ -61,11 +69,30 @@ jobs:
       - name: Pick available iOS Simulator
         id: sim
         run: |
-          # 環境によって手に入るランタイム/デバイス名が変わるため、
-          # 利用可能な最新のiPhoneシミュレータを動的に選択する
-          DEVICE=$(xcrun simctl list devices available | grep -E "iPhone" | tail -1 | sed -E 's/^[[:space:]]*([^(]+) \(.*/\1/' | sed -E 's/[[:space:]]+$//')
-          echo "device=$DEVICE" >> "$GITHUB_OUTPUT"
-          echo "Using simulator device: $DEVICE"
+          set -o pipefail
+          # xcrun simctl list はシステム全体のランタイムを返してしまい、
+          # 現在選択中のXcode/SDKでは実際にビルドできない機種を拾うことがある。
+          # そのため、このproject/schemeに対して xcodebuild が
+          # 「本当にビルド可能」と申告する destination だけを対象にする。
+          xcodebuild -showdestinations -project "$PROJECT" -scheme "$SCHEME" 2>/dev/null \
+            | tee /tmp/destinations.txt
+
+          # 具体的なidを持つ iOS Simulator 行だけを抽出(プレースホルダーは除外)
+          LINE=$(grep -E "platform:iOS Simulator" /tmp/destinations.txt | grep -v "Any iOS Simulator Device" | grep "id:" | head -1)
+
+          if [ -z "$LINE" ]; then
+            echo "::error::このschemeに対して有効なiOS Simulator destinationが見つかりませんでした。"
+            echo "--- xcodebuild -showdestinations の出力 ---"
+            cat /tmp/destinations.txt
+            exit 1
+          fi
+
+          NAME=$(echo "$LINE" | sed -E 's/.*name:([^,}]+).*/\1/' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')
+          OS=$(echo "$LINE" | sed -E 's/.*OS:([^,}]+).*/\1/' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')
+
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "os=$OS" >> "$GITHUB_OUTPUT"
+          echo "Using simulator: name=$NAME os=$OS"
 
       - name: Build (Debug, Simulator)
         run: |
@@ -73,7 +100,7 @@ jobs:
           xcodebuild build \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
-            -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.device }}" \
+            -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }},OS=${{ steps.sim.outputs.os }}" \
             -configuration Debug \
             $XCODE_FLAGS \
             | xcpretty
@@ -84,7 +111,7 @@ jobs:
           xcodebuild test \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
-            -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.device }}" \
+            -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }},OS=${{ steps.sim.outputs.os }}" \
             -configuration Debug \
             -resultBundlePath TestResults.xcresult \
             $XCODE_FLAGS \
