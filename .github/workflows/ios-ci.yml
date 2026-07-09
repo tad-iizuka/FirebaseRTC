@@ -49,14 +49,41 @@ jobs:
           xcodebuild -version
           xcodebuild -showsdks
 
+      - name: List installed Xcode versions on this runner
+        run: |
+          echo "--- /Applications 内のXcode一覧 ---"
+          ls -d /Applications/Xcode*.app 2>/dev/null || echo "見つかりませんでした"
+          for app in /Applications/Xcode*.app; do
+            [ -d "$app" ] || continue
+            v=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$app/Contents/Info.plist" 2>/dev/null)
+            echo "$app -> $v"
+          done
+
+      - name: Warm up CoreSimulatorService
+        run: |
+          # -downloadPlatform が "Unable to connect to simulator" で落ちる既知の問題対策。
+          # CoreSimulatorServiceが未起動のまま-downloadPlatformを呼ぶと失敗することがあるため、
+          # 先にsimctlで軽くアクセスしてサービスを起動させておく。
+          xcrun simctl list devicetypes >/dev/null 2>&1 || true
+          sleep 3
+
       - name: Ensure iOS Simulator runtime is installed
+        id: download_platform
+        continue-on-error: true
         run: |
           # ランナーに、選択中のXcodeが要求するiOS Simulatorランタイムが
           # 入っていないことがあるため、明示的にダウンロードしておく。
           # (すでに入っている場合は即座に完了する)
-          sudo xcodebuild -runFirstLaunch
+          # ここが失敗しても、既存ランタイムだけで後続のdestination探索を試すため
+          # ジョブ全体は止めない(continue-on-error)。
           xcodebuild -downloadPlatform iOS
+
+      - name: Show installed runtimes (diagnostic)
+        run: |
+          echo "download step outcome: ${{ steps.download_platform.outcome }}"
           xcrun simctl list runtimes
+          echo "--- 全destination一覧(このproject/scheme向け) ---"
+          xcodebuild -showdestinations -project "$PROJECT" -scheme "$SCHEME" 2>&1 || true
 
       - name: Install xcpretty
         run: gem install xcpretty --no-document
