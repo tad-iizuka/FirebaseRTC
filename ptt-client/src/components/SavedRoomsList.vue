@@ -11,7 +11,7 @@ const emit = defineEmits<{ open: [room: SavedRoom]; remove: [roomId: string] }>(
 		<span class="text-center text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
 			— 最近使ったルーム —
 		</span>
-		<div v-for="room in rooms" :key="room.roomId" class="flex items-center gap-2">
+		<div v-for="room in rooms" :key="room.roomId" class="flex min-w-0 items-center gap-2">
 			<Button
 				variant="secondary"
 				class="min-w-0 flex-1 justify-start normal-case"
