@@ -1,7 +1,7 @@
 /**
  * PTTApp.kt
  *
- * [LiveKit移行 + Firebase Auth対応 + 招待制ルーム対応 + Phase5テキストチャット]
+ * [LiveKit移行 + Firebase Auth対応 + 招待制ルーム対応 + Phase5テキストチャット + 送話ロック連携]
  * Web版(ptt-client/public/index.html)・iOS版(ContentView.swift)と同等のUI:
  * Googleサインイン → ルーム作成/招待コード参加 → PTTボタン → 送話中リスト → チャット → ログ
  *
@@ -9,6 +9,14 @@
  * identityとして使うため)。ルームIDの直接入力による接続も行わず、token-serverの
  * invite_only設計(POST /rooms でルーム作成、POST /rooms/:roomId/join で招待コード検証)
  * に合わせている。
+ *
+ * [送話ロック連携]
+ * PTTConnectionManager が token-server の /talk/start・/talk/heartbeat・/talk/stop
+ * (token-server/routes/talk.js)を呼び出し、サーバー側で排他制御を強制する。
+ * このComposable側は connectionManager.currentTalkerUid を見て、自分以外が
+ * 発話ロックを保持している間はPTTボタンのタップ判定を無効化し、
+ * 「誰が話しているか」を表示するだけに留める(実際のロック取得/延長/解放ロジックは
+ * すべてPTTConnectionManagerに集約されている)。
  */
 package co.ubunifu.pttandroid.ui
 
@@ -98,6 +106,9 @@ fun PTTApp(
     val myRole by banStore.myRole.collectAsState()
     val isBanned by banStore.isBanned.collectAsState()
     val banError by banStore.errorMessage.collectAsState()
+    // [送話ロック連携] サーバー(routes/talk.js)がRoom Metadataに書き込むcurrentTalker(uid)。
+    // 自分以外のuidが入っている間はPTTボタンを無効化する。
+    val currentTalkerUid by connectionManager.currentTalkerUid.collectAsState()
 
     var tokenServerUrl by remember { mutableStateOf("https://ptt-token-server-rnn4fqay3a-an.a.run.app") }
     var livekitUrl by remember { mutableStateOf("wss://ubunifu-talk-wy19xst3.livekit.cloud") }
@@ -110,6 +121,10 @@ fun PTTApp(
     var banTarget by remember { mutableStateOf<ParticipantInfo?>(null) }
     // [BAN対応] 自分がBANされてルームを追い出された直後に表示する通知文言
     var banNotice by remember { mutableStateOf<String?>(null) }
+
+    // [送話ロック連携] 自分以外が発話ロックを保持しているか、および相手の表示名
+    val someoneElseIsTalking = currentTalkerUid != null && currentTalkerUid != currentUser?.uid
+    val currentTalkerName = currentTalkerUid?.let { uid -> participants[uid]?.name ?: uid } ?: ""
 
     LaunchedEffect(currentUser?.uid) {
         savedRoomsStore.load(currentUser?.uid)
@@ -189,6 +204,8 @@ fun PTTApp(
                 TalkArea(
                     isConnected = status is ConnectionStatus.Connected,
                     isSending = isSending,
+                    someoneElseTalking = someoneElseIsTalking,
+                    talkerName = currentTalkerName,
                     onStart = { connectionManager.startTalking() },
                     onStop = { connectionManager.stopTalking() },
                 )
@@ -503,15 +520,28 @@ private fun SavedRoomRow(saved: SavedRoom, onOpen: (SavedRoom) -> Unit, onRemove
     }
 }
 
+/**
+ * [送話ロック連携] 自分以外が発話ロックを保持している間(someoneElseTalking)は
+ * タップ判定を無効化し、「誰が話しているか」を表示する。実際のロック取得/延長/解放は
+ * onStart/onStop経由でPTTConnectionManagerが担う(この関数自身はサーバーを呼ばない)。
+ */
 @Composable
-private fun TalkArea(isConnected: Boolean, isSending: Boolean, onStart: () -> Unit, onStop: () -> Unit) {
+private fun TalkArea(
+    isConnected: Boolean,
+    isSending: Boolean,
+    someoneElseTalking: Boolean,
+    talkerName: String,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+) {
+    val canTalk = isConnected && !someoneElseTalking
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             modifier = Modifier
                 .size(150.dp)
                 .clip(CircleShape)
                 .then(
-                    if (isConnected) {
+                    if (canTalk) {
                         Modifier.pointerInput(Unit) {
                             detectTapGestures(
                                 onPress = {
@@ -533,10 +563,16 @@ private fun TalkArea(isConnected: Boolean, isSending: Boolean, onStart: () -> Un
                 )
             }
             Text(
-                if (isSending) "送話中" else "押して送話",
+                text = when {
+                    isSending -> "送話中"
+                    someoneElseTalking -> "$talkerName が送話中"
+                    else -> "押して送話"
+                },
                 fontFamily = Mono,
                 fontSize = 13.sp,
                 color = if (isSending) Accent else Muted,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 10.dp),
             )
         }
         Spacer(Modifier.height(14.dp))

@@ -2,13 +2,20 @@
 //  ContentView.swift
 //  ptt-ios
 //
-//  [LiveKit移行 + Firebase Auth対応 + 招待制ルーム対応 + Phase5テキストチャット]
+//  [LiveKit移行 + Firebase Auth対応 + 招待制ルーム対応 + Phase5テキストチャット + 送話ロック連携]
 //  Web版(ptt-client/public/index.html)と同等のUI:
 //  Googleサインイン → ルーム作成/招待コード参加 → PTTボタン → 送話中リスト → チャット → ログ
 //  クライアントIDの手入力は廃止(token-serverは常にFirebase ID Token由来のuidを
 //  identityとして使うため、クライアントが自己申告する値は元々使われていなかった)。
 //  ルームIDの直接入力による接続も廃止し、token-serverのinvite_only設計
 //  (POST /rooms でルーム作成、POST /rooms/:roomId/join で招待コード検証)に合わせた。
+//
+//  [送話ロック連携]
+//  PTTConnectionManager が token-server の /talk/start・/talk/heartbeat・/talk/stop
+//  (token-server/routes/talk.js)を呼び出し、サーバー側で排他制御を強制する。
+//  このView側は connection.currentTalkerUid を見て、自分以外が発話ロックを
+//  保持している間はPTTボタンを無効化し、「誰が話しているか」を表示するだけに留める
+//  (実際のロック取得/延長/解放ロジックはすべてPTTConnectionManagerに集約されている)。
 //
 
 import SwiftUI
@@ -340,6 +347,19 @@ struct ContentView: View {
         return false
     }
 
+    /// [送話ロック連携] 自分以外が発話ロックを保持しているか。
+    /// trueの間はPTTボタンを無効化し、「誰が話しているか」を表示する。
+    private var someoneElseIsTalking: Bool {
+        guard let talkerUid = connection.currentTalkerUid else { return false }
+        return talkerUid != auth.currentUser?.uid
+    }
+
+    /// 現在発話ロックを保持している相手の表示名(自分以外の場合のみ意味を持つ)。
+    private var currentTalkerName: String {
+        guard let talkerUid = connection.currentTalkerUid else { return "" }
+        return connection.participants[talkerUid]?.name ?? talkerUid
+    }
+
     private func handleCreateRoom() {
         roomManager.clearError()
         Task {
@@ -421,31 +441,43 @@ struct ContentView: View {
 
     // MARK: - Talk area (PTT button)
 
+    /// [送話ロック連携] 自分以外が発話ロックを保持している間はボタンのヒットテストを無効化し、
+    /// 「誰が話しているか」を表示する。実際のロック取得/解放は
+    /// connection.startTalking()/stopTalking() が担う(このView自身はサーバーを呼ばない)。
     private var talkArea: some View {
-        VStack(spacing: 14) {
+        let canTalk = isConnected && !someoneElseIsTalking
+        return VStack(spacing: 14) {
             Circle()
                 .strokeBorder(connection.isSending ? Color.orange : Color.gray.opacity(0.4), lineWidth: 2)
                 .background(Circle().fill(Color.black.opacity(0.3)))
                 .frame(width: 150, height: 150)
                 .overlay(
-                    Text(connection.isSending ? "送話中" : "押して送話")
+                    Text(talkAreaLabel)
                         .font(.system(size: 13, design: .monospaced))
+                        .multilineTextAlignment(.center)
                         .foregroundColor(connection.isSending ? .orange : .gray)
+                        .padding(.horizontal, 10)
                 )
                 .scaleEffect(connection.isSending ? 0.97 : 1.0)
-                .opacity(isConnected ? 1.0 : 0.3)
+                .opacity(canTalk ? 1.0 : 0.3)
                 .gesture(
                     DragGesture(minimumDistance: 0)
                         .onChanged { _ in connection.startTalking() }
                         .onEnded { _ in connection.stopTalking() }
                 )
-                .allowsHitTesting(isConnected)
+                .allowsHitTesting(canTalk)
 
             Text("ボタンを押している間だけ音声が送信されます")
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundColor(.gray)
         }
         .padding(.vertical, 24)
+    }
+
+    private var talkAreaLabel: String {
+        if connection.isSending { return "送話中" }
+        if someoneElseIsTalking { return "\(currentTalkerName) が送話中" }
+        return "押して送話"
     }
 
     // MARK: - Talkers / Participants

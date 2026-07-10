@@ -11,6 +11,22 @@
 //  送話中インジケーターは、以前は ptt_start/ptt_end の自前JSONメッセージだったが、
 //  LiveKitの RoomDelegate が返す「トラックのmute/unmute」イベントをそのまま使う。
 //
+//  [送話ロック連携]
+//  Web版(ptt-client/public/index.html)と同じく、token-server の
+//  POST /rooms/:roomId/talk/start | /talk/heartbeat | /talk/stop
+//  (token-server/routes/talk.js) を呼び出し、サーバー側のFirestoreトランザクションで
+//  排他制御を強制する。クライアント側のUI抑制だけに頼らない。
+//    - PTTボタン押下時: talk/start を呼び、成功して初めてマイクを有効化する。
+//      他人が保持中なら409(talk_locked)が返るので、その場合は送話を開始しない。
+//    - 送話中: LOCK_TTL_MS(サーバー側15秒)より十分短い間隔でtalk/heartbeatを呼び、
+//      ロックの失効を防ぐ。heartbeatが失敗した場合(サーバー側でMAX_HOLD_MS超過等により
+//      既にロックを失っている)は、強制的に送話を終了する。
+//    - PTTボタン解放時 / ルーム退出時: talk/stop を呼びロックを明示的に解放する
+//      (ベストエフォート。失敗してもサーバー側のTTL失効に任せられる)。
+//    - サーバーが LiveKit Room Metadata に書き込む { currentTalker, ... } を
+//      RoomDelegateのメタデータ更新経由で受け取り、他人が発話中の間はPTTボタンを
+//      無効化する(ContentView側で currentTalkerUid を見て表示・入力可否を決める)。
+//
 
 import Foundation
 import Combine
@@ -28,6 +44,10 @@ final class PTTConnectionManager: NSObject, ObservableObject {
     @Published private(set) var participants: [String: PTTParticipantInfo] = [:]
     @Published private(set) var logLines: [String] = []
     @Published private(set) var isSending = false
+    /// [送話ロック連携] サーバー(routes/talk.js)がLiveKitのRoom Metadataに書き込む
+    /// currentTalker(uid)。nilなら誰も発話ロックを保持していない。
+    /// 自分以外のuidが入っている間、UI側はPTTボタンを無効化する。
+    @Published private(set) var currentTalkerUid: String?
 
     // MARK: - Private
 
@@ -36,6 +56,18 @@ final class PTTConnectionManager: NSObject, ObservableObject {
     private var livekitURL = ""
     private var roomName = ""
     private var idTokenProvider: (() async throws -> String)?
+
+    /// PTTボタンが現在物理的に押され続けているか。talk/start の応答待ち中に
+    /// ボタンが離された場合を検知するために使う(Web版のpttHeldと同じ役割)。
+    private var pttHeld = false
+    /// startTalking() の呼び出しごとに増分し、古い呼び出しの結果(応答)を
+    /// 無視するために使う(Web版のtalkRequestTokenと同じ役割)。
+    private var talkRequestToken = 0
+    /// 送話ロック保持中、失効(サーバー側TTL)前に延長し続けるための繰り返しタスク。
+    private var talkHeartbeatTask: Task<Void, Never>?
+    /// サーバー側 LOCK_TTL_MS(15秒, token-server/routes/talk.js) より
+    /// 十分短い間隔で延長する。Web版のTALK_LOCK_HEARTBEAT_MSと同じ値。
+    private static let talkLockHeartbeatNanoseconds: UInt64 = 5_000_000_000
 
     // MARK: - Public API
 
@@ -52,6 +84,7 @@ final class PTTConnectionManager: NSObject, ObservableObject {
         self.roomName = roomName
         self.idTokenProvider = idTokenProvider
         status = .connecting
+        currentTalkerUid = nil
 
         Task {
             do {
@@ -66,6 +99,11 @@ final class PTTConnectionManager: NSObject, ObservableObject {
                 // PTTのため、接続直後はマイクを無効化しておく
                 // (トラックは作られるが送信されない = ボタンを押すまで無音)
                 try await newRoom.localParticipant.setMicrophone(enabled: false)
+
+                // 接続時点で既に誰かが発話ロックを保持していた場合に備え、room.metadataから
+                // 初期状態を読み込む(メタデータ更新デリゲートは「変化した瞬間」しか
+                // 呼ばれないため、接続前からの既存状態は別途拾う必要がある。Web版と同じ理由)。
+                updateCurrentTalker(fromMetadataString: newRoom.metadata)
 
                 // 接続時点ですでに他の参加者がいる場合、参加後に発火するイベントだけでは
                 // 拾えないため room.remoteParticipants から初期状態を取り込む。
@@ -95,11 +133,20 @@ final class PTTConnectionManager: NSObject, ObservableObject {
 
     func disconnect() {
         guard let room else { return }
+        pttHeld = false
+        talkRequestToken += 1
+        stopTalkHeartbeat()
         Task {
+            // 自分がロックを保持したまま切断すると、サーバー側はTTL(15秒)経過まで
+            // 他の人をブロックし続けてしまうため、ベストエフォートで明示的に解放しておく。
+            // (失敗しても実害はTTL経過まで待つだけなので、エラーは握りつぶしてよい)
+            try? await self.talkRequest(.stop)
+
             await room.disconnect()
             self.room = nil
             participants.removeAll()
             isSending = false
+            currentTalkerUid = nil
             status = .disconnected
             appendLog("切断しました")
         }
@@ -108,28 +155,141 @@ final class PTTConnectionManager: NSObject, ObservableObject {
     /// PTTボタンが押された
     func startTalking() {
         guard let room, case .connected = status, !isSending else { return }
-        isSending = true
+        // 他人が発話ロックを保持中の場合、UI側(ContentView)がボタンのヒットテストを
+        // 無効化する想定だが、念のためここでも二重に弾く。
+        guard currentTalkerUid == nil else { return }
+
+        pttHeld = true
+        talkRequestToken += 1
+        let myToken = talkRequestToken
+
         Task {
             do {
-                try await room.localParticipant.setMicrophone(enabled: true)
+                try await talkRequest(.start)
             } catch {
-                appendLog("マイク有効化エラー: \(error.localizedDescription)")
-                isSending = false
+                // 他人が発話中(409 talk_locked)など。RoomMetadataの更新でほぼ同時に
+                // ボタンも無効化されるはずだが、競合(ほぼ同時押下)によるレースは起こりうる。
+                appendLog("発話を開始できませんでした: \(error.localizedDescription)")
+                if myToken == self.talkRequestToken { self.pttHeld = false }
+                return
+            }
+
+            // [レース対策] talk/start の応答待ち(Cloud Runのコールドスタート等で
+            // 1秒近くかかることがある)の間にボタンが離されていた場合、ここで送話を
+            // 開始してしまうと「離したのに喋り続ける」状態になる。ロックは既に
+            // 取得できてしまっているので、使わないままサーバー側に解放を伝える。
+            guard self.pttHeld, myToken == self.talkRequestToken else {
+                Task { try? await self.talkRequest(.stop) }
+                return
+            }
+
+            do {
+                try await room.localParticipant.setMicrophone(enabled: true)
+                self.isSending = true
+                self.startTalkHeartbeat()
+            } catch {
+                self.appendLog("マイク有効化エラー: \(error.localizedDescription)")
+                Task { try? await self.talkRequest(.stop) }
             }
         }
     }
 
-    /// PTTボタンが離された
-    func stopTalking() {
-        guard let room, isSending else { return }
+    /// PTTボタンが離された。
+    /// - Parameter forced: heartbeat失敗などサーバー側で既にロックを失っている場合にtrue。
+    ///   この場合 talk/stop の呼び出し自体は冪等なので害はないが、二重に呼ぶ必要はない。
+    func stopTalking(forced: Bool = false) {
+        pttHeld = false
+        talkRequestToken += 1 // 進行中のstartTalkingがあれば、その結果を無視させる
+        guard let room else { return }
+        stopTalkHeartbeat()
         isSending = false
+
         Task {
             do {
                 try await room.localParticipant.setMicrophone(enabled: false)
             } catch {
-                appendLog("マイク無効化エラー: \(error.localizedDescription)")
+                self.appendLog("マイク無効化エラー: \(error.localizedDescription)")
+            }
+            if !forced {
+                try? await self.talkRequest(.stop)
             }
         }
+    }
+
+    // MARK: - 送話ロック(talk/start・heartbeat・stop)
+
+    private enum TalkAction: String {
+        case start
+        case heartbeat
+        case stop
+    }
+
+    private func startTalkHeartbeat() {
+        stopTalkHeartbeat()
+        talkHeartbeatTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: Self.talkLockHeartbeatNanoseconds)
+                if Task.isCancelled { break }
+                do {
+                    try await self.talkRequest(.heartbeat)
+                } catch {
+                    // サーバー側で最大発話時間(MAX_HOLD_MS)を超えた等、ロックを失った
+                    // 場合はここに来る。本来は次のRoomMetadata更新でもUIが追従するが、
+                    // 念のため即座に強制的に送話を止める。
+                    self.appendLog("発話ロックの延長に失敗しました。送話を終了します: \(error.localizedDescription)")
+                    self.stopTalking(forced: true)
+                    break
+                }
+            }
+        }
+    }
+
+    private func stopTalkHeartbeat() {
+        talkHeartbeatTask?.cancel()
+        talkHeartbeatTask = nil
+    }
+
+    private func talkRequest(_ action: TalkAction) async throws {
+        guard let idTokenProvider else {
+            throw TokenFetchError.serverError(statusCode: 401, message: "サインインしていません")
+        }
+        let idToken = try await idTokenProvider()
+
+        let encodedRoomId = roomName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? roomName
+        guard let url = URL(string: "\(tokenServerURL)/rooms/\(encodedRoomId)/talk/\(action.rawValue)") else {
+            throw URLError(.badURL)
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+        guard http.statusCode == 200 else {
+            let serverMessage = try? JSONDecoder().decode(ServerErrorResponse.self, from: data).error
+            throw TokenFetchError.serverError(statusCode: http.statusCode, message: serverMessage)
+        }
+    }
+
+    /// LiveKitのRoom Metadata(JSON文字列)から currentTalker(uid) を取り出して反映する。
+    /// token-server/lib/roomMetadata.js が書き込む `{ currentTalker, recording, updatedAt }`
+    /// の形式を前提にしている。パース失敗時はnil(=誰も発話中でない)として扱う。
+    private func updateCurrentTalker(fromMetadataString metadata: String?) {
+        guard let metadata, let data = metadata.data(using: .utf8) else {
+            currentTalkerUid = nil
+            return
+        }
+        guard
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let talker = json["currentTalker"] as? String
+        else {
+            currentTalkerUid = nil
+            return
+        }
+        currentTalkerUid = talker
     }
 
     // MARK: - トークン取得
@@ -205,6 +365,7 @@ extension PTTConnectionManager: RoomDelegate {
             if connectionState == .disconnected {
                 self.participants.removeAll()
                 self.isSending = false
+                self.currentTalkerUid = nil
                 self.room = nil
                 if case .error = self.status {
                     // エラーによる切断は表示を残す
@@ -238,6 +399,9 @@ extension PTTConnectionManager: RoomDelegate {
             } else {
                 self.status = .connected(room: self.roomName)
             }
+            // 再接続の間に発話ロックの状態が変わっている可能性があるため、
+            // 最新のRoom Metadataから読み直しておく。
+            self.updateCurrentTalker(fromMetadataString: room.metadata)
         }
     }
 
@@ -258,6 +422,21 @@ extension PTTConnectionManager: RoomDelegate {
         Task { @MainActor in
             self.appendLog("接続失敗: \(error?.localizedDescription ?? "不明なエラー")")
             self.status = .error(error?.localizedDescription ?? "接続失敗")
+        }
+    }
+
+    /// [送話ロック連携] token-server(routes/talk.js → lib/roomMetadata.js)が
+    /// RoomServiceClient.updateRoomMetadata() で書き込む
+    /// `{ currentTalker, recording, updatedAt }` の変化を受け取る。
+    ///
+    /// [注意] このデリゲートメソッドの正確な名称・シグネチャはLiveKit Swift SDKの
+    /// バージョンによって変わりうる(client-sdk-swift 2.15.1時点を想定)。導入時は
+    /// 実際に依存させたバージョンのRoomDelegateの宣言と突き合わせて確認すること
+    /// (ptt-android側のRoom.eventsに関する既存の注意書きと同じ理由)。
+    nonisolated func room(_ room: Room, didUpdateMetadata metadata: String?) {
+        Task { @MainActor in
+            self.updateCurrentTalker(fromMetadataString: metadata)
+            self.appendLog("[診断] メタデータ更新受信: currentTalker=\(self.currentTalkerUid ?? "null")")
         }
     }
 
