@@ -20,20 +20,49 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # 静的HTML/JSのみなのでビルドステップは無いが、
-  # 最低限のリンク切れ・構文チェックとして軽い検証を挟む
-  lint:
+  # [変更点] 以前は静的HTML/JSをそのまま配信していたためビルドステップが無く、
+  # index.htmlの構文チェックだけを行っていた。Vue+Vite化に伴い、lintとtestに加えて
+  # ここで本番ビルド(vue-tsc + vite build)まで通すことをCIの必須条件にする
+  # (以前のhtml-validateは、ビルド後のdist/index.htmlに対して意味のあるチェックには
+  # ならないため廃止した)。
+  build-and-test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ptt-client
     steps:
       - uses: actions/checkout@v4
-      - name: Check index.html exists and is well-formed HTML
-        run: |
-          test -f ptt-client/public/index.html
-          npx --yes html-validate ptt-client/public/index.html || true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: ptt-client/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm run test
+
+      - name: Build (type-check + vite build)
+        run: npm run build
+
+      # 後続のdeployジョブ(PR preview / production)で使い回すため、
+      # ビルド成果物だけをartifactとして保存する。
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptt-client-dist
+          path: ptt-client/dist
+          retention-days: 1
 
   deploy-preview:
     if: github.event_name == 'pull_request'
-    needs: lint
+    needs: build-and-test
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -41,6 +70,13 @@ jobs:
       checks: write
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ptt-client-dist
+          path: ptt-client/dist
+
       - name: Deploy to Firebase Hosting Preview Channel (client target)
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
@@ -53,12 +89,19 @@ jobs:
 
   deploy-production:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: lint
+    needs: build-and-test
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ptt-client-dist
+          path: ptt-client/dist
+
       - name: Deploy to Firebase Hosting (client target, live)
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:

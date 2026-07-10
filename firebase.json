@@ -2,7 +2,7 @@
   "hosting": [
     {
       "target": "client",
-      "public": "ptt-client/public",
+      "public": "ptt-client/dist",
       "ignore": [
         "firebase.json",
         "**/.*",

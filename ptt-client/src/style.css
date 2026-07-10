@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * [デザイン方針]
+ * 元の ptt-client/public/index.html (:root カスタムプロパティ) の値を
+ * そのままHSLに変換して shadcn-vue のセマンティックトークンへ写像している。
+ * 見た目は変えず、実装だけをVue+Tailwind+shadcn-vueに移行するのが今回のゴール。
+ * Phase 7のデザインシステム策定時にここを正式に見直す。
+ */
+@layer base {
+  :root {
+    --background: 156 16% 6%; /* #0d1210 */
+    --foreground: 145 18% 87%; /* #d8e4dd */
+
+    --card: 154 15% 9%; /* #141b18 */
+    --card-foreground: 145 18% 87%;
+
+    --popover: 154 15% 9%;
+    --popover-foreground: 145 18% 87%;
+
+    --primary: 19 100% 62%; /* #ff7a3c アクセントオレンジ */
+    --primary-foreground: 156 16% 6%;
+
+    --secondary: 136 13% 17%; /* #263129 (line) */
+    --secondary-foreground: 145 18% 87%;
+
+    --muted: 136 13% 17%;
+    --muted-foreground: 155 7% 47%; /* #6f8079 */
+
+    --accent: 21 48% 24%; /* #5c3520 (accent-dim / hover背景) */
+    --accent-foreground: 19 100% 62%;
+
+    --destructive: 0 100% 68%; /* #ff5c5c */
+    --destructive-foreground: 156 16% 6%;
+
+    --border: 136 13% 17%;
+    --input: 136 13% 17%;
+    --ring: 19 100% 62%;
+
+    /* shadcn標準セットに無い、アプリ固有の状態色 */
+    --live: 147 69% 55%; /* #3ddc84 送話中/接続中インジケーター */
+
+    --radius: 0.25rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-mono antialiased;
+  }
+}
