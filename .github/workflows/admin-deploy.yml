@@ -23,20 +23,49 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # 静的HTML/JSのみなのでビルドステップは無いが、
-  # 最低限のリンク切れ・構文チェックとして軽い検証を挟む(web-deploy.ymlと同じ)
-  lint:
+  # [変更点] 以前は静的HTML/JSをそのまま配信していたためビルドステップが無く、
+  # index.htmlの構文チェック(html-validate)だけを行っていた。Vue+Vite化に伴い、
+  # web-deploy.ymlと同じくlint・test・本番ビルド(vue-tsc + vite build)まで通すことを
+  # CIの必須条件にする(html-validateはビルド後のdist/index.htmlに対して意味のある
+  # チェックにならないため廃止)。
+  build-and-test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: admin-dashboard
     steps:
       - uses: actions/checkout@v4
-      - name: Check index.html exists and is well-formed HTML
-        run: |
-          test -f admin-dashboard/public/index.html
-          npx --yes html-validate admin-dashboard/public/index.html || true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: admin-dashboard/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm run test
+
+      - name: Build (type-check + vite build)
+        run: npm run build
+
+      # 後続のdeployジョブ(PR preview / production)で使い回すため、
+      # ビルド成果物だけをartifactとして保存する。
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: admin-dashboard-dist
+          path: admin-dashboard/dist
+          retention-days: 1
 
   deploy-preview:
     if: github.event_name == 'pull_request'
-    needs: lint
+    needs: build-and-test
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -44,6 +73,13 @@ jobs:
       checks: write
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: admin-dashboard-dist
+          path: admin-dashboard/dist
+
       - name: Deploy to Firebase Hosting Preview Channel (admin target)
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
@@ -56,12 +92,19 @@ jobs:
 
   deploy-production:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: lint
+    needs: build-and-test
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: admin-dashboard-dist
+          path: admin-dashboard/dist
+
       - name: Deploy to Firebase Hosting (admin target, live)
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:

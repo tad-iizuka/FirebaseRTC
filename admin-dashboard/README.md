@@ -1,106 +1,87 @@
-# PTT 管理者ダッシュボード — Firebase Hosting 正式デプロイ
+# PTT 管理者ダッシュボード — Vue 3 + TypeScript + Pinia + Tailwind + shadcn-vue
 
-`dev-tools/admin-dashboard.html`(ローカル専用の開発ツール)とは別に、こちらは
-**Firebase Hostingの独立したサイト**として正式運用するための配置です。
-`ptt-client`(Web版本体)と同じFirebaseプロジェクト内に、Hostingの
-**マルチサイト機能**でもう1つサイトを追加し、`firebase.json`のtargetで
-既存のhosting設定パターンをそのまま流用しています。
+`admin-dashboard/public/index.html`(vanilla JS実装)を置き換える、`ptt-client`と同じ技術スタックの
+リニューアル版です。
 
-```
-admin-dashboard/
-  public/index.html   … 本番配信するダッシュボード本体 (dev-tools版から複製・調整)
-  README.md           … このファイル
-```
+## `ptt-client`との関係(重要)
 
-## なぜdev-tools版をそのまま公開しないのか
+`独立プロジェクトとして複製する`方針で作っているため、`ptt-client`とは**コード上の依存関係が
+一切ありません**。以下のファイルは`ptt-client`から内容をそのままコピーしたものです。将来
+pnpm workspacesへ統合する際は、この一覧がそのまま「共通パッケージへ切り出す候補」になります。
 
-`dev-tools/admin-dashboard.html` はREADME内に明記の通り「ローカル専用の開発ツール」
-という位置づけで、`file://` や `python3 -m http.server` での一時的な起動を前提にした
-注意書きが入っている。正式にURLを持たせて運用する場合は
+| ファイル | 内容 |
+|---|---|
+| `src/lib/firebase.ts` | Firebase初期化(同一プロジェクト `fir-rtc-de1f4` を指す) |
+| `src/lib/api.ts` | 認証付きfetchラッパー(`authedFetch` / `ApiError`) |
+| `src/lib/utils.ts` | `cn()` |
+| `src/components/ui/*.vue` | shadcn-vue風UIプリミティブ(Button/Input/Card/Badge) |
+| `src/stores/auth.ts` | Google/Appleサインイン |
+| `src/style.css` / `tailwind.config.ts` | ダーク+monospaceのデザイントークン |
+| `eslint.config.js` / `tsconfig.*` / `vite.config.ts` / `vitest.config.ts` | ツールチェイン設定一式 |
 
-- Firebase Authの「承認済みドメイン」に本番ドメインを登録する必要がある
-  (`file://`や`localhost`と違い、明示的な登録がないとGoogleサインインの
-  ポップアップが `auth/unauthorized-domain` で失敗する)
-- 検索エンジンにインデックスされないよう `noindex` を明示する
-- 開発専用の注意書き(ローカルサーバーの起動方法等)を本番向けの文言に置き換える
+`src/types/api.ts`は`ptt-client`版から`ServerErrorResponse`だけを抜き出した最小構成です
+(PTT本体のルーム/チャット等の型はこのアプリでは不要なため)。
 
-といった違いがあるため、`dev-tools/`側は開発時の手早い動作確認用として残しつつ、
-別ディレクトリとして正式版を用意している。
+admin固有で新規に書いたのは以下です。
 
-## アクセス制御について
+- `src/types/admin.ts` — `GET /admin/rooms` / `GET /admin/rooms/:roomId` のレスポンス型
+- `src/stores/adminRooms.ts` — 一覧取得・ページング・詳細取得・403判定
+- `src/stores/settings.ts` — トークンサーバーURLの永続化(LiveKit URLは不要なので`ptt-client`版から削減)
+- `src/lib/format.ts` — 日時フォーマットの小ユーティリティ
+- `src/views/RoomsListView.vue` / `RoomDetailView.vue` / `AuthView.vue`
+- `src/components/AppHeader.vue`(channelLabelが無い、admin専用の簡略版)
 
-このサイト自体はFirebase Hostingの公開URLとして誰でも開けるが、実際に意味のある
-データ(`GET /admin/rooms` 等)を返すかどうかはtoken-server側の
-`middleware/requireAdmin.js`(`adminUsers/{uid}.permissions` に `rooms:monitor` が
-あるか)で判定される。つまり「ページは公開・APIが権限で守る」設計であり、
-`firestore.rules`が `rooms`/`members`/`reports` を守っているのと同じ考え方。
-Hosting側のアクセス制御(Firebase Hosting自体へのBasic認証等)は現状導入していない。
-社外に一切見せたくない場合は、追加でCloud Armor/IAP相当の仕組みの導入を検討すること。
-
-## 一回限りのセットアップ
-
-### 1. Hostingサイトの追加作成
-
-デフォルトサイト(`ptt-client`用、サイトIDは通常プロジェクトIDと同じ
-`fir-rtc-de1f4`)とは別に、管理者ダッシュボード専用のサイトを新規作成する。
+## セットアップ
 
 ```bash
-firebase hosting:sites:create fir-rtc-de1f4-admin --project fir-rtc-de1f4
+cd admin-dashboard
+npm install
+npm run dev
 ```
-
-サイトIDは他のFirebaseプロジェクトと重複しないグローバルに一意な文字列である
-必要がある。上記のIDが既に使われている場合は、`fir-rtc-de1f4-admin` の部分を
-別の一意な値に変え、`.firebaserc` の `targets.fir-rtc-de1f4.hosting.admin` の値も
-合わせて書き換えること。
-
-### 2. targetの紐付け
-
-`.firebaserc` に既に `targets` を追加済みだが、初回はローカルでも一度
-明示的に紐付けておくと事故が少ない。
 
 ```bash
-firebase target:apply hosting client fir-rtc-de1f4 --project fir-rtc-de1f4
-firebase target:apply hosting admin fir-rtc-de1f4-admin --project fir-rtc-de1f4
+npm run build     # 型チェック + 本番ビルド → dist/
+npm run test
+npm run lint
+npm run format
 ```
 
-### 3. Firebase Authの承認済みドメインに追加
+`npm install` → `lint` → `test` → `build` まで通ることをこの環境で確認済みです。
 
-Firebase Console > Authentication > Settings > 承認済みドメイン に、
-サイト作成後に払い出される既定ドメイン
-(`fir-rtc-de1f4-admin.web.app` / `fir-rtc-de1f4-admin.firebaseapp.com`)を追加する。
-これを行わないとGoogleサインインが `auth/unauthorized-domain` で失敗する。
+## 権限の付与
 
-カスタムドメインを充てる場合は、そのドメインも別途Hosting側の
-「カスタムドメインの追加」手順で紐付けた上で、同様に承認済みドメインへ追加すること。
+閲覧には Firestore の `adminUsers/{uid}.permissions` に `rooms:monitor` が必要です。
 
-### 4. GitHub Actions用の環境変数・シークレット
+```bash
+node dev-tools/grant-admin-permission.js grant <uid> rooms:monitor "運用チームリーダー"
+```
 
-`ptt-client`用の `web-deploy.yml` が既に使っている以下を、そのまま
-`admin-deploy.yml` でも再利用している(新規追加は不要):
+権限が無いアカウントでサインインすると、一覧/詳細どちらも「管理者権限がありません」という
+専用メッセージが表示されます(`adminRooms.isForbidden`で汎用エラーと区別しています)。
 
-- Secret: `FIREBASE_SERVICE_ACCOUNT`
-- Variable: `FIREBASE_PROJECT_ID`
+## `firebase.json` / CI に必要な変更
 
-このサービスアカウントに、新規作成した `fir-rtc-de1f4-admin` サイトへの
-デプロイ権限(`Firebase Hosting Admin` ロール等、プロジェクト全体に付与済みなら
-追加作業は不要)があることを確認する。
+`ptt-client`と同様、ビルドレスの静的配信からVite成果物の配信に変わります。
 
-### 5. 動作確認
+```diff
+  {
+    "target": "admin",
+-   "public": "admin-dashboard/public",
++   "public": "admin-dashboard/dist",
+    "ignore": [...],
+    "headers": [...]
+  }
+```
 
-1. `firebase deploy --only hosting:admin --project fir-rtc-de1f4` でローカルから
-   一度手動デプロイし、`https://fir-rtc-de1f4-admin.web.app` が開けることを確認する
-   (以降はmainブランチへのマージで `admin-deploy.yml` が自動デプロイする)。
-2. `rooms:monitor` 権限を付与済みのアカウントでサインインし、ルーム一覧が
-   表示されることを確認する(`node dev-tools/grant-admin-permission.js grant <uid> rooms:monitor`)。
-3. 権限を持たないアカウントでサインインすると `GET /admin/rooms` が403になり、
-   一覧の代わりにエラーメッセージが表示されることを確認する。
-4. `firebase deploy --only hosting:client` を実行しても `ptt-client` 側のみが
-   更新され、管理者サイトに影響しないことを確認する(targetが分離されているため)。
+`.github/workflows/admin-deploy.yml` に、`web-deploy.yml`(更新版)と同じ形で
+Node.jsセットアップ + `npm ci` + `npm run lint` + `npm run test` + `npm run build` を追加し、
+`ptt-client-dist` と同様に `admin-dashboard-dist` をartifactとして
+`deploy-preview` / `deploy-production` の両ジョブへ渡すよう変更してください
+(現行の `html-validate` チェックは廃止します)。
 
-## 動作確認チェックリスト(追加分)
+## 意図的に省略した箇所
 
-- [ ] `fir-rtc-de1f4-admin.web.app` にアクセスでき、`ptt-client`本体とは別ドメインである
-- [ ] 承認済みドメイン未登録の状態でサインインを試すと `auth/unauthorized-domain` になる(登録後は解消)
-- [ ] mainブランチへの `admin-dashboard/**` 変更マージで自動デプロイされる
-- [ ] `firebase.json` / `.firebaserc` のみの変更でも `admin-deploy.yml` / `web-deploy.yml` の両方がトリガーされる
-- [ ] レスポンスヘッダーに `X-Robots-Tag: noindex, nofollow` が付与されている
+- `dev-tools/admin-dashboard.html` は開発専用ツールとして今回は手を付けていません(元々
+  ローカル専用の位置づけのため)。
+- ページング操作は「次のページ」のみです(旧実装の`cursorStack`による「前のページ」機能は
+  移植していません)。必要であれば`stores/adminRooms.ts`に`goToPreviousPage()`を追加してください。

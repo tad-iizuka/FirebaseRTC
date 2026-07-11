@@ -11,7 +11,7 @@
     },
     {
       "target": "admin",
-      "public": "admin-dashboard/public",
+      "public": "admin-dashboard/dist",
       "ignore": [
         "firebase.json",
         "**/.*",
