@@ -55,6 +55,7 @@ export default {
         },
         // アプリ固有の追加トークン(shadcn標準セットには無い)
         live: 'hsl(var(--live))',
+        warning: 'hsl(var(--warning))',
       },
       borderRadius: {
         lg: 'var(--radius)',

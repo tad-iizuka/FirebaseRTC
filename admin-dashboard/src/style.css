@@ -8,6 +8,10 @@
  * そのままHSLに変換して shadcn-vue のセマンティックトークンへ写像している。
  * 見た目は変えず、実装だけをVue+Tailwind+shadcn-vueに移行するのが今回のゴール。
  * Phase 7のデザインシステム策定時にここを正式に見直す。
+ *
+ * [デザインシステム統一] ptt-design-system.md の --warning (#f3b833) を追加。
+ * 値は shared/design-tokens.css / ptt-ios Color+Tokens.swift / Android PTTColors.kt
+ * と同期させること。
  */
 @layer base {
   :root {
@@ -41,6 +45,7 @@
 
     /* shadcn標準セットに無い、アプリ固有の状態色 */
     --live: 147 69% 55%; /* #3ddc84 送話中/接続中インジケーター */
+    --warning: 42 89% 58%; /* #f3b833 再接続中インジケーター */
 
     --radius: 0.25rem;
   }

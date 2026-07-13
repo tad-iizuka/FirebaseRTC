@@ -14,7 +14,9 @@ const dotClass = computed(() =>
     'h-[7px] w-[7px] shrink-0 rounded-full bg-muted-foreground',
     props.kind === 'connected' && 'bg-live shadow-[0_0_6px_hsl(var(--live))]',
     props.kind === 'error' && 'bg-destructive',
-    props.kind === 'reconnecting' && 'bg-primary',
+    // [デザインシステム統一] 以前は accent(--primary)を流用していたが、
+    // Android版(PTTColors.Warning)・iOS版(.pttWarning)と同じ意味の色に揃える。
+    props.kind === 'reconnecting' && 'bg-warning shadow-[0_0_6px_hsl(var(--warning))]',
   ),
 )
 

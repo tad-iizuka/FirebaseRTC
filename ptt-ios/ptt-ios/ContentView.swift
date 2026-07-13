@@ -64,8 +64,8 @@ struct ContentView: View {
                 }
             }
         }
-        .background(Color(red: 0.05, green: 0.07, blue: 0.06))
-        .foregroundColor(Color(red: 0.85, green: 0.89, blue: 0.86))
+        .background(.pttBackground)
+        .foregroundColor(.pttText)
         .onChange(of: auth.currentUser?.uid, initial: true) { _, newUid in
             savedRooms.load(forUid: newUid)
         }
@@ -107,15 +107,15 @@ struct ContentView: View {
             .buttonStyle(.plain)
             .overlay(
                 RoundedRectangle(cornerRadius: 2)
-                    .stroke(Color.orange, lineWidth: 1)
+                    .stroke(Color.pttAccent, lineWidth: 1)
             )
-            .foregroundColor(.orange)
+            .foregroundColor(.pttAccent)
             .disabled(auth.isSigningIn)
 
             if let message = auth.lastErrorMessage {
                 Text(message)
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(Color(red: 1.0, green: 0.36, blue: 0.36))
+                    .foregroundColor(.pttDanger)
             }
         }
         .padding(14)
@@ -127,7 +127,7 @@ struct ContentView: View {
         HStack {
             Text("PTT CLIENT")
                 .font(.system(size: 11, weight: .regular, design: .monospaced))
-                .foregroundColor(.gray)
+                .foregroundColor(.pttMuted)
             Spacer()
             if auth.currentUser != nil {
                 Text(auth.displayName ?? "")
@@ -138,7 +138,7 @@ struct ContentView: View {
                     auth.signOut()
                 }
                 .font(.system(size: 11, design: .monospaced))
-                .foregroundColor(.gray)
+                .foregroundColor(.pttMuted)
                 .padding(.leading, 8)
             }
             Spacer()
@@ -165,7 +165,7 @@ struct ContentView: View {
                 .frame(width: 7, height: 7)
             Text(statusText)
                 .font(.system(size: 12, design: .monospaced))
-                .foregroundColor(.gray)
+                .foregroundColor(.pttMuted)
             Spacer()
         }
         .padding(.horizontal, 14)
@@ -174,10 +174,10 @@ struct ContentView: View {
 
     private var statusColor: Color {
         switch connection.status {
-        case .connected: return Color(red: 0.24, green: 0.86, blue: 0.52)
-        case .reconnecting: return Color(red: 0.95, green: 0.72, blue: 0.2) // 黄色系: 再接続試行中であることを目立たせる
-        case .error: return Color(red: 1.0, green: 0.36, blue: 0.36)
-        default: return .gray
+        case .connected: return .pttLive
+        case .reconnecting: return .pttWarning // 黄色系: 再接続試行中であることを目立たせる
+        case .error: return .pttDanger
+        default: return .pttMuted
         }
     }
 
@@ -199,7 +199,7 @@ struct ContentView: View {
             if let banNotice {
                 Text(banNotice)
                     .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(Color(red: 1.0, green: 0.36, blue: 0.36))
+                    .foregroundColor(.pttDanger)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
@@ -213,13 +213,13 @@ struct ContentView: View {
                     .padding(.vertical, 9)
             }
             .buttonStyle(.plain)
-            .overlay(RoundedRectangle(cornerRadius: 2).stroke(Color.orange, lineWidth: 1))
-            .foregroundColor(.orange)
+            .overlay(RoundedRectangle(cornerRadius: 2).stroke(Color.pttAccent, lineWidth: 1))
+            .foregroundColor(.pttAccent)
             .disabled(roomManager.isWorking)
 
             Text("— または —")
                 .font(.system(size: 10, design: .monospaced))
-                .foregroundColor(.gray)
+                .foregroundColor(.pttMuted)
                 .frame(maxWidth: .infinity)
 
             HStack(spacing: 10) {
@@ -233,20 +233,20 @@ struct ContentView: View {
                     .padding(.vertical, 9)
             }
             .buttonStyle(.plain)
-            .overlay(RoundedRectangle(cornerRadius: 2).stroke(Color.gray.opacity(0.5), lineWidth: 1))
-            .foregroundColor(.gray)
+            .overlay(RoundedRectangle(cornerRadius: 2).stroke(.pttLine, lineWidth: 1))
+            .foregroundColor(.pttMuted)
             .disabled(roomManager.isWorking)
 
             if let message = roomManager.lastErrorMessage {
                 Text(message)
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(Color(red: 1.0, green: 0.36, blue: 0.36))
+                    .foregroundColor(.pttDanger)
             }
 
             if !savedRooms.rooms.isEmpty {
                 Text("— 最近使ったルーム —")
                     .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(.gray)
+                    .foregroundColor(.pttMuted)
                     .frame(maxWidth: .infinity)
                     .padding(.top, 4)
 
@@ -271,7 +271,7 @@ struct ContentView: View {
                         .lineLimit(1)
                     Text("(\(saved.roomId))")
                         .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(.gray)
+                        .foregroundColor(.pttMuted)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
@@ -279,13 +279,13 @@ struct ContentView: View {
                 .padding(8)
             }
             .buttonStyle(.plain)
-            .background(Color.black.opacity(0.3))
+            .background(.pttPanel.opacity(0.6))
 
             Button("削除") {
                 savedRooms.remove(roomId: saved.roomId)
             }
             .font(.system(size: 11, design: .monospaced))
-            .foregroundColor(.gray)
+            .foregroundColor(.pttMuted)
         }
     }
 
@@ -298,17 +298,17 @@ struct ContentView: View {
                     .font(.system(size: 12, design: .monospaced))
                 Text(code)
                     .font(.system(size: 18, weight: .bold, design: .monospaced))
-                    .foregroundColor(.orange)
+                    .foregroundColor(.pttAccent)
                 Text("ルームID: \(roomId)")
                     .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(.gray)
+                    .foregroundColor(.pttMuted)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(10)
             .overlay(
                 RoundedRectangle(cornerRadius: 2)
                     .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4]))
-                    .foregroundColor(.orange)
+                    .foregroundColor(.pttAccent)
             )
             .padding(14)
         }
@@ -323,8 +323,8 @@ struct ContentView: View {
                 .padding(.vertical, 9)
         }
         .buttonStyle(.plain)
-        .overlay(RoundedRectangle(cornerRadius: 2).stroke(Color.gray.opacity(0.4), lineWidth: 1))
-        .foregroundColor(.gray)
+        .overlay(RoundedRectangle(cornerRadius: 2).stroke(.pttLine, lineWidth: 1))
+        .foregroundColor(.pttMuted)
         .padding(14)
     }
 
@@ -332,11 +332,11 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label)
                 .font(.system(size: 10, design: .monospaced))
-                .foregroundColor(.gray)
+                .foregroundColor(.pttMuted)
             TextField(placeholder, text: text)
                 .font(.system(size: 14, design: .monospaced))
                 .padding(8)
-                .background(Color.black.opacity(0.3))
+                .background(.pttPanel.opacity(0.6))
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
         }
@@ -448,14 +448,14 @@ struct ContentView: View {
         let canTalk = isConnected && !someoneElseIsTalking
         return VStack(spacing: 14) {
             Circle()
-                .strokeBorder(connection.isSending ? Color.orange : Color.gray.opacity(0.4), lineWidth: 2)
-                .background(Circle().fill(Color.black.opacity(0.3)))
+                .strokeBorder(connection.isSending ? Color.pttAccent : .pttLine, lineWidth: 2)
+                .background(Circle().fill(.pttPanel.opacity(0.6)))
                 .frame(width: 150, height: 150)
                 .overlay(
                     Text(talkAreaLabel)
                         .font(.system(size: 13, design: .monospaced))
                         .multilineTextAlignment(.center)
-                        .foregroundColor(connection.isSending ? .orange : .gray)
+                        .foregroundColor(connection.isSending ? .pttAccent : .pttMuted)
                         .padding(.horizontal, 10)
                 )
                 .scaleEffect(connection.isSending ? 0.97 : 1.0)
@@ -469,7 +469,7 @@ struct ContentView: View {
 
             Text("ボタンを押している間だけ音声が送信されます")
                 .font(.system(size: 11, design: .monospaced))
-                .foregroundColor(.gray)
+                .foregroundColor(.pttMuted)
         }
         .padding(.vertical, 24)
     }
@@ -488,12 +488,12 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("参加者(緑=送話中)")
                 .font(.system(size: 10, design: .monospaced))
-                .foregroundColor(.gray)
+                .foregroundColor(.pttMuted)
 
             if connection.participants.isEmpty {
                 Text("— なし —")
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(.gray)
+                    .foregroundColor(.pttMuted)
             } else {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(sortedParticipants) { info in
@@ -518,7 +518,7 @@ struct ContentView: View {
         HStack(spacing: 8) {
             Text(info.name)
                 .font(.system(size: 12, design: .monospaced))
-                .foregroundColor(info.isMuted ? .gray : Color(red: 0.24, green: 0.86, blue: 0.52))
+                .foregroundColor(info.isMuted ? .pttMuted : .pttLive)
                 .lineLimit(1)
 
             Spacer()
@@ -528,7 +528,7 @@ struct ContentView: View {
                     banTarget = info
                 }
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .foregroundColor(Color(red: 1.0, green: 0.36, blue: 0.36))
+                .foregroundColor(.pttDanger)
             }
         }
     }
@@ -542,7 +542,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("チャット")
                 .font(.system(size: 10, design: .monospaced))
-                .foregroundColor(.gray)
+                .foregroundColor(.pttMuted)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
@@ -551,32 +551,32 @@ struct ContentView: View {
                             .font(.system(size: 12, design: .monospaced))
                             .foregroundColor(
                                 message.uid == auth.currentUser?.uid
-                                    ? Color(red: 0.24, green: 0.86, blue: 0.52)
-                                    : Color(red: 0.85, green: 0.89, blue: 0.86)
+                                    ? .pttLive
+                                    : .pttText
                             )
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
             }
             .frame(maxHeight: 180)
-            .background(Color.black.opacity(0.15))
+            .background(.pttPanel.opacity(0.4))
 
             if let errorMessage = chat.errorMessage {
                 Text(errorMessage)
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(Color(red: 1.0, green: 0.36, blue: 0.36))
+                    .foregroundColor(.pttDanger)
             }
 
             HStack(spacing: 8) {
                 TextField("メッセージを入力", text: $chatInputText)
                     .font(.system(size: 14, design: .monospaced))
                     .padding(8)
-                    .background(Color.black.opacity(0.3))
+                    .background(.pttPanel.opacity(0.6))
                     .onSubmit { sendChatMessage() }
 
                 Button("送信") { sendChatMessage() }
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundColor(.orange)
+                    .foregroundColor(.pttAccent)
                     .disabled(chatInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
@@ -607,7 +607,7 @@ struct ContentView: View {
             ForEach(connection.logLines.suffix(50), id: \.self) { line in
                 Text(line)
                     .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(.gray)
+                    .foregroundColor(.pttMuted)
             }
         }
         .padding(10)

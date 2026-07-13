@@ -1,0 +1,26 @@
+/**
+ * shared/design-tokens.css
+ *
+ * PTTデザインシステムのカラートークン(単一の正)。
+ * 詳細はリポジトリルートの ptt-design-system.md「1. カラートークン」表を参照。
+ *
+ * 以前は ptt-client/public/index.html, admin-dashboard/public/index.html,
+ * dev-tools/admin-dashboard.html の3ファイルがそれぞれ独立した <style> 内 :root で
+ * 同一の変数を再定義していた(コピペ起源で完全一致していたが、変更時に3箇所同時に
+ * 直す必要があり、実際に --warning のようなAndroid版にしかない色が同期漏れしていた)。
+ * 今後はこのファイルを <link rel="stylesheet"> で読み込み、各HTMLの :root定義は
+ * 削除すること。
+ */
+:root {
+  --bg: #0d1210;
+  --panel: #141b18;
+  --line: #263129;
+  --text: #d8e4dd;
+  --muted: #6f8079;
+  --accent: #ff7a3c;
+  --accent-dim: #5c3520;
+  --live: #3ddc84;
+  --warning: #f3b833;
+  --danger: #ff5c5c;
+  --mono: "SF Mono", "Menlo", "Consolas", monospace;
+}

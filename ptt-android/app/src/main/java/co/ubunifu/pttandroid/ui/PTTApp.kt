@@ -72,12 +72,9 @@ import co.ubunifu.pttandroid.model.ParticipantInfo
 import co.ubunifu.pttandroid.room.PTTRoomManager
 import co.ubunifu.pttandroid.room.PTTSavedRoomsStore
 import co.ubunifu.pttandroid.room.SavedRoom
+import co.ubunifu.pttandroid.ui.theme.PTTColors
 import kotlinx.coroutines.launch
 
-private val Live = Color(0xFF3DDC84)
-private val Danger = Color(0xFFFF5C5C)
-private val Accent = Color(0xFFFF7A3C)
-private val Muted = Color(0xFF6F8079)
 private val Mono = FontFamily.Monospace
 
 @Composable
@@ -184,7 +181,7 @@ fun PTTApp(
         )
 
         banNotice?.let { notice ->
-            Text(notice, fontFamily = Mono, fontSize = 12.sp, color = Danger)
+            Text(notice, fontFamily = Mono, fontSize = 12.sp, color = PTTColors.Danger)
             Spacer(Modifier.height(8.dp))
         }
 
@@ -308,7 +305,7 @@ fun PTTApp(
             confirmButton = {
                 Button(
                     onClick = { confirmBan(target) },
-                    colors = ButtonDefaults.buttonColors(containerColor = Danger),
+                    colors = ButtonDefaults.buttonColors(containerColor = PTTColors.Danger),
                 ) {
                     Text("BANする", fontFamily = Mono)
                 }
@@ -335,7 +332,7 @@ private fun HeaderRow(currentUserName: String?, channelLabel: String, onSignOut:
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("PTT CLIENT", fontFamily = Mono, fontSize = 11.sp, color = Muted)
+        Text("PTT CLIENT", fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Muted)
         if (currentUserName != null) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(currentUserName, fontFamily = Mono, fontSize = 12.sp)
@@ -344,7 +341,7 @@ private fun HeaderRow(currentUserName: String?, channelLabel: String, onSignOut:
                     "サインアウト",
                     fontFamily = Mono,
                     fontSize = 11.sp,
-                    color = Muted,
+                    color = PTTColors.Muted,
                     modifier = Modifier.pointerInput(Unit) {
                         detectTapGestures(onTap = { onSignOut() })
                     },
@@ -362,22 +359,22 @@ private fun AuthSection(errorMessage: String?, onSignIn: () -> Unit) {
         Button(
             onClick = onSignIn,
             modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = Accent),
+            colors = ButtonDefaults.buttonColors(containerColor = PTTColors.Accent),
         ) {
             Text("Googleでサインイン", fontFamily = Mono)
         }
-        errorMessage?.let { Text(it, color = Danger, fontFamily = Mono, fontSize = 11.sp) }
+        errorMessage?.let { Text(it, color = PTTColors.Danger, fontFamily = Mono, fontSize = 11.sp) }
     }
 }
 
 @Composable
 private fun StatusRow(status: ConnectionStatus) {
     val (color, text) = when (status) {
-        is ConnectionStatus.Disconnected -> Muted to "サーバ未接続"
-        is ConnectionStatus.Connecting -> Muted to "接続中..."
-        is ConnectionStatus.Connected -> Live to "接続中 (room=${status.room})"
-        is ConnectionStatus.Reconnecting -> Color(0xFFF3B833) to "再接続中... (room=${status.room})"
-        is ConnectionStatus.Error -> Danger to "エラー: ${status.message}"
+        is ConnectionStatus.Disconnected -> PTTColors.Muted to "サーバ未接続"
+        is ConnectionStatus.Connecting -> PTTColors.Muted to "接続中..."
+        is ConnectionStatus.Connected -> PTTColors.Live to "接続中 (room=${status.room})"
+        is ConnectionStatus.Reconnecting -> PTTColors.Warning to "再接続中... (room=${status.room})"
+        is ConnectionStatus.Error -> PTTColors.Danger to "エラー: ${status.message}"
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(
@@ -390,7 +387,7 @@ private fun StatusRow(status: ConnectionStatus) {
             }
         }
         Spacer(Modifier.width(8.dp))
-        Text(text, fontFamily = Mono, fontSize = 12.sp, color = Muted)
+        Text(text, fontFamily = Mono, fontSize = 12.sp, color = PTTColors.Muted)
     }
     Spacer(Modifier.height(10.dp))
 }
@@ -401,8 +398,8 @@ private fun InviteBox(inviteCode: String?, roomId: String?) {
     Card(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
         Column(Modifier.padding(10.dp)) {
             Text("このルームの招待コード(参加者に共有してください):", fontFamily = Mono, fontSize = 12.sp)
-            Text(inviteCode, fontFamily = Mono, fontSize = 18.sp, color = Accent)
-            Text("ルームID: $roomId", fontFamily = Mono, fontSize = 12.sp, color = Muted)
+            Text(inviteCode, fontFamily = Mono, fontSize = 18.sp, color = PTTColors.Accent)
+            Text("ルームID: $roomId", fontFamily = Mono, fontSize = 12.sp, color = PTTColors.Muted)
         }
     }
 }
@@ -445,13 +442,13 @@ private fun RoomSelectionSection(
             onClick = onCreateRoom,
             enabled = !isWorking,
             modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = Accent),
+            colors = ButtonDefaults.buttonColors(containerColor = PTTColors.Accent),
         ) {
             if (isWorking) CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White)
             else Text("新しいルームを作成する", fontFamily = Mono)
         }
 
-        Text("— または —", fontFamily = Mono, fontSize = 10.sp, color = Muted, modifier = Modifier.fillMaxWidth())
+        Text("— または —", fontFamily = Mono, fontSize = 10.sp, color = PTTColors.Muted, modifier = Modifier.fillMaxWidth())
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedTextField(
@@ -473,12 +470,12 @@ private fun RoomSelectionSection(
             Text("招待コードで参加する", fontFamily = Mono)
         }
 
-        errorMessage?.let { Text(it, color = Danger, fontFamily = Mono, fontSize = 11.sp) }
+        errorMessage?.let { Text(it, color = PTTColors.Danger, fontFamily = Mono, fontSize = 11.sp) }
 
         if (savedRooms.isNotEmpty()) {
             Text(
                 "— 最近使ったルーム —",
-                fontFamily = Mono, fontSize = 10.sp, color = Muted,
+                fontFamily = Mono, fontSize = 10.sp, color = PTTColors.Muted,
                 modifier = Modifier.fillMaxWidth(),
             )
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -505,14 +502,14 @@ private fun SavedRoomRow(saved: SavedRoom, onOpen: (SavedRoom) -> Unit, onRemove
                 Text(saved.label, fontFamily = Mono, fontSize = 12.sp, maxLines = 1)
                 Text(
                     "(${saved.roomId})",
-                    fontFamily = Mono, fontSize = 11.sp, color = Muted,
+                    fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Muted,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
             }
         }
         Text(
             "削除",
-            fontFamily = Mono, fontSize = 11.sp, color = Muted,
+            fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Muted,
             modifier = Modifier.pointerInput(saved.roomId) {
                 detectTapGestures(onTap = { onRemove(saved.roomId) })
             },
@@ -558,7 +555,7 @@ private fun TalkArea(
             androidx.compose.foundation.Canvas(modifier = Modifier.size(150.dp)) {
                 drawCircle(color = Color(0xFF10160F))
                 drawCircle(
-                    color = if (isSending) Accent else Color.Gray.copy(alpha = 0.4f),
+                    color = if (isSending) PTTColors.Accent else PTTColors.Line,
                     style = androidx.compose.ui.graphics.drawscope.Stroke(width = 4f),
                 )
             }
@@ -570,7 +567,7 @@ private fun TalkArea(
                 },
                 fontFamily = Mono,
                 fontSize = 13.sp,
-                color = if (isSending) Accent else Muted,
+                color = if (isSending) PTTColors.Accent else PTTColors.Muted,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 modifier = Modifier.padding(horizontal = 10.dp),
             )
@@ -578,7 +575,7 @@ private fun TalkArea(
         Spacer(Modifier.height(14.dp))
         Text(
             "ボタンを押している間だけ音声が送信されます",
-            fontFamily = Mono, fontSize = 11.sp, color = Muted,
+            fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Muted,
         )
     }
 }
@@ -591,10 +588,10 @@ private fun ParticipantsSection(
     onRequestBan: (ParticipantInfo) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth()) {
-        Text("参加者(緑=送話中)", fontFamily = Mono, fontSize = 10.sp, color = Muted)
+        Text("参加者(緑=送話中)", fontFamily = Mono, fontSize = 10.sp, color = PTTColors.Muted)
         Spacer(Modifier.height(6.dp))
         if (participants.isEmpty()) {
-            Text("— なし —", fontFamily = Mono, fontSize = 11.sp, color = Muted)
+            Text("— なし —", fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Muted)
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 participants.values.sortedBy { it.name }.forEach { info ->
@@ -606,7 +603,7 @@ private fun ParticipantsSection(
                             info.name,
                             fontFamily = Mono,
                             fontSize = 11.sp,
-                            color = if (!info.muted) Live else Muted,
+                            color = if (!info.muted) PTTColors.Live else PTTColors.Muted,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f),
                         )
@@ -618,7 +615,7 @@ private fun ParticipantsSection(
                                 fontFamily = Mono,
                                 fontSize = 10.sp,
                                 fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
-                                color = Danger,
+                                color = PTTColors.Danger,
                                 modifier = Modifier
                                     .padding(start = 8.dp)
                                     .pointerInput(info.identity) {
@@ -643,7 +640,7 @@ private fun ChatSection(
     onSend: () -> Unit,
 ) {
     Column(Modifier.fillMaxWidth()) {
-        Text("チャット", fontFamily = Mono, fontSize = 10.sp, color = Muted)
+        Text("チャット", fontFamily = Mono, fontSize = 10.sp, color = PTTColors.Muted)
         Spacer(Modifier.height(6.dp))
         LazyColumn(Modifier.fillMaxWidth().height(160.dp)) {
             items(messages) { message ->
@@ -651,11 +648,11 @@ private fun ChatSection(
                     "${message.displayName}: ${message.text}",
                     fontFamily = Mono,
                     fontSize = 12.sp,
-                    color = if (message.uid == myUid) Live else MaterialTheme.colorScheme.onSurface,
+                    color = if (message.uid == myUid) PTTColors.Live else MaterialTheme.colorScheme.onSurface,
                 )
             }
         }
-        errorMessage?.let { Text(it, color = Danger, fontFamily = Mono, fontSize = 11.sp) }
+        errorMessage?.let { Text(it, color = PTTColors.Danger, fontFamily = Mono, fontSize = 11.sp) }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
                 value = input,
@@ -679,7 +676,7 @@ private fun LogSection(lines: List<String>) {
     Column(Modifier.fillMaxWidth().height(130.dp)) {
         LazyColumn {
             items(lines.takeLast(50)) { line ->
-                Text(line, fontFamily = Mono, fontSize = 10.sp, color = Muted)
+                Text(line, fontFamily = Mono, fontSize = 10.sp, color = PTTColors.Muted)
             }
         }
     }
