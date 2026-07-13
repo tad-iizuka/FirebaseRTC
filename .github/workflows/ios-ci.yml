@@ -130,10 +130,31 @@ jobs:
 
           NAME=$(echo "$LINE" | sed -E 's/.*name:([^,}]+).*/\1/' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')
           OS=$(echo "$LINE" | sed -E 's/.*OS:([^,}]+).*/\1/' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')
+          UDID=$(echo "$LINE" | sed -E 's/.*id:([^,}]+).*/\1/' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')
 
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
           echo "os=$OS" >> "$GITHUB_OUTPUT"
-          echo "Using simulator: name=$NAME os=$OS"
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          echo "Using simulator: name=$NAME os=$OS udid=$UDID"
+
+      - name: Boot simulator explicitly and wait
+        # [対策] xcodebuild test に暗黙でシミュレータを起動させると、初回ブート中に
+        # DTServiceHub が SIGCONT(signal 19)の送信に失敗し
+        # ("Failed to send signal 19 to process ... : 3")、テスト自体は失敗しないまま
+        # アプリの起動だけが延々と(10分以上)待たされることがある。
+        # 事前に明示的にbootしてbootstatusで「本当に起動完了した」ことを
+        # 確認しておくことで、この不安定さを軽減する。
+        run: |
+          set -o pipefail
+          UDID="${{ steps.sim.outputs.udid }}"
+          if [ -z "$UDID" ]; then
+            echo "::warning::simulatorのUDIDが取得できなかったため、明示的なbootはスキップします"
+            exit 0
+          fi
+          echo "Booting simulator udid=$UDID ..."
+          xcrun simctl bootstatus "$UDID" -b || xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl list devices | grep "$UDID" || true
 
       - name: Build (Debug, Simulator)
         run: |
@@ -149,14 +170,42 @@ jobs:
       - name: Unit & UI Tests
         run: |
           set -o pipefail
-          xcodebuild test \
-            -project "$PROJECT" \
-            -scheme "$SCHEME" \
-            -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }},OS=${{ steps.sim.outputs.os }}" \
-            -configuration Debug \
-            -resultBundlePath TestResults.xcresult \
-            $XCODE_FLAGS \
-            | xcpretty --report junit --output build/reports/junit.xml
+          mkdir -p build/reports
+
+          MAX_ATTEMPTS=2
+          attempt=1
+          until [ "$attempt" -gt "$MAX_ATTEMPTS" ]; do
+            echo "=== xcodebuild test 実行 (試行 $attempt/$MAX_ATTEMPTS) ==="
+            rm -rf TestResults.xcresult
+
+            if xcodebuild test \
+              -project "$PROJECT" \
+              -scheme "$SCHEME" \
+              -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }},OS=${{ steps.sim.outputs.os }}" \
+              -configuration Debug \
+              -resultBundlePath TestResults.xcresult \
+              $XCODE_FLAGS \
+              | xcpretty --report junit --output build/reports/junit.xml; then
+              echo "テスト成功(試行 $attempt)"
+              exit 0
+            fi
+
+            echo "::warning::テスト失敗(試行 $attempt/$MAX_ATTEMPTS)。シミュレータのインフラ起因の可能性があるため再試行します"
+            attempt=$((attempt + 1))
+
+            if [ "$attempt" -le "$MAX_ATTEMPTS" ]; then
+              # DTServiceHub/CoreSimulatorServiceが半端な状態のまま残っている可能性があるため、
+              # 一度リセットしてから明示的に再起動する(単なる即時リトライだと同じ状態を
+              # 引きずって再発しやすいため)。
+              xcrun simctl shutdown "${{ steps.sim.outputs.udid }}" || true
+              sleep 5
+              xcrun simctl bootstatus "${{ steps.sim.outputs.udid }}" -b || xcrun simctl boot "${{ steps.sim.outputs.udid }}" || true
+              xcrun simctl bootstatus "${{ steps.sim.outputs.udid }}" -b
+            fi
+          done
+
+          echo "::error::テストが $MAX_ATTEMPTS 回とも失敗しました"
+          exit 1
 
       - name: Upload JUnit report
         if: always()
