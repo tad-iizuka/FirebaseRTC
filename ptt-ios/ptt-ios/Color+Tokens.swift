@@ -10,8 +10,23 @@
 //  このファイルのトークンを参照すること。値は shared/design-tokens.css /
 //  PTTColors.kt と同期させること(変更時は3箇所セットで直す)。
 //
+//  [2024-xx-xx 修正]
+//  `.background(...)` / `.fill(...)` / `.stroke(...)` など、引数型が
+//  `some ShapeStyle`(ジェネリック)なAPIでは、`Color`への拡張だけでは
+//  `.pttBackground` のようなドット構文で推論されない。
+//  そのため以下の2段構えにする:
+//    1) `Color` 自体への拡張 … `Color.pttBackground` のように明示的に
+//       `Color`型が要求される場所(型注釈、Color同士の演算など)で使う。
+//    2) `ShapeStyle where Self == Color` への拡張 … `.background(.pttBackground)`
+//       `.fill(.pttLive)` `.foregroundStyle(.pttText)` のように
+//       ジェネリックな `ShapeStyle`/`View`引数の文脈で `.トークン名` を使う。
+//       (Appleの `.red` `.blue` などが両方の文脈で動くのもこの実装パターンによる)
+//  値の本体は1)のColor拡張にのみ持たせ、2)はそれを参照するだけにして
+//  値の二重管理を避けている。
 
 import SwiftUI
+
+// MARK: - 1. Color本体の定義(単一の情報源)
 
 extension Color {
     /// #0d1210 — 画面背景
@@ -34,4 +49,19 @@ extension Color {
     static let pttWarning = Color(red: 0.953, green: 0.722, blue: 0.2)
     /// #ff5c5c — エラー・BAN・録音中
     static let pttDanger = Color(red: 1.0, green: 0.36, blue: 0.36)
+}
+
+// MARK: - 2. ShapeStyleとしての橋渡し(.background/.fill/.stroke等で使えるように)
+
+extension ShapeStyle where Self == Color {
+    static var pttBackground: Color { .pttBackground }
+    static var pttPanel: Color { .pttPanel }
+    static var pttLine: Color { .pttLine }
+    static var pttText: Color { .pttText }
+    static var pttMuted: Color { .pttMuted }
+    static var pttAccent: Color { .pttAccent }
+    static var pttAccentDim: Color { .pttAccentDim }
+    static var pttLive: Color { .pttLive }
+    static var pttWarning: Color { .pttWarning }
+    static var pttDanger: Color { .pttDanger }
 }
