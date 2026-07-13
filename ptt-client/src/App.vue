@@ -3,12 +3,15 @@ import { computed, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useSavedRoomsStore } from '@/stores/savedRooms'
 import { useConnectionStore } from '@/stores/connection'
+import { useOnboardingStore } from '@/stores/onboarding'
 import AppHeader from '@/components/AppHeader.vue'
 import AuthView from '@/views/AuthView.vue'
+import OnboardingFlow from '@/components/OnboardingFlow.vue'
 
 const auth = useAuthStore()
 const savedRooms = useSavedRoomsStore()
 const connection = useConnectionStore()
+const onboarding = useOnboardingStore()
 
 const channelLabel = computed(() =>
 	connection.statusKind === 'connected' || connection.statusKind === 'reconnecting'
@@ -34,13 +37,17 @@ async function handleSignOut() {
 <template>
 	<div class="flex min-h-dvh items-start justify-center p-4 sm:items-center sm:p-6">
 		<div class="w-full min-w-0 max-w-[420px] overflow-hidden rounded-md border border-border bg-card">
-			<AppHeader
-				:user-name="auth.currentUser?.displayName ?? auth.currentUser?.email"
-				:channel-label="channelLabel"
-				@sign-out="handleSignOut"
-			/>
-			<AuthView v-if="!auth.currentUser" />
-			<RouterView v-else />
+			<!-- [オンボーディング] 初回起動時はサインイン前でもスワイプ形式の紹介画面を最優先で表示する -->
+			<OnboardingFlow v-if="!onboarding.hasCompletedOnboarding" @complete="onboarding.complete" />
+			<template v-else>
+				<AppHeader
+					:user-name="auth.currentUser?.displayName ?? auth.currentUser?.email"
+					:channel-label="channelLabel"
+					@sign-out="handleSignOut"
+				/>
+				<AuthView v-if="!auth.currentUser" />
+				<RouterView v-else />
+			</template>
 		</div>
 	</div>
 </template>
