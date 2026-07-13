@@ -28,6 +28,10 @@ jobs:
     env:
       PROJECT: ptt-ios/ptt-ios.xcodeproj
       SCHEME: ptt-ios
+      # actions/cache で復元・保存する対象を固定パスにするため明示的に指定する。
+      # 指定しない場合、xcodebuildは実行のたびに ~/Library/Developer/Xcode/DerivedData 配下に
+      # ハッシュ付きのランダムなサブディレクトリを作るため、キャッシュのpathと噛み合わない。
+      DERIVED_DATA_PATH: ${{ github.workspace }}/DerivedData
       # PRやフォークからのビルドでも通るよう、CIでは署名を無効化する
       # (シミュレータ向けビルド/テストなので署名は不要)
       XCODE_FLAGS: >-
@@ -39,6 +43,35 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # [キャッシュ方針]
+      # SPMの取得先(パッケージのソース本体)と、コンパイル成果物(DerivedData)を
+      # それぞれ別キーでキャッシュする:
+      #   - SPMキャッシュ: Package.resolved のハッシュが変わらない限り再利用可能
+      #     (依存バージョンが変わらなければダウンロード自体をスキップできる)
+      #   - DerivedDataキャッシュ: ソースコード(.swift等)のハッシュもキーに含める。
+      #     Swiftのビルドはインクリメンタルコンパイルに対応しているため、
+      #     コード変更後もキャッシュがあれば差分だけの再コンパイルで済み、
+      #     フルビルドよりかなり速くなる。restore-keysでSPM分だけでも
+      #     部分一致すればゼロからよりはマシになるようフォールバックを用意する。
+      - name: Cache Swift Package Manager
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ~/Library/org.swift.swiftpm
+            ptt-ios/ptt-ios.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
+          key: ${{ runner.os }}-spm-${{ hashFiles('ptt-ios/ptt-ios.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
+
+      - name: Cache DerivedData
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.DERIVED_DATA_PATH }}
+          key: ${{ runner.os }}-deriveddata-${{ hashFiles('ptt-ios/**/*.swift', 'ptt-ios/ptt-ios.xcodeproj/project.pbxproj') }}
+          restore-keys: |
+            ${{ runner.os }}-deriveddata-
 
       - name: Select Xcode version
         uses: maxim-lobanov/setup-xcode@v1
@@ -105,7 +138,8 @@ jobs:
         run: |
           xcodebuild -resolvePackageDependencies \
             -project "$PROJECT" \
-            -scheme "$SCHEME"
+            -scheme "$SCHEME" \
+            -derivedDataPath "$DERIVED_DATA_PATH"
 
       - name: Pick available iOS Simulator
         id: sim
@@ -164,10 +198,23 @@ jobs:
             -scheme "$SCHEME" \
             -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }},OS=${{ steps.sim.outputs.os }}" \
             -configuration Debug \
+            -derivedDataPath "$DERIVED_DATA_PATH" \
             $XCODE_FLAGS \
             | xcpretty
 
-      - name: Unit & UI Tests
+      - name: Unit Tests (ptt-iosTests)
+        # [方針: A+C]
+        # 以前は -scheme 単位で ptt-iosTests と ptt-iosUITests をまとめて実行していたが、
+        # ptt-iosUITests は Xcode生成のボイラープレート(testExample/testLaunchPerformance)で
+        # 実質的なカバレッジがゼロにもかかわらず、シミュレータのAccessibilityサブシステム
+        # 初期化待ちで "Timed out while loading Accessibility." により頻繁にハングし、
+        # ジョブ全体のtimeout-minutesを消費してしまっていた
+        # (詳細: 2026-07-13 実行 https://github.com/tad-iizuka/FirebaseRTC/actions/runs/29232530654)。
+        #
+        # -only-testing:ptt-iosTests でホストアプリ内実行のロジックテストのみに絞ることで、
+        # Accessibility待ちを経路から完全に排除し、実行時間・安定性の両方を改善する。
+        # ptt-iosUITests は下記「UI Tests (SKIPPED)」を参照し、実質的なテストを書くタイミングで
+        # 再度有効化すること。
         run: |
           set -o pipefail
           mkdir -p build/reports
@@ -175,14 +222,16 @@ jobs:
           MAX_ATTEMPTS=2
           attempt=1
           until [ "$attempt" -gt "$MAX_ATTEMPTS" ]; do
-            echo "=== xcodebuild test 実行 (試行 $attempt/$MAX_ATTEMPTS) ==="
+            echo "=== xcodebuild test (ptt-iosTests) 実行 (試行 $attempt/$MAX_ATTEMPTS) ==="
             rm -rf TestResults.xcresult
 
             if xcodebuild test \
               -project "$PROJECT" \
               -scheme "$SCHEME" \
+              -only-testing:ptt-iosTests \
               -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }},OS=${{ steps.sim.outputs.os }}" \
               -configuration Debug \
+              -derivedDataPath "$DERIVED_DATA_PATH" \
               -resultBundlePath TestResults.xcresult \
               $XCODE_FLAGS \
               | xcpretty --report junit --output build/reports/junit.xml; then
@@ -206,6 +255,19 @@ jobs:
 
           echo "::error::テストが $MAX_ATTEMPTS 回とも失敗しました"
           exit 1
+
+      # [UI Tests (SKIPPED)]
+      # ptt-iosUITests は現状 Xcode生成のボイラープレートのみで実質的なカバレッジがなく、
+      # 上記の通りAccessibility初期化待ちでCIを不安定化させる要因になっていたため、
+      # 意図的にCIの対象から外している(-only-testing:ptt-iosTests で除外済み)。
+      #
+      # 実際のPTT機能を検証するUIテストを書き始める際は、以下を追加で行うこと:
+      #   1. 別ステップとして
+      #      xcodebuild test -only-testing:ptt-iosUITests ... を追加する
+      #   2. boot前に `xcrun simctl erase <udid>` を挟み、Accessibility/TCC状態を含めて
+      #      完全にクリーンな状態から起動させる(既知の緩和策)
+      #   3. Accessibility初期化には数分かかることがあるため、timeout-minutesの余裕も
+      #      合わせて見直す
 
       - name: Upload JUnit report
         if: always()
