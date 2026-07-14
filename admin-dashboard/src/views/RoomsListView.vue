@@ -3,6 +3,7 @@ import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSettingsStore } from '@/stores/settings'
 import { useAdminRoomsStore } from '@/stores/adminRooms'
+import { usePolling } from '@/composables/usePolling'
 import { formatTime } from '@/lib/format'
 import Button from '@/components/ui/Button.vue'
 import Input from '@/components/ui/Input.vue'
@@ -15,6 +16,12 @@ const rooms = useAdminRoomsStore()
 
 onMounted(() => {
   rooms.goToFirstPage(settings.tokenServerUrl).catch(() => {})
+})
+
+// [Phase8] 表示中のページを10秒ごとに再取得する簡易リアルタイム更新。
+// 「次のページ」への遷移状態(cursor)は保ったまま、内容だけを更新する。
+usePolling(() => {
+  rooms.refreshCurrentPage(settings.tokenServerUrl).catch(() => {})
 })
 
 function refresh() {

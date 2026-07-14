@@ -1,5 +1,5 @@
 /**
- * 管理者向け: 複数ルーム横断監視API (Phase 5)
+ * 管理者向け: 複数ルーム横断監視API (Phase 5) + 監査ログ・権限管理API (Phase 8)
  *
  * [設計方針]
  * 「ルームの状態」には2種類の情報源があり、性質が異なる:
@@ -17,11 +17,21 @@
  * 一方、Firestore側のアクティブメンバー数は count() 集計クエリを
  * ルームごとに呼んでいるため、ページサイズ(最大 MAX_PAGE_SIZE)で
  * 読み取りコストの上限を切っている。
+ *
+ * [Phase8で追加]
+ *   - GET /admin/audit-logs … lib/auditLog.js が記録した操作履歴の閲覧。
+ *     roomId/actorUidでの絞り込みは Firestore複合インデックスが必要
+ *     (firestore.indexes.json / phase8-operations.md 参照)。
+ *   - GET /admin/admins, POST /admin/admins/:uid/permissions …
+ *     adminUsers(権限台帳)の閲覧・編集。ただし admins:manage 自体の
+ *     付与/剥奪はこのAPIでは行えない(dev-tools/grant-admin-permission.js
+ *     での手動運用に固定。自己昇格・権限エスカレーションを防ぐため)。
  */
 
 const express = require('express');
 const { RoomServiceClient } = require('livekit-server-sdk');
-const { db } = require('../lib/firebaseAdmin');
+const { admin, db } = require('../lib/firebaseAdmin');
+const { logAdminAction } = require('../lib/auditLog');
 const { requireFirebaseAuth, isValidRoomId } = require('../middleware/requireAuth');
 const { requireAdminPermission } = require('../middleware/requireAdmin');
 
@@ -200,5 +210,142 @@ router.get('/rooms/:roomId', requireFirebaseAuth, requireAdminPermission('rooms:
     res.status(500).json({ error: 'ルーム詳細の取得に失敗しました' });
   }
 });
+
+/**
+ * GET /admin/audit-logs?roomId=&actorUid=&cursor=&limit=
+ *
+ * [設計方針] roomId / actorUid での絞り込みは Firestore の複合インデックスが
+ * 必要になる(where(...) + orderBy(createdAt))。デプロイ前に
+ * `firebase deploy --only firestore:indexes` でインデックスを作成しておくこと
+ * (firestore.indexes.json / phase8-operations.md 参照)。両方同時に指定された
+ * 場合はroomId側を優先する。
+ */
+router.get('/audit-logs', requireFirebaseAuth, requireAdminPermission('audit:read'), async (req, res) => {
+  const pageSize = Math.min(Number.parseInt(req.query.limit, 10) || DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
+  const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : null;
+
+  try {
+    let query = db.collection('auditLogs').orderBy('createdAt', 'desc').limit(pageSize);
+    if (req.query.roomId) {
+      query = db
+        .collection('auditLogs')
+        .where('targetRoomId', '==', String(req.query.roomId))
+        .orderBy('createdAt', 'desc')
+        .limit(pageSize);
+    } else if (req.query.actorUid) {
+      query = db
+        .collection('auditLogs')
+        .where('actorUid', '==', String(req.query.actorUid))
+        .orderBy('createdAt', 'desc')
+        .limit(pageSize);
+    }
+    if (cursor) {
+      const cursorSnap = await db.collection('auditLogs').doc(cursor).get();
+      if (cursorSnap.exists) query = query.startAfter(cursorSnap);
+    }
+
+    const snap = await query.get();
+    const logs = snap.docs.map((d) => {
+      const l = d.data();
+      return {
+        logId: d.id,
+        actorUid: l.actorUid,
+        action: l.action,
+        targetRoomId: l.targetRoomId,
+        targetUid: l.targetUid,
+        detail: l.detail,
+        createdAt: l.createdAt?.toMillis?.() ?? null,
+      };
+    });
+    res.json({
+      logs,
+      nextCursor: snap.docs.length === pageSize ? snap.docs[snap.docs.length - 1].id : null,
+    });
+  } catch (e) {
+    console.error('[監査ログ取得エラー]', e.message);
+    res.status(500).json({ error: '監査ログの取得に失敗しました' });
+  }
+});
+
+/**
+ * GET /admin/admins
+ * adminUsers 全件一覧。admins:manage 権限が必要。
+ */
+router.get('/admins', requireFirebaseAuth, requireAdminPermission('admins:manage'), async (req, res) => {
+  try {
+    const snap = await db.collection('adminUsers').get();
+    const admins = snap.docs.map((d) => ({
+      uid: d.id,
+      permissions: d.data().permissions || [],
+      note: d.data().note || null,
+      grantedAt: d.data().grantedAt?.toMillis?.() ?? null,
+    }));
+    res.json({ admins });
+  } catch (e) {
+    console.error('[管理者一覧取得エラー]', e.message);
+    res.status(500).json({ error: '管理者一覧の取得に失敗しました' });
+  }
+});
+
+/**
+ * POST /admin/admins/:uid/permissions
+ * body: { permission: string, action: "grant" | "revoke" }
+ *
+ * [注意] admins:manage 自体はこのAPIでは付与/剥奪できない
+ * (dev-tools/grant-admin-permission.js の手動運用に固定。自己昇格・
+ *  権限エスカレーションを防ぐため)。
+ */
+router.post(
+  '/admins/:uid/permissions',
+  requireFirebaseAuth,
+  requireAdminPermission('admins:manage'),
+  async (req, res) => {
+    const targetUid = req.params.uid;
+    const { permission, action } = req.body || {};
+
+    if (typeof permission !== 'string' || !permission) {
+      return res.status(400).json({ error: 'permission は必須です' });
+    }
+    if (!['grant', 'revoke'].includes(action)) {
+      return res.status(400).json({ error: 'action は grant または revoke を指定してください' });
+    }
+    if (permission === 'admins:manage') {
+      return res.status(403).json({
+        error:
+          'admins:manage の付与/剥奪はこのAPIでは行えません(dev-tools/grant-admin-permission.js を使用してください)',
+      });
+    }
+
+    try {
+      const ref = db.collection('adminUsers').doc(targetUid);
+      if (action === 'grant') {
+        await ref.set(
+          { permissions: admin.firestore.FieldValue.arrayUnion(permission), grantedAt: new Date() },
+          { merge: true }
+        );
+      } else {
+        await ref.set(
+          { permissions: admin.firestore.FieldValue.arrayRemove(permission) },
+          { merge: true }
+        );
+      }
+
+      await logAdminAction({
+        actorUid: req.firebaseUser.uid,
+        action: `admin:${action}`,
+        targetUid,
+        detail: { permission },
+      });
+
+      console.log(
+        `[管理者権限${action === 'grant' ? '付与' : '剥奪'}] target=${targetUid} permission=${permission} by=${req.firebaseUser.uid}`
+      );
+      res.json({ uid: targetUid, permission, action });
+    } catch (e) {
+      console.error('[管理者権限変更エラー]', e.message);
+      res.status(500).json({ error: '権限の変更に失敗しました' });
+    }
+  }
+);
 
 module.exports = router;

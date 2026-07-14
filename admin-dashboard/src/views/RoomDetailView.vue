@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, watch } from 'vue'
+import { computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSettingsStore } from '@/stores/settings'
 import { useAdminRoomsStore } from '@/stores/adminRooms'
+import { useAdminRecordingsStore } from '@/stores/adminRecordings'
+import { usePolling } from '@/composables/usePolling'
 import { formatTime } from '@/lib/format'
 import Button from '@/components/ui/Button.vue'
 import Badge from '@/components/ui/Badge.vue'
@@ -11,19 +13,44 @@ const route = useRoute()
 const router = useRouter()
 const settings = useSettingsStore()
 const rooms = useAdminRoomsStore()
+const recordings = useAdminRecordingsStore()
 
 const roomId = computed(() => String(route.params.roomId))
 
 function load() {
   rooms.fetchRoomDetail(settings.tokenServerUrl, roomId.value).catch(() => {})
+  // [Phase8] 録音履歴。GET /rooms/:roomId/recordings はメンバーであれば
+  // 誰でも閲覧可(admin権限とは別モデル)。
+  recordings.fetchRecordings(settings.tokenServerUrl, roomId.value).catch(() => {})
 }
 
 onMounted(load)
 watch(roomId, load)
+// [Phase8] 詳細・録音履歴とも10秒ごとに再取得する。
+usePolling(load)
+
+onUnmounted(() => {
+  recordings.clear()
+})
 
 function back() {
   rooms.clearDetail()
+  recordings.clear()
   router.push({ name: 'rooms' })
+}
+
+/**
+ * [Phase8] owner/moderator限定のGCS署名付きダウンロードURL(5分間有効)を
+ * 発行してもらい、新しいタブで開く。一覧取得のエラー(recordings.errorMessage)
+ * とは別に、発行操作自体の失敗もここに反映する。
+ */
+async function download(recordingId: string) {
+  try {
+    const url = await recordings.issueDownloadUrl(settings.tokenServerUrl, roomId.value, recordingId)
+    window.open(url, '_blank')
+  } catch (e) {
+    recordings.errorMessage = (e as Error).message
+  }
 }
 </script>
 
@@ -72,7 +99,7 @@ function back() {
       </table>
 
       <h3 class="mb-2 text-[12px] font-medium">現在の接続(LiveKit)</h3>
-      <table class="w-full border-collapse text-xs">
+      <table class="mb-6 w-full border-collapse text-xs">
         <thead>
           <tr class="border-b border-border text-[10px] uppercase tracking-[0.06em] text-muted-foreground">
             <th class="p-2 text-left">identity</th>
@@ -88,6 +115,41 @@ function back() {
             <td class="max-w-[10rem] truncate p-2">{{ p.identity }}</td>
             <td class="whitespace-nowrap p-2">{{ formatTime(p.joinedAt) }}</td>
             <td class="p-2">{{ p.isPublishingAudio ? '送話中' : '—' }}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 class="mb-2 text-[12px] font-medium">録音履歴</h3>
+      <p v-if="recordings.errorMessage" class="mb-2 text-xs text-destructive">{{ recordings.errorMessage }}</p>
+      <p v-else-if="recordings.isLoading" class="mb-2 text-xs text-muted-foreground">読み込み中...</p>
+      <table class="w-full border-collapse text-xs">
+        <thead>
+          <tr class="border-b border-border text-[10px] uppercase tracking-[0.06em] text-muted-foreground">
+            <th class="p-2 text-left">egressId</th>
+            <th class="p-2 text-left">開始</th>
+            <th class="p-2 text-left">終了</th>
+            <th class="p-2 text-left">状態</th>
+            <th class="p-2 text-left"></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-if="recordings.recordings.length === 0">
+            <td colspan="5" class="p-2 text-muted-foreground">— 録音履歴なし —</td>
+          </tr>
+          <tr v-for="r in recordings.recordings" :key="r.recordingId" class="border-b border-border">
+            <td class="max-w-[10rem] truncate p-2">{{ r.recordingId }}</td>
+            <td class="whitespace-nowrap p-2">{{ formatTime(r.startedAt) }}</td>
+            <td class="whitespace-nowrap p-2">{{ formatTime(r.endedAt) }}</td>
+            <td class="p-2">{{ r.status }}</td>
+            <td class="p-2">
+              <button
+                type="button"
+                class="text-[11px] text-primary underline-offset-2 hover:underline"
+                @click="download(r.recordingId)"
+              >
+                ダウンロードURL発行
+              </button>
+            </td>
           </tr>
         </tbody>
       </table>

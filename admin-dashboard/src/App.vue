@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useAuthStore } from '@/stores/auth'
 import AppHeader from '@/components/AppHeader.vue'
+import NavTabs from '@/components/NavTabs.vue'
 import AuthView from '@/views/AuthView.vue'
 
 const auth = useAuthStore()
@@ -14,7 +15,12 @@ const auth = useAuthStore()
         @sign-out="auth.signOut"
       />
       <AuthView v-if="!auth.currentUser" />
-      <RouterView v-else />
+      <!-- [Phase8] 監査ログ・管理者権限タブの追加に伴い、サインイン後は
+           NavTabsで画面を切り替えられるようにする。 -->
+      <template v-else>
+        <NavTabs />
+        <RouterView />
+      </template>
     </div>
   </div>
 </template>

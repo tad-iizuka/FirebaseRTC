@@ -12,13 +12,23 @@
  * 非同期にLiveKitから通知されるため、Firestore上の確定的な状態更新は
  * routes/webhooks.js の egress_ended イベント処理に一本化している。
  * (このAPIのレスポンスだけを見て「録音は終わった」と判断してはいけない)
+ *
+ * [Phase8で追加]
+ *   - 録音開始/停止依頼のたびに lib/auditLog.js へ記録する。
+ *   - GET /rooms/:roomId/recordings … 過去の録音履歴一覧
+ *     (routes/webhooks.js の handleEgressEnded が rooms/{roomId}/recordings
+ *     サブコレクションへ書き込む)。
+ *   - GET /rooms/:roomId/recordings/:recordingId/download-url …
+ *     owner/moderator限定のGCS署名付きダウンロードURL発行(5分間有効)。
  */
 
 const fs = require('fs');
 const express = require('express');
+const { Storage } = require('@google-cloud/storage');
 const { EgressClient, EncodedFileType, GCPUpload } = require('livekit-server-sdk');
 const { db } = require('../lib/firebaseAdmin');
 const { syncRoomMetadata } = require('../lib/roomMetadata');
+const { logAdminAction } = require('../lib/auditLog');
 const { requireFirebaseAuth, requireRoomMembership } = require('../middleware/requireAuth');
 
 const router = express.Router();
@@ -40,6 +50,8 @@ const egressClient = new EgressClient(
  * ローカル開発時は RECORDING_GCS_KEY_FILE (サービスアカウントJSONのパス)、
  * Cloud Run本番環境ではSecret Manager経由の RECORDING_GCS_CREDENTIALS_JSON
  * (JSON文字列そのもの)のいずれかを使う想定。
+ * [Phase8] 署名付きダウンロードURLの発行にも同じ認証情報を流用する
+ * (Cloud Run実行SAのADCだけでは署名できないため)。
  */
 function loadGcsCredentials() {
   if (process.env.RECORDING_GCS_CREDENTIALS_JSON) {
@@ -122,10 +134,12 @@ router.post(
       }
 
       let info;
+      let output;
       try {
+        output = buildOutput(roomId);
         info = await egressClient.startRoomCompositeEgress(
           roomId,
-          { file: buildOutput(roomId) },
+          { file: output },
           { audioOnly: true }
         );
       } catch (egressError) {
@@ -134,8 +148,19 @@ router.post(
         throw egressError;
       }
 
-      await roomRef.update({ 'recording.egressId': info.egressId });
+      // [Phase8] 録音履歴一覧・ダウンロードURL発行のため、filepathも保存しておく。
+      await roomRef.update({
+        'recording.egressId': info.egressId,
+        'recording.filepath': output.filepath,
+      });
       await syncRoomMetadata(roomId);
+
+      await logAdminAction({
+        actorUid: uid,
+        action: 'recording:start',
+        targetRoomId: roomId,
+        detail: { egressId: info.egressId },
+      });
 
       console.log(`[録音開始] room=${roomId} egressId=${info.egressId} by=${uid}`);
       res.json({ started: true, egressId: info.egressId });
@@ -180,6 +205,13 @@ router.post(
         await egressClient.stopEgress(room.recording.egressId);
       }
 
+      await logAdminAction({
+        actorUid: uid,
+        action: 'recording:stop_requested',
+        targetRoomId: roomId,
+        detail: { egressId: room.recording.egressId },
+      });
+
       console.log(`[録音停止依頼] room=${roomId} egressId=${room.recording.egressId} by=${uid}`);
       // active:falseへの確定はegress_endedのWebhookで行うため、
       // ここでは「依頼が受理された」ことのみを返す。
@@ -214,6 +246,90 @@ router.get(
     } catch (e) {
       console.error('[録音状態取得エラー]', e.message);
       res.status(500).json({ error: '録音状態の取得に失敗しました' });
+    }
+  }
+);
+
+/**
+ * GET /rooms/:roomId/recordings
+ *
+ * [Phase8] 録音履歴の一覧。routes/webhooks.js の handleEgressEnded() が
+ * egress_ended 受信時に rooms/{roomId}/recordings/{egressId} へ書き込む。
+ * 録音は「全参加者への開示」(README参照)という既存方針に合わせ、閲覧は
+ * メンバーであれば誰でも可能とする(ダウンロードURL発行は別途owner/moderator限定)。
+ */
+router.get('/:roomId/recordings', requireFirebaseAuth, requireRoomMembership, async (req, res) => {
+  try {
+    const snap = await db
+      .collection('rooms')
+      .doc(req.params.roomId)
+      .collection('recordings')
+      .orderBy('startedAt', 'desc')
+      .limit(100)
+      .get();
+    const recordings = snap.docs.map((d) => {
+      const r = d.data();
+      return {
+        recordingId: d.id,
+        startedAt: r.startedAt?.toMillis?.() ?? null,
+        endedAt: r.endedAt?.toMillis?.() ?? null,
+        status: r.status,
+        startedByUid: r.startedByUid,
+      };
+    });
+    res.json({ recordings });
+  } catch (e) {
+    console.error('[録音一覧取得エラー]', e.message);
+    res.status(500).json({ error: '録音一覧の取得に失敗しました' });
+  }
+});
+
+/**
+ * GET /rooms/:roomId/recordings/:recordingId/download-url
+ *
+ * [Phase8] owner/moderatorのみ。GCS署名付きURL(5分間有効)を発行する。
+ *
+ * [注意] 署名付きURLの発行にはサービスアカウントの秘密鍵(またはIAM経由の
+ * トークン署名権限)が必要。RECORDING_GCS_CREDENTIALS_JSON / KEY_FILEの
+ * 認証情報をそのまま使い回すため、Cloud Run実行SAのADCだけでは署名できない。
+ */
+router.get(
+  '/:roomId/recordings/:recordingId/download-url',
+  requireFirebaseAuth,
+  requireRoomMembership,
+  requireModeratorOrOwner,
+  async (req, res) => {
+    const { roomId, recordingId } = req.params;
+    try {
+      const docRef = db.collection('rooms').doc(roomId).collection('recordings').doc(recordingId);
+      const snap = await docRef.get();
+      if (!snap.exists) {
+        return res.status(404).json({ error: '録音が見つかりません' });
+      }
+      const recording = snap.data();
+      if (!recording.filepath) {
+        return res.status(409).json({ error: 'このファイルはまだアップロードが完了していません' });
+      }
+
+      const storage = new Storage({ credentials: JSON.parse(loadGcsCredentials()) });
+      const bucket = storage.bucket(process.env.RECORDING_GCS_BUCKET);
+      const [url] = await bucket.file(recording.filepath).getSignedUrl({
+        version: 'v4',
+        action: 'read',
+        expires: Date.now() + 5 * 60 * 1000,
+      });
+
+      await logAdminAction({
+        actorUid: req.firebaseUser.uid,
+        action: 'recording:download_url_issued',
+        targetRoomId: roomId,
+        detail: { recordingId },
+      });
+
+      res.json({ url, expiresInMs: 5 * 60 * 1000 });
+    } catch (e) {
+      console.error('[ダウンロードURL発行エラー]', e.message);
+      res.status(500).json({ error: 'ダウンロードURLの発行に失敗しました' });
     }
   }
 );
