@@ -2,7 +2,7 @@
 //  ContentView.swift
 //  ptt-ios
 //
-//  [LiveKit移行 + Firebase Auth対応 + 招待制ルーム対応 + Phase5テキストチャット + 送話ロック連携]
+//  [LiveKit移行 + Firebase Auth対応 + 招待制ルーム対応 + Phase5テキストチャット + 送話ロック連携 + オンボーディング]
 //  Web版(ptt-client/public/index.html)と同等のUI:
 //  Googleサインイン → ルーム作成/招待コード参加 → PTTボタン → 送話中リスト → チャット → ログ
 //  クライアントIDの手入力は廃止(token-serverは常にFirebase ID Token由来のuidを
@@ -17,6 +17,11 @@
 //  保持している間はPTTボタンを無効化し、「誰が話しているか」を表示するだけに留める
 //  (実際のロック取得/延長/解放ロジックはすべてPTTConnectionManagerに集約されている)。
 //
+//  [オンボーディング]
+//  Web版(ptt-client/src/App.vue)と同じ設計判断: onboarding.hasCompletedOnboarding が
+//  falseの間は、サインイン状態に関わらずスワイプ形式の紹介画面(PTTOnboardingView)を
+//  最優先で表示する。完了/スキップすると通常のサインイン〜ルームフローに切り替わる。
+//
 
 import SwiftUI
 import FirebaseAuth
@@ -29,6 +34,7 @@ struct ContentView: View {
     @StateObject private var connection = PTTConnectionManager()
     @StateObject private var chat = PTTChatStore()
     @StateObject private var ban = PTTBanStore()
+    @StateObject private var onboarding = PTTOnboardingStore()
 
     @State private var tokenServerURL: String = "https://ptt-token-server-rnn4fqay3a-an.a.run.app"
     @State private var livekitURL: String = "wss://ubunifu-talk-wy19xst3.livekit.cloud"
@@ -46,21 +52,28 @@ struct ContentView: View {
     @State private var banNotice: String?
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                header
-                if auth.currentUser == nil {
-                    authSection
-                } else if activeRoomId != nil {
-                    statusRow
-                    inviteBox
-                    voiceSection
-                    talkArea
-                    talkerSection
-                    chatSection
-                    logSection
-                } else {
-                    roomSelectionSection
+        Group {
+            if !onboarding.hasCompletedOnboarding {
+                // [オンボーディング] 初回起動時はサインイン前でもこの画面を最優先で表示する。
+                PTTOnboardingView(onComplete: { onboarding.complete() })
+            } else {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        header
+                        if auth.currentUser == nil {
+                            authSection
+                        } else if activeRoomId != nil {
+                            statusRow
+                            inviteBox
+                            voiceSection
+                            talkArea
+                            talkerSection
+                            chatSection
+                            logSection
+                        } else {
+                            roomSelectionSection
+                        }
+                    }
                 }
             }
         }
