@@ -18,6 +18,12 @@
  * このエンドポイント (https://<このサーバー>/webhooks/livekit) を
  * 登録しておく必要がある。署名検証にはLIVEKIT_API_KEY/LIVEKIT_API_SECRETを
  * そのまま流用するため、追加の秘密情報は不要。
+ *
+ * [Phase8で追加]
+ * 録音履歴(一覧・ダウンロードAPI用)を rooms/{roomId}/recordings/{egressId}
+ * サブコレクションへ書き残す。rooms/{roomId}.recording は「現在進行中の
+ * 録音1件」だけを保持する設計のため、過去の録音を辿れるようにするには
+ * ここで別途永続化する必要がある。
  */
 
 const express = require('express');
@@ -100,10 +106,28 @@ async function handleEgressEnded(egressInfo) {
     return;
   }
 
+  const statusName = describeEgressStatus(egressInfo.status);
+
+  // [Phase8] 録音履歴(一覧・ダウンロードAPI用)をサブコレクションへ書き残す。
+  // このドキュメントの書き込みに失敗しても、以降の recording:null 更新・
+  // メタデータ同期は継続する(履歴の記録漏れよりも、録音状態フラグの
+  // 確定を優先する)。
+  try {
+    await roomRef.collection('recordings').doc(egressInfo.egressId).set({
+      egressId: egressInfo.egressId,
+      filepath: room.recording.filepath || null,
+      startedAt: room.recording.startedAt,
+      endedAt: new Date(),
+      status: statusName,
+      startedByUid: room.recording.startedByUid || null,
+    });
+  } catch (e) {
+    console.warn(`[録音履歴保存失敗] room=${roomId} egressId=${egressInfo.egressId}: ${e.message}`);
+  }
+
   await roomRef.update({ recording: null });
   await syncRoomMetadata(roomId);
 
-  const statusName = describeEgressStatus(egressInfo.status);
   console.log(
     `[録音終了] room=${roomId} egressId=${egressInfo.egressId} status=${statusName}`
   );

@@ -23,11 +23,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # [変更点] 以前は静的HTML/JSをそのまま配信していたためビルドステップが無く、
-  # index.htmlの構文チェック(html-validate)だけを行っていた。Vue+Vite化に伴い、
-  # web-deploy.ymlと同じくlint・test・本番ビルド(vue-tsc + vite build)まで通すことを
-  # CIの必須条件にする(html-validateはビルド後のdist/index.htmlに対して意味のある
-  # チェックにならないため廃止)。
+  # [変更点] Vue+Vite化に伴い、旧html-validateチェックを廃止し、
+  # ptt-client用web-deploy.ymlと同じ形で lint/test/build を必須条件にする。
   build-and-test:
     runs-on: ubuntu-latest
     defaults:
@@ -54,8 +51,6 @@ jobs:
       - name: Build (type-check + vite build)
         run: npm run build
 
-      # 後続のdeployジョブ(PR preview / production)で使い回すため、
-      # ビルド成果物だけをartifactとして保存する。
       - name: Upload dist artifact
         uses: actions/upload-artifact@v4
         with:

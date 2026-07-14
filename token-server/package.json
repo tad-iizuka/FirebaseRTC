@@ -1,13 +1,14 @@
 {
   "name": "ptt-token-server",
-  "version": "1.1.0",
-  "description": "LiveKit接続用トークン発行 + 招待制ルーム管理(作成/参加/BAN)/通報受付を行うバックエンド。Firebase AuthのID Token検証必須 (旧ptt-server/server.jsの後継)",
+  "version": "1.2.0",
+  "description": "LiveKit接続用トークン発行 + 招待制ルーム管理(作成/参加/BAN/role変更)/通報受付/監査ログ/録音履歴管理を行うバックエンド。Firebase AuthのID Token検証必須 (旧ptt-server/server.jsの後継)",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "license": "ISC",
   "dependencies": {
+    "@google-cloud/storage": "^7.21.0",
     "express": "^4.19.2",
     "express-rate-limit": "^7.4.0",
     "firebase-admin": "^12.7.0",

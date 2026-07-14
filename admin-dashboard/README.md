@@ -85,3 +85,25 @@ Node.jsセットアップ + `npm ci` + `npm run lint` + `npm run test` + `npm ru
   ローカル専用の位置づけのため)。
 - ページング操作は「次のページ」のみです(旧実装の`cursorStack`による「前のページ」機能は
   移植していません)。必要であれば`stores/adminRooms.ts`に`goToPreviousPage()`を追加してください。
+
+## Phase 8 での追加
+
+`ptt-client`と同じVue 3構成のまま、以下を追加しました。
+
+| 追加ファイル | 内容 |
+|---|---|
+| `src/types/admin.ts` | `AuditLogEntry` / `AdminUserEntry` / `RecordingEntry` 等の型を追記 |
+| `src/stores/adminAuditLogs.ts` | `GET /admin/audit-logs` のラッパー(roomId/actorUidフィルタ・ページング) |
+| `src/stores/adminUsers.ts` | `GET/POST /admin/admins*` のラッパー(`admins:manage`自体はクライアント側でも事前ガード) |
+| `src/stores/adminRecordings.ts` | `GET /rooms/:roomId/recordings*` のラッパー(adminRoomsとは別の権限モデルのため分離) |
+| `src/composables/usePolling.ts` | 10秒間隔の簡易ポーリング(Firestoreリアルタイムリスナーをクライアントへ直接張らせない方針のため) |
+| `src/components/NavTabs.vue` | ルーム/監査ログ/管理者権限の切り替えタブ |
+| `src/views/AuditLogsView.vue` | 監査ログ閲覧画面 |
+| `src/views/AdminsView.vue` | 管理者権限の一覧・付与/剥奪画面 |
+
+`src/views/RoomDetailView.vue` には録音履歴セクション(一覧・ダウンロードURL発行ボタン)を追加し、
+`src/stores/adminRooms.ts` にはポーリング時にページングを崩さず現在ページだけを再取得する
+`refreshCurrentPage()` と、詳細画面のちらつきを防ぐ差分更新を追加しています。
+
+`admins:manage` 自体の付与/剥奪はこの画面からは行えません
+(`dev-tools/grant-admin-permission.js` での手動運用に固定。既存方針(自己昇格防止)を踏襲)。

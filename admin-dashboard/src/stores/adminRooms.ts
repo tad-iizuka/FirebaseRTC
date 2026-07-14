@@ -15,6 +15,9 @@ export const useAdminRoomsStore = defineStore('adminRooms', () => {
   const rooms = ref<AdminRoomSummary[]>([])
   const nextCursor = ref<string | null>(null)
   const cursorHistory = ref<(string | null)[]>([]) // 「前のページ」に戻るための履歴
+  // [Phase8] 表示中のページを識別するカーソル。ポーリングでの再取得時に
+  // ページングを崩さず「今見ているページ」だけを再フェッチするために使う。
+  const currentCursor = ref<string | null>(null)
 
   const detail = ref<AdminRoomDetail | null>(null)
 
@@ -36,6 +39,7 @@ export const useAdminRoomsStore = defineStore('adminRooms', () => {
       const data = await authedFetch<AdminRoomListResponse>(baseUrl, `/admin/rooms${qs}`)
       rooms.value = data.rooms
       nextCursor.value = data.nextCursor
+      currentCursor.value = cursor
     } catch (e) {
       if (e instanceof ApiError && e.statusCode === 403) {
         isForbidden.value = true
@@ -59,9 +63,19 @@ export const useAdminRoomsStore = defineStore('adminRooms', () => {
     await fetchRooms(baseUrl, null)
   }
 
+  /** [Phase8] ポーリング用: ページングを崩さず現在表示中のページだけを再取得する。 */
+  async function refreshCurrentPage(baseUrl: string) {
+    await fetchRooms(baseUrl, currentCursor.value)
+  }
+
   async function fetchRoomDetail(baseUrl: string, roomId: string) {
     isLoadingDetail.value = true
-    detail.value = null
+    // [Phase8] ポーリングによる再取得時に画面がちらつかないよう、既に同じ
+    // ルームの詳細を表示中であれば detail を null に戻さず裏で更新する。
+    // 別ルームへ遷移した場合(roomIdが変わった場合)のみリセットする。
+    if (!detail.value || detail.value.roomId !== roomId) {
+      detail.value = null
+    }
     resetError()
     try {
       detail.value = await authedFetch<AdminRoomDetail>(baseUrl, `/admin/rooms/${encodeURIComponent(roomId)}`)
@@ -84,6 +98,7 @@ export const useAdminRoomsStore = defineStore('adminRooms', () => {
   return {
     rooms,
     nextCursor,
+    currentCursor,
     detail,
     isLoadingList,
     isLoadingDetail,
@@ -92,6 +107,7 @@ export const useAdminRoomsStore = defineStore('adminRooms', () => {
     fetchRooms,
     goToNextPage,
     goToFirstPage,
+    refreshCurrentPage,
     fetchRoomDetail,
     clearDetail,
   }

@@ -7,12 +7,16 @@
  * クライアントからFirestoreへの直接書き込みは一切許可せず(firestore.rules参照)、
  * 必ずこのAPI経由でmembersドキュメントを作成させることで、
  * 招待コード検証をサーバー側で強制する。
+ *
+ * [Phase8] BAN・role変更等の管理系操作はすべて lib/auditLog.js 経由で
+ * auditLogsコレクションへ記録する(誰が・いつ・何をしたかの追跡用)。
  */
 
 const express = require('express');
 const crypto = require('crypto');
 const { RoomServiceClient } = require('livekit-server-sdk');
 const { db } = require('../lib/firebaseAdmin');
+const { logAdminAction } = require('../lib/auditLog');
 const { requireFirebaseAuth, isValidRoomId } = require('../middleware/requireAuth');
 
 const router = express.Router();
@@ -191,11 +195,85 @@ router.post('/:roomId/members/:targetUid/ban', requireFirebaseAuth, async (req, 
       console.warn('[LiveKit即時キック失敗(未接続の可能性)]', e.message);
     }
 
+    await logAdminAction({
+      actorUid: uid,
+      action: 'room:ban',
+      targetRoomId: roomId,
+      targetUid,
+      detail: {},
+    });
+
     console.log(`[BAN] roomId=${roomId} target=${targetUid} by=${uid}`);
     res.json({ roomId, targetUid, banned: true });
   } catch (e) {
     console.error('[BAN処理エラー]', e.message);
     res.status(500).json({ error: 'BAN処理に失敗しました' });
+  }
+});
+
+/**
+ * POST /rooms/:roomId/members/:targetUid/role
+ * body: { role: "moderator" | "member" }
+ *
+ * [Phase8: moderator任命API]
+ * [設計方針] 「誰が新しいmoderatorを任命できるか」を単純化するため、
+ * 任命権はowner本人のみに一元化する(moderatorが別のmoderatorを任命・降格
+ * することはできない)。ownerの role 自体はこのAPIでは変更できない
+ * (ownerが誤って自分をmemberに降格し、以後誰も管理操作できなくなる事故を
+ * 防ぐため)。README.mdの「未実装・今後の検討事項」に記載のあった
+ * 「moderator権限の付与手段が無い」を解消するAPI。
+ */
+router.post('/:roomId/members/:targetUid/role', requireFirebaseAuth, async (req, res) => {
+  const uid = req.firebaseUser.uid;
+  const { roomId, targetUid } = req.params;
+  const role = req.body?.role;
+
+  if (!isValidRoomId(roomId)) {
+    return res.status(400).json({ error: 'roomId が不正です' });
+  }
+  if (!['moderator', 'member'].includes(role)) {
+    return res.status(400).json({ error: 'role は moderator または member を指定してください' });
+  }
+  if (targetUid === uid) {
+    return res.status(400).json({ error: '自分自身のroleを変更することはできません' });
+  }
+
+  try {
+    const roomRef = db.collection('rooms').doc(roomId);
+
+    const actorSnap = await roomRef.collection('members').doc(uid).get();
+    if (!actorSnap.exists || actorSnap.data().role !== 'owner') {
+      return res.status(403).json({ error: '権限がありません(ownerのみ実行可能)' });
+    }
+
+    const targetRef = roomRef.collection('members').doc(targetUid);
+    const targetSnap = await targetRef.get();
+    if (!targetSnap.exists) {
+      return res.status(404).json({ error: '対象のメンバーが見つかりません' });
+    }
+    const targetData = targetSnap.data();
+    if (targetData.role === 'owner') {
+      return res.status(403).json({ error: 'オーナーのroleは変更できません' });
+    }
+    if (targetData.status === 'banned') {
+      return res.status(400).json({ error: 'BAN済みのメンバーのroleは変更できません' });
+    }
+
+    await targetRef.update({ role });
+
+    await logAdminAction({
+      actorUid: uid,
+      action: 'room:role_change',
+      targetRoomId: roomId,
+      targetUid,
+      detail: { newRole: role, previousRole: targetData.role },
+    });
+
+    console.log(`[role変更] roomId=${roomId} target=${targetUid} role=${role} by=${uid}`);
+    res.json({ roomId, targetUid, role });
+  } catch (e) {
+    console.error('[role変更エラー]', e.message);
+    res.status(500).json({ error: 'roleの変更に失敗しました' });
   }
 });
 

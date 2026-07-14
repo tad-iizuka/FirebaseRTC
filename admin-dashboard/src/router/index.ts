@@ -15,6 +15,20 @@ const router = createRouter({
       component: () => import('@/views/RoomDetailView.vue'),
       meta: { requiresAuth: true },
     },
+    {
+      // [Phase8] 監査ログ閲覧(audit:read権限が必要。token-server/routes/admin.js)
+      path: '/audit-logs',
+      name: 'audit-logs',
+      component: () => import('@/views/AuditLogsView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      // [Phase8] 管理者権限の一覧・付与/剥奪(admins:manage権限が必要)
+      path: '/admins',
+      name: 'admins',
+      component: () => import('@/views/AdminsView.vue'),
+      meta: { requiresAuth: true },
+    },
   ],
 })
 

@@ -4,21 +4,24 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>[開発者用] PTT 管理者ダッシュボード</title>
-<link rel="stylesheet" href="../shared/design-tokens.css">
 <style>
   :root {
+    --bg: #0d1210; --panel: #141b18; --line: #263129; --text: #d8e4dd;
+    --muted: #6f8079; --accent: #ff7a3c; --live: #3ddc84; --danger: #ff5c5c;
     --mono: "SF Mono", "Menlo", "Consolas", monospace;
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--mono); padding: 24px; }
   h1 { font-size: 15px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
   .warn { background: #fff3cd; color: #3a2e00; border: 1px solid #ffe69c; padding: 8px 10px; border-radius: 4px; font-size: 12px; margin-bottom: 16px; max-width: 720px; }
+  .note { background: #16201a; border: 1px solid var(--line); color: var(--muted); padding: 8px 10px; border-radius: 4px; font-size: 12px; margin-bottom: 16px; max-width: 720px; }
   .controls { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
   input { background: var(--panel); border: 1px solid var(--line); color: var(--text); font-family: var(--mono); font-size: 13px; padding: 7px 9px; border-radius: 2px; }
   input#tokenServerUrl { width: 420px; max-width: 100%; }
   button { background: transparent; border: 1px solid var(--accent); color: var(--accent); font-family: var(--mono); font-size: 12px; padding: 7px 12px; border-radius: 2px; cursor: pointer; }
   button:hover { background: rgba(255,122,60,0.1); }
   button.secondary { border-color: var(--line); color: var(--muted); }
+  button.active { background: rgba(255,122,60,0.15); }
   table { border-collapse: collapse; width: 100%; margin-top: 8px; font-size: 12px; }
   th, td { border-bottom: 1px solid var(--line); padding: 8px 10px; text-align: left; white-space: nowrap; }
   th { color: var(--muted); font-weight: normal; text-transform: uppercase; letter-spacing: 0.06em; font-size: 10px; }
@@ -31,23 +34,30 @@
   .badge.lock { border-color: var(--accent); color: var(--accent); }
   #detail { margin-top: 24px; padding-top: 16px; border-top: 1px dashed var(--line); }
   #detail h2 { font-size: 13px; color: var(--text); }
+  #detail h3 { font-size: 12px; }
   #status { font-size: 12px; color: var(--muted); margin: 8px 0; }
   #status.error { color: var(--danger); }
+  .panel { display: none; }
+  .panel.visible { display: block; }
+  .link-btn { color: var(--accent); text-decoration: underline; cursor: pointer; background: none; border: none; font-family: var(--mono); font-size: 11px; padding: 0; }
 </style>
 </head>
 <body>
 
 <h1>PTT 管理者ダッシュボード(開発者用)</h1>
 <p class="warn">
-  これは本番クライアントの一部ではありません。/admin/rooms API を手動で確認するための
+  これは本番クライアントの一部ではありません。/admin/rooms 等のAPIを手動で確認するための
   ローカル専用の開発ツールです。公開ホスティングには含めないでください。
-  閲覧には <code>adminUsers/{uid}.permissions</code> に <code>rooms:monitor</code> が
-  付与されているFirebaseアカウントでのサインインが必要です
+  閲覧にはタブごとに必要な権限(<code>rooms:monitor</code> / <code>audit:read</code> /
+  <code>admins:manage</code>)が付与されたFirebaseアカウントでのサインインが必要です
   (dev-tools/grant-admin-permission.js で付与)。<br>
   <strong>注意:</strong> このファイルを <code>file://</code> で直接開くと
   Firebase Authが <code>auth/unauthorized-domain</code> エラーを返しサインインできません。
   <code>cd dev-tools &amp;&amp; python3 -m http.server 8000</code> 等でローカルサーバーを立て、
   <code>http://localhost:8000/admin-dashboard.html</code> として開いてください。
+</p>
+<p class="note">
+  表示中のタブは10秒ごとに自動更新されます(admin-dashboard/public/index.html と同じ実装)。
 </p>
 
 <div class="controls">
@@ -57,23 +67,60 @@
 </div>
 <div id="status">未サインイン</div>
 
-<table id="roomsTable" style="display:none">
-  <thead>
-    <tr>
-      <th></th>
-      <th>Room ID</th>
-      <th>Owner UID</th>
-      <th>作成日時</th>
-      <th>接続中人数</th>
-      <th>メンバー数(active)</th>
-      <th>状態</th>
-    </tr>
-  </thead>
-  <tbody id="roomsBody"></tbody>
-</table>
-<button class="secondary" id="nextPageBtn" style="display:none; margin-top:10px;">次のページ</button>
+<div class="controls">
+  <button id="tabRoomsBtn" class="active">ルーム</button>
+  <button id="tabAuditLogsBtn" class="secondary">監査ログ</button>
+  <button id="tabAdminsBtn" class="secondary">管理者権限</button>
+</div>
 
-<div id="detail"></div>
+<div id="roomsPanel" class="panel visible">
+  <table id="roomsTable" style="display:none">
+    <thead>
+      <tr>
+        <th></th>
+        <th>Room ID</th>
+        <th>Owner UID</th>
+        <th>作成日時</th>
+        <th>接続中人数</th>
+        <th>メンバー数(active)</th>
+        <th>状態</th>
+      </tr>
+    </thead>
+    <tbody id="roomsBody"></tbody>
+  </table>
+  <button class="secondary" id="nextPageBtn" style="display:none; margin-top:10px;">次のページ</button>
+
+  <div id="detail"></div>
+</div>
+
+<div id="auditLogsPanel" class="panel">
+  <div class="controls">
+    <input id="auditRoomIdFilter" placeholder="roomIdで絞込(任意)" />
+    <input id="auditActorUidFilter" placeholder="actorUidで絞込(任意)" />
+    <button class="secondary" id="auditFilterBtn">絞込</button>
+  </div>
+  <table>
+    <thead><tr><th>日時</th><th>action</th><th>actor</th><th>room</th><th>target</th><th>detail</th></tr></thead>
+    <tbody id="auditLogsBody"></tbody>
+  </table>
+</div>
+
+<div id="adminsPanel" class="panel">
+  <table>
+    <thead><tr><th>UID</th><th>permissions</th><th>付与日時</th><th>メモ</th></tr></thead>
+    <tbody id="adminsBody"></tbody>
+  </table>
+  <div class="controls" style="margin-top:12px">
+    <input id="grantUid" placeholder="対象UID" />
+    <input id="grantPermission" placeholder="permission (例: audit:read)" />
+    <button id="grantBtn">付与</button>
+    <button class="secondary" id="revokeBtn">剥奪</button>
+  </div>
+  <p class="note">
+    <code>admins:manage</code> 自体はこの画面から付与/剥奪できません
+    (<code>dev-tools/grant-admin-permission.js</code> での手動運用に固定しています)。
+  </p>
+</div>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-app.js";
@@ -101,6 +148,8 @@ const detailEl = $('detail');
 let currentUser = null;
 let nextCursor = null;
 let cursorStack = [];
+let currentTab = 'rooms';
+let pollTimer = null;
 
 function setStatus(text, isError = false) {
   statusEl.textContent = text;
@@ -126,6 +175,23 @@ async function authedFetch(path) {
   return res.json();
 }
 
+async function authedPost(path, body) {
+  if (!currentUser) throw new Error('サインインしていません');
+  const idToken = await currentUser.getIdToken();
+  const base = $('tokenServerUrl').value.trim().replace(/\/$/, '');
+  const res = await fetch(`${base}${path}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let err = {};
+    try { err = await res.json(); } catch (e) { /* ignore */ }
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 $('signInBtn').addEventListener('click', async () => {
   try {
     await signInWithPopup(auth, new GoogleAuthProvider());
@@ -134,7 +200,7 @@ $('signInBtn').addEventListener('click', async () => {
   }
 });
 
-$('refreshBtn').addEventListener('click', () => loadRooms(null));
+$('refreshBtn').addEventListener('click', () => reloadCurrentTab());
 nextPageBtn.addEventListener('click', () => {
   if (nextCursor) {
     cursorStack.push(nextCursor);
@@ -147,12 +213,16 @@ onAuthStateChanged(auth, (user) => {
   if (user) {
     setStatus(`サインイン中: ${user.displayName || user.email || user.uid}`);
     cursorStack = [];
-    loadRooms(null);
+    reloadCurrentTab();
+    startPolling();
   } else {
     setStatus('未サインイン');
     roomsTable.style.display = 'none';
     nextPageBtn.style.display = 'none';
     detailEl.innerHTML = '';
+    $('auditLogsBody').innerHTML = '';
+    $('adminsBody').innerHTML = '';
+    stopPolling();
   }
 });
 
@@ -213,6 +283,27 @@ async function loadDetail(roomId) {
       <tr><td>${p.identity}</td><td>${fmtTime(p.joinedAt)}</td><td>${p.isPublishingAudio ? '送話中' : '—'}</td></tr>
     `).join('') || '<tr><td colspan="3">— 現在接続なし —</td></tr>';
 
+    let recordingsSection = '';
+    try {
+      const recData = await authedFetch(`/rooms/${encodeURIComponent(roomId)}/recordings`);
+      const recRows = recData.recordings.map((r) => `
+        <tr>
+          <td>${r.recordingId}</td>
+          <td>${fmtTime(r.startedAt)}</td>
+          <td>${fmtTime(r.endedAt)}</td>
+          <td>${r.status}</td>
+          <td><button class="link-btn" data-recording-id="${r.recordingId}" data-room-id="${roomId}">ダウンロードURL発行</button></td>
+        </tr>
+      `).join('') || '<tr><td colspan="5">— 録音履歴なし —</td></tr>';
+      recordingsSection = `
+        <h3 style="margin-top:16px;">録音履歴</h3>
+        <table><thead><tr><th>egressId</th><th>開始</th><th>終了</th><th>状態</th><th></th></tr></thead>
+        <tbody>${recRows}</tbody></table>
+      `;
+    } catch (e) {
+      recordingsSection = `<p style="color:var(--muted); font-size:12px;">録音履歴の取得に失敗しました: ${e.message}</p>`;
+    }
+
     detailEl.innerHTML = `
       <h2>room: ${d.roomId}</h2>
       <div style="font-size:12px; color:var(--muted); margin-bottom:10px;">
@@ -220,16 +311,125 @@ async function loadDetail(roomId) {
         ${d.recording.active ? ' / <span class="badge rec">録音中</span>' : ''}
         ${d.talkLock ? ` / <span class="badge lock">発話中: ${d.talkLock.uid}</span>` : ''}
       </div>
-      <h3 style="font-size:12px;">メンバー台帳(Firestore)</h3>
+      <h3>メンバー台帳(Firestore)</h3>
       <table><thead><tr><th>UID</th><th>表示名</th><th>role</th><th>status</th><th>参加日時</th></tr></thead>
       <tbody>${memberRows}</tbody></table>
-      <h3 style="font-size:12px; margin-top:16px;">現在の接続(LiveKit)</h3>
+      <h3 style="margin-top:16px;">現在の接続(LiveKit)</h3>
       <table><thead><tr><th>identity</th><th>接続日時</th><th>状態</th></tr></thead>
       <tbody>${liveRows}</tbody></table>
+      ${recordingsSection}
     `;
+
+    detailEl.querySelectorAll('button[data-recording-id]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        try {
+          const rid = btn.dataset.roomId;
+          const recId = btn.dataset.recordingId;
+          const data = await authedFetch(`/rooms/${encodeURIComponent(rid)}/recordings/${encodeURIComponent(recId)}/download-url`);
+          window.open(data.url, '_blank');
+        } catch (e) {
+          setStatus(`ダウンロードURL発行エラー: ${e.message}`, true);
+        }
+      });
+    });
   } catch (e) {
     detailEl.innerHTML = `<div style="color:var(--danger)">詳細の取得に失敗しました: ${e.message}</div>`;
   }
+}
+
+async function loadAuditLogs() {
+  try {
+    const roomId = $('auditRoomIdFilter').value.trim();
+    const actorUid = $('auditActorUidFilter').value.trim();
+    const qs = new URLSearchParams();
+    if (roomId) qs.set('roomId', roomId);
+    if (actorUid) qs.set('actorUid', actorUid);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    const data = await authedFetch(`/admin/audit-logs${suffix}`);
+    $('auditLogsBody').innerHTML = data.logs.map((l) => `
+      <tr>
+        <td>${fmtTime(l.createdAt)}</td>
+        <td>${l.action}</td>
+        <td>${l.actorUid}</td>
+        <td>${l.targetRoomId ?? '—'}</td>
+        <td>${l.targetUid ?? '—'}</td>
+        <td>${l.detail ? JSON.stringify(l.detail) : '—'}</td>
+      </tr>
+    `).join('') || '<tr><td colspan="6">— 記録なし —</td></tr>';
+  } catch (e) {
+    setStatus(`監査ログの取得に失敗しました: ${e.message}`, true);
+  }
+}
+
+$('auditFilterBtn').addEventListener('click', () => loadAuditLogs());
+
+async function loadAdmins() {
+  try {
+    const data = await authedFetch('/admin/admins');
+    $('adminsBody').innerHTML = data.admins.map((a) => `
+      <tr>
+        <td>${a.uid}</td>
+        <td>${a.permissions.join(', ') || '—'}</td>
+        <td>${fmtTime(a.grantedAt)}</td>
+        <td>${a.note ?? '—'}</td>
+      </tr>
+    `).join('') || '<tr><td colspan="4">— 管理者なし —</td></tr>';
+  } catch (e) {
+    setStatus(`管理者一覧の取得に失敗しました: ${e.message}`, true);
+  }
+}
+
+async function changePermission(action) {
+  const uid = $('grantUid').value.trim();
+  const permission = $('grantPermission').value.trim();
+  if (!uid || !permission) {
+    setStatus('対象UIDとpermissionの両方を入力してください', true);
+    return;
+  }
+  try {
+    await authedPost(`/admin/admins/${encodeURIComponent(uid)}/permissions`, { permission, action });
+    setStatus(`${action === 'grant' ? '付与' : '剥奪'}しました: uid=${uid} permission=${permission}`);
+    loadAdmins();
+  } catch (e) {
+    setStatus(`権限変更エラー: ${e.message}`, true);
+  }
+}
+
+$('grantBtn').addEventListener('click', () => changePermission('grant'));
+$('revokeBtn').addEventListener('click', () => changePermission('revoke'));
+
+function switchTab(name) {
+  currentTab = name;
+  $('roomsPanel').classList.toggle('visible', name === 'rooms');
+  $('auditLogsPanel').classList.toggle('visible', name === 'audit');
+  $('adminsPanel').classList.toggle('visible', name === 'admins');
+  $('tabRoomsBtn').classList.toggle('active', name === 'rooms');
+  $('tabAuditLogsBtn').classList.toggle('active', name === 'audit');
+  $('tabAdminsBtn').classList.toggle('active', name === 'admins');
+  reloadCurrentTab();
+}
+
+function reloadCurrentTab() {
+  if (!currentUser) return;
+  if (currentTab === 'rooms') loadRooms(null);
+  if (currentTab === 'audit') loadAuditLogs();
+  if (currentTab === 'admins') loadAdmins();
+}
+
+$('tabRoomsBtn').addEventListener('click', () => switchTab('rooms'));
+$('tabAuditLogsBtn').addEventListener('click', () => switchTab('audit'));
+$('tabAdminsBtn').addEventListener('click', () => switchTab('admins'));
+
+function startPolling() {
+  stopPolling();
+  pollTimer = setInterval(() => {
+    if (!currentUser) return;
+    reloadCurrentTab();
+  }, 10000);
+}
+function stopPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = null;
 }
 </script>
 

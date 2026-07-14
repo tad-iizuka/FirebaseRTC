@@ -16,6 +16,9 @@ rules_version = '2';
 //     自分が管理者かどうかもクライアント側には開示せず、token-server側の
 //     ミドルウェア(middleware/requireAdmin.js)だけが参照する。付与/剥奪は
 //     dev-tools/grant-admin-permission.js でAdmin SDK経由・手動運用する。
+//   - [Phase8] 監査ログ(auditLogs)・録音履歴(recordings)もクライアントへの
+//     直接公開は行わない。閲覧はそれぞれ GET /admin/audit-logs
+//     (audit:read権限)・GET /rooms/:roomId/recordings(メンバーのみ)経由に限定する。
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -27,7 +30,8 @@ service cloud.firestore {
       match /members/{uid} {
         // 自分自身のメンバードキュメントのみ読み取り可(BAN即時反映のUI用)。
         allow read: if request.auth != null && request.auth.uid == uid;
-        // role/status の変更(参加・BAN・BAN解除等)はすべてサーバーAPI経由に限定。
+        // role/status の変更(参加・BAN・BAN解除・moderator任命等)はすべて
+        // サーバーAPI経由に限定。
         allow write: if false;
       }
 
@@ -43,6 +47,14 @@ service cloud.firestore {
         // (本文の長さチェック・レート制限をサーバー側で強制するため)。
         allow write: if false;
       }
+
+      match /recordings/{recordingId} {
+        // [Phase8] 録音履歴のメタデータ(ファイルパス等)。クライアントへの
+        // 直接開示はせず、必ずtoken-server経由(GET /rooms/:roomId/recordings,
+        // .../download-url)で取得させる(ダウンロードURL発行権限を
+        // owner/moderatorに限定するため)。
+        allow read, write: if false;
+      }
     }
 
     match /reports/{reportId} {
@@ -54,6 +66,12 @@ service cloud.firestore {
       // 管理者権限台帳。誰が管理者か、どの権限を持つかはクライアントに一切
       // 開示しない(自分自身のドキュメントであっても読み取り不可。
       // rooms/members とは異なり「即時UI反映」のニーズが無いための判断)。
+      allow read, write: if false;
+    }
+
+    match /auditLogs/{logId} {
+      // [Phase8] 監査ログ。GET /admin/audit-logs (audit:read権限) 経由でのみ
+      // 閲覧可能。クライアントSDKからの直接読み書きは一切許可しない。
       allow read, write: if false;
     }
 
