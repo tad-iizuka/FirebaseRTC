@@ -81,7 +81,7 @@ jobs:
             --project "${{ vars.GCP_PROJECT_ID }}" \
             --allow-unauthenticated \
             --set-secrets LIVEKIT_API_KEY=livekit-api-key:latest,LIVEKIT_API_SECRET=livekit-api-secret:latest,RECORDING_GCS_CREDENTIALS_JSON=recording-gcs-credentials:latest \
-            --set-env-vars LIVEKIT_HOST=${{ vars.LIVEKIT_HOST }},FIREBASE_PROJECT_ID=${{ vars.FIREBASE_PROJECT_ID }},ALLOWED_ORIGINS=${{ vars.ALLOWED_ORIGINS }},RECORDING_GCS_BUCKET=${{ vars.RECORDING_GCS_BUCKET }}
+            --set-env-vars "^:^LIVEKIT_HOST=${{ vars.LIVEKIT_HOST }}:FIREBASE_PROJECT_ID=${{ vars.FIREBASE_PROJECT_ID }}:ALLOWED_ORIGINS=${{ vars.ALLOWED_ORIGINS }}:RECORDING_GCS_BUCKET=${{ vars.RECORDING_GCS_BUCKET }}"
 
       - name: デプロイ後ヘルスチェック
         run: |
