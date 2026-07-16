@@ -1,9 +1,10 @@
 /**
  * PTTApp.kt
  *
- * [LiveKit移行 + Firebase Auth対応 + 招待制ルーム対応 + Phase5テキストチャット + 送話ロック連携]
+ * [LiveKit移行 + Firebase Auth対応 + 招待制ルーム対応 + Phase5テキストチャット + 送話ロック連携 + オンボーディング]
  * Web版(ptt-client/public/index.html)・iOS版(ContentView.swift)と同等のUI:
- * Googleサインイン → ルーム作成/招待コード参加 → PTTボタン → 送話中リスト → チャット → ログ
+ * (初回起動時のみ)オンボーディング → Googleサインイン → ルーム作成/招待コード参加 →
+ * PTTボタン → 送話中リスト → チャット → ログ
  *
  * クライアントIDの手入力は行わない(token-serverは常にFirebase ID Token由来のuidを
  * identityとして使うため)。ルームIDの直接入力による接続も行わず、token-serverの
@@ -17,6 +18,11 @@
  * 発話ロックを保持している間はPTTボタンのタップ判定を無効化し、
  * 「誰が話しているか」を表示するだけに留める(実際のロック取得/延長/解放ロジックは
  * すべてPTTConnectionManagerに集約されている)。
+ *
+ * [オンボーディング]
+ * Web版(ptt-client/src/App.vue)・iOS版(ContentView.swift)と同じ設計判断:
+ * onboardingStore.hasCompletedOnboarding が false の間は、サインイン状態に関わらず
+ * スワイプ形式の紹介画面(PTTOnboardingScreen)を最優先で表示する。
  */
 package co.ubunifu.pttandroid.ui
 
@@ -69,6 +75,8 @@ import co.ubunifu.pttandroid.chat.PTTChatStore
 import co.ubunifu.pttandroid.connection.PTTConnectionManager
 import co.ubunifu.pttandroid.model.ConnectionStatus
 import co.ubunifu.pttandroid.model.ParticipantInfo
+import co.ubunifu.pttandroid.onboarding.PTTOnboardingScreen
+import co.ubunifu.pttandroid.onboarding.PTTOnboardingStore
 import co.ubunifu.pttandroid.room.PTTRoomManager
 import co.ubunifu.pttandroid.room.PTTSavedRoomsStore
 import co.ubunifu.pttandroid.room.SavedRoom
@@ -85,8 +93,18 @@ fun PTTApp(
     connectionManager: PTTConnectionManager,
     chatStore: PTTChatStore,
     banStore: PTTBanStore,
+    onboardingStore: PTTOnboardingStore,
     onRequestGoogleSignIn: () -> Unit,
 ) {
+    // [オンボーディング] 初回起動時はサインイン前でもこの画面を最優先で表示する
+    // (Web版App.vue・iOS版ContentView.swiftと同じ優先順位)。完了/スキップで
+    // onboardingStore.complete() が呼ばれ、以降の起動では表示されなくなる。
+    val hasCompletedOnboarding by onboardingStore.hasCompletedOnboarding.collectAsState()
+    if (!hasCompletedOnboarding) {
+        PTTOnboardingScreen(onComplete = { onboardingStore.complete() })
+        return
+    }
+
     val scope = rememberCoroutineScope()
 
     val currentUser by authManager.currentUser.collectAsState()

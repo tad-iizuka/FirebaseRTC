@@ -2,7 +2,8 @@
  * MainActivity.kt
  *
  * Web版(ptt-client/public/index.html)・iOS版(ContentView.swift)と同等のUI:
- * Googleサインイン → ルーム作成/招待コード参加 → PTTボタン → 送話中リスト → チャット → ログ
+ * (初回起動時のみ)オンボーディング → Googleサインイン → ルーム作成/招待コード参加 →
+ * PTTボタン → 送話中リスト → チャット → ログ
  *
  * Google Sign-InのIntent起動とマイク権限リクエストはActivity側の責務のため、
  * ここでActivityResultLauncherを保持し、結果だけを各Managerへ橋渡しする。
@@ -30,6 +31,7 @@ import co.ubunifu.pttandroid.auth.PTTAuthManager
 import co.ubunifu.pttandroid.ban.PTTBanStore
 import co.ubunifu.pttandroid.chat.PTTChatStore
 import co.ubunifu.pttandroid.connection.PTTConnectionManager
+import co.ubunifu.pttandroid.onboarding.PTTOnboardingStore
 import co.ubunifu.pttandroid.room.PTTRoomManager
 import co.ubunifu.pttandroid.room.PTTSavedRoomsStore
 import co.ubunifu.pttandroid.ui.PTTApp
@@ -72,6 +74,9 @@ class MainActivity : ComponentActivity() {
             val connectionManager = remember { PTTConnectionManager(applicationContext, scope) }
             val chatStore = remember { PTTChatStore() }
             val banStore = remember { PTTBanStore() }
+            // [オンボーディング] 初回起動時のスワイプ形式チュートリアルの完了状態
+            // (SharedPreferencesベース。Web版のonboarding.ts/iOS版のPTTOnboardingStore.swiftと同じ設計)。
+            val onboardingStore = remember { PTTOnboardingStore(applicationContext) }
 
             LaunchedEffect(Unit) {
                 if (!micPermissionGranted.value) {
@@ -89,6 +94,7 @@ class MainActivity : ComponentActivity() {
                             connectionManager = connectionManager,
                             chatStore = chatStore,
                             banStore = banStore,
+                            onboardingStore = onboardingStore,
                             onRequestGoogleSignIn = { signInLauncher.launch(authManager.signInIntent()) },
                         )
                     }
