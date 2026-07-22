@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { cn } from '@/lib/utils'
 
+const { t } = useI18n()
 const props = defineProps<{
   disabled: boolean
   isSending: boolean
@@ -14,9 +16,9 @@ const emit = defineEmits<{
 }>()
 
 const label = computed(() => {
-  if (props.lockedByName) return `${props.lockedByName} が送話中`
-  if (props.isSending) return '送話中'
-  return '押して送話'
+  if (props.lockedByName) return t('ptt.talkingByName', { name: props.lockedByName })
+  if (props.isSending) return t('ptt.talking')
+  return t('ptt.pressToTalk')
 })
 
 // Pointer Events はマウス・タッチ・ペンを一本化して扱えるため、旧実装の

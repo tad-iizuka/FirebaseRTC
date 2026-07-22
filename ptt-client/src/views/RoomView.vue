@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useSettingsStore } from '@/stores/settings'
 import { useRoomStore } from '@/stores/room'
@@ -17,6 +18,7 @@ import LogPanel from '@/components/LogPanel.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import { authedFetch } from '@/lib/api'
 
+const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
@@ -64,7 +66,7 @@ watch(
   () => ban.isBanned,
   async (banned) => {
     if (!banned) return
-    banNotice.value = 'このルームから排除されました'
+    banNotice.value = t('room.banNotice')
     await leaveRoom()
   },
 )
@@ -84,7 +86,7 @@ async function confirmBan() {
 }
 
 async function reportParticipant(p: ParticipantInfo) {
-  const reason = window.prompt(`${p.name} を通報する理由を入力してください`, '')
+  const reason = window.prompt(t('room.reportPromptLabel', { name: p.name }), '')
   if (reason === null || !reason.trim()) return
   try {
     await authedFetch(settings.tokenServerUrl, '/reports', {
@@ -92,7 +94,7 @@ async function reportParticipant(p: ParticipantInfo) {
       body: { roomId: roomId.value, reportedUid: p.identity, reason: reason.trim() },
     })
   } catch (e) {
-    connection.logLines.push(`通報エラー: ${(e as Error).message}`)
+    connection.logLines.push(t('room.reportError', { message: (e as Error).message }))
   }
 }
 
@@ -120,7 +122,7 @@ onUnmounted(() => {
     <InviteBox :invite-code="roomStore.currentInviteCode" :room-id="roomId" />
 
     <div class="px-5 pb-0 pt-2">
-      <Button variant="secondary" class="w-full" @click="leaveRoom">ルームを退出する</Button>
+      <Button variant="secondary" class="w-full" @click="leaveRoom">{{ t('room.leaveRoom') }}</Button>
     </div>
 
     <div class="flex flex-col items-center gap-3.5 px-5 pb-6 pt-6">
@@ -131,7 +133,7 @@ onUnmounted(() => {
         @start="connection.startTalking"
         @stop="() => connection.stopTalking()"
       />
-      <p class="text-center text-[11px] text-muted-foreground">ボタンを押している間だけ音声が送信されます</p>
+      <p class="text-center text-[11px] text-muted-foreground">{{ t('room.pttHint') }}</p>
     </div>
 
     <ParticipantList
@@ -152,9 +154,9 @@ onUnmounted(() => {
 
     <ConfirmDialog
       :open="!!banTarget"
-      title="BANしますか?"
-      :description="`${banTarget?.name ?? ''} をこのルームからBANしますか?\nこの操作は取り消せません。`"
-      confirm-label="BANする"
+      :title="t('room.banConfirmTitle')"
+      :description="t('room.banConfirmDescription', { name: banTarget?.name ?? '' })"
+      :confirm-label="t('room.banConfirmLabel')"
       @confirm="confirmBan"
       @cancel="banTarget = null"
     />

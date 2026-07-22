@@ -1,0 +1,127 @@
+{
+  "common": {
+    "skip": "Skip",
+    "back": "Back",
+    "next": "Next",
+    "getStarted": "Get Started",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "remove": "Remove",
+    "orDivider": "— or —",
+    "notConnected": "Not connected"
+  },
+  "header": {
+    "appName": "PTT Client",
+    "signOut": "Sign out"
+  },
+  "auth": {
+    "tokenServerUrl": "Token Server URL",
+    "livekitUrl": "LiveKit URL (wss://)",
+    "signInWithGoogle": "Sign in with Google",
+    "signingIn": "Signing in...",
+    "signInWithApple": "Sign in with Apple"
+  },
+  "onboarding": {
+    "skip": "Skip",
+    "back": "Back",
+    "next": "Next",
+    "start": "Get Started",
+    "slideLabel": "Slide {n}",
+    "slides": [
+      {
+        "title": "Welcome to PTT Client",
+        "description": "A simple push-to-talk voice chat, just like a walkie-talkie: your voice is sent only while you hold the button."
+      },
+      {
+        "title": "Create or join a room",
+        "description": "Rooms are invite-only. Create your own room, or join one using an invite code you received."
+      },
+      {
+        "title": "Press the button to talk",
+        "description": "Audio is sent only while you hold the PTT button in the center. Talk is automatically put on hold while someone else is speaking."
+      },
+      {
+        "title": "Chat and manage participants",
+        "description": "Along with the text chat and participant list, moderators can also ban or report participants."
+      }
+    ]
+  },
+  "roomSelect": {
+    "createRoom": "Create a new room",
+    "creating": "Creating...",
+    "roomIdLabel": "Room ID",
+    "roomIdPlaceholder": "Entered by the invited person",
+    "inviteCodeLabel": "Invite code",
+    "inviteCodePlaceholder": "8-character code",
+    "joinRoom": "Join with invite code",
+    "joining": "Joining...",
+    "recentRooms": "— Recently used rooms —",
+    "createdRoomLabel": "Room you created",
+    "joinedRoomLabel": "Room joined with an invite code"
+  },
+  "room": {
+    "leaveRoom": "Leave room",
+    "pttHint": "Audio is sent only while the button is pressed",
+    "banNotice": "You have been removed from this room",
+    "banConfirmTitle": "Ban this participant?",
+    "banConfirmDescription": "Ban {name} from this room?\nThis action cannot be undone.",
+    "banConfirmLabel": "Ban",
+    "reportPromptLabel": "Enter the reason for reporting {name}",
+    "reportError": "Report error: {message}"
+  },
+  "status": {
+    "disconnected": "Not connected to server",
+    "connecting": "Connecting...",
+    "connected": "Connected (room={roomId})",
+    "reconnecting": "Reconnecting... (room={roomId})",
+    "error": "Error: {message}"
+  },
+  "invite": {
+    "label": "Invite code for this room (share with participants):",
+    "roomId": "Room ID: {roomId}"
+  },
+  "ptt": {
+    "talkingByName": "{name} is talking",
+    "talking": "Talking",
+    "pressToTalk": "Press to talk"
+  },
+  "participants": {
+    "title": "Participants (green = talking)",
+    "none": "— None —",
+    "report": "Report",
+    "ban": "BAN"
+  },
+  "chat": {
+    "title": "Chat",
+    "placeholder": "Type a message",
+    "send": "Send"
+  },
+  "errors": {
+    "notSignedIn": "Not signed in",
+    "googleSignIn": "Google sign-in error: {message}",
+    "appleSignIn": "Apple sign-in error: {message}",
+    "chatFetch": "Chat fetch error: {message}",
+    "roleFetch": "Role fetch error: {message}",
+    "banWatch": "Ban monitoring error: {message}"
+  },
+  "log": {
+    "alreadyConnecting": "Already connected or connecting",
+    "tokenFetchSuccess": "Token fetch succeeded",
+    "roomConnected": "Room connected: room={roomId}",
+    "connectionError": "Connection error: {message}",
+    "tokenRefreshNear": "Token is nearing expiry, reconnecting",
+    "tokenRefreshSuccess": "Token refreshed and reconnected successfully",
+    "tokenRefreshError": "Token refresh error: {message}",
+    "tokenRefreshFailed": "Token refresh failed",
+    "connectionState": "Connection state: {state}",
+    "disconnectedState": "Disconnected",
+    "metadataUpdate": "[Diag] Metadata update received: currentTalker={uid}",
+    "participantJoined": "Joined: {name}",
+    "participantLeft": "Left: {name}",
+    "trackSubscribed": "Audio track subscription started: {name}",
+    "talkHeartbeatFailed": "Failed to extend the talk lock. Ending talk: {message}",
+    "talkStartFailed": "Could not start talking: {message}",
+    "micEnableError": "Microphone enable error: {message}",
+    "micDisableError": "Microphone disable error: {message}"
+  }
+}

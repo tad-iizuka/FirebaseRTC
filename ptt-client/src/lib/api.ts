@@ -1,4 +1,5 @@
 import { firebaseAuth } from '@/lib/firebase'
+import { i18n } from '@/i18n'
 import type { ServerErrorResponse } from '@/types/api'
 
 /**
@@ -36,7 +37,7 @@ export async function authedFetch<T>(
 ): Promise<T> {
   const user = firebaseAuth.currentUser
   if (!user) {
-    throw new ApiError(401, 'サインインしていません')
+    throw new ApiError(401, i18n.global.t('errors.notSignedIn'))
   }
   const idToken = await user.getIdToken()
 

@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
 
+const { t } = useI18n()
 defineProps<{
   open: boolean
   title: string
@@ -23,9 +25,9 @@ const emit = defineEmits<{ confirm: []; cancel: [] }>()
       <h2 class="mb-2 text-sm font-semibold">{{ title }}</h2>
       <p class="mb-5 whitespace-pre-line text-xs text-muted-foreground">{{ description }}</p>
       <div class="flex justify-end gap-2">
-        <Button variant="secondary" size="sm" @click="emit('cancel')">キャンセル</Button>
+        <Button variant="secondary" size="sm" @click="emit('cancel')">{{ t('common.cancel') }}</Button>
         <Button variant="destructive" size="sm" @click="emit('confirm')">{{
-          confirmLabel ?? '実行する'
+          confirmLabel ?? t('common.confirm')
         }}</Button>
       </div>
     </Card>

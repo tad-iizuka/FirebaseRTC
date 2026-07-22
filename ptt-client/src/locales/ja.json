@@ -1,0 +1,127 @@
+{
+  "common": {
+    "skip": "スキップ",
+    "back": "戻る",
+    "next": "次へ",
+    "getStarted": "はじめる",
+    "cancel": "キャンセル",
+    "confirm": "実行する",
+    "remove": "削除",
+    "orDivider": "— または —",
+    "notConnected": "未接続"
+  },
+  "header": {
+    "appName": "PTT Client",
+    "signOut": "サインアウト"
+  },
+  "auth": {
+    "tokenServerUrl": "トークンサーバーURL",
+    "livekitUrl": "LiveKit URL (wss://)",
+    "signInWithGoogle": "Googleでサインイン",
+    "signingIn": "サインイン中...",
+    "signInWithApple": "Appleでサインイン"
+  },
+  "onboarding": {
+    "skip": "スキップ",
+    "back": "戻る",
+    "next": "次へ",
+    "start": "はじめる",
+    "slideLabel": "スライド {n}",
+    "slides": [
+      {
+        "title": "PTT Client へようこそ",
+        "description": "トランシーバーのように、押している間だけ声が届くシンプルな音声チャットです。"
+      },
+      {
+        "title": "ルームを作成・参加",
+        "description": "ルームは招待制です。自分でルームを作成するか、招待コードを受け取って参加しましょう。"
+      },
+      {
+        "title": "ボタンを押して話す",
+        "description": "中央のPTTボタンを押している間だけ音声が送信されます。誰かが話している間は自動的に送話が待機状態になります。"
+      },
+      {
+        "title": "チャットと参加者管理",
+        "description": "テキストチャットや参加者一覧に加え、モデレーター向けのBAN・通報機能も使えます。"
+      }
+    ]
+  },
+  "roomSelect": {
+    "createRoom": "新しいルームを作成する",
+    "creating": "作成中...",
+    "roomIdLabel": "ルームID",
+    "roomIdPlaceholder": "招待された側が入力",
+    "inviteCodeLabel": "招待コード",
+    "inviteCodePlaceholder": "8文字のコード",
+    "joinRoom": "招待コードで参加する",
+    "joining": "参加中...",
+    "recentRooms": "— 最近使ったルーム —",
+    "createdRoomLabel": "自分が作成したルーム",
+    "joinedRoomLabel": "招待コードで参加したルーム"
+  },
+  "room": {
+    "leaveRoom": "ルームを退出する",
+    "pttHint": "ボタンを押している間だけ音声が送信されます",
+    "banNotice": "このルームから排除されました",
+    "banConfirmTitle": "BANしますか?",
+    "banConfirmDescription": "{name} をこのルームからBANしますか?\nこの操作は取り消せません。",
+    "banConfirmLabel": "BANする",
+    "reportPromptLabel": "{name} を通報する理由を入力してください",
+    "reportError": "通報エラー: {message}"
+  },
+  "status": {
+    "disconnected": "サーバ未接続",
+    "connecting": "接続中...",
+    "connected": "接続中 (room={roomId})",
+    "reconnecting": "再接続中... (room={roomId})",
+    "error": "エラー: {message}"
+  },
+  "invite": {
+    "label": "このルームの招待コード(参加者に共有してください):",
+    "roomId": "ルームID: {roomId}"
+  },
+  "ptt": {
+    "talkingByName": "{name} が送話中",
+    "talking": "送話中",
+    "pressToTalk": "押して送話"
+  },
+  "participants": {
+    "title": "参加者(緑=送話中)",
+    "none": "— なし —",
+    "report": "通報",
+    "ban": "BAN"
+  },
+  "chat": {
+    "title": "チャット",
+    "placeholder": "メッセージを入力",
+    "send": "送信"
+  },
+  "errors": {
+    "notSignedIn": "サインインしていません",
+    "googleSignIn": "Googleサインインエラー: {message}",
+    "appleSignIn": "Appleサインインエラー: {message}",
+    "chatFetch": "チャット取得エラー: {message}",
+    "roleFetch": "ロール取得エラー: {message}",
+    "banWatch": "BAN監視エラー: {message}"
+  },
+  "log": {
+    "alreadyConnecting": "すでに接続中/接続試行中です",
+    "tokenFetchSuccess": "トークン取得成功",
+    "roomConnected": "ルーム接続完了: room={roomId}",
+    "connectionError": "接続エラー: {message}",
+    "tokenRefreshNear": "トークン有効期限が近いため再接続します",
+    "tokenRefreshSuccess": "トークン更新・再接続に成功しました",
+    "tokenRefreshError": "トークン更新エラー: {message}",
+    "tokenRefreshFailed": "トークン更新失敗",
+    "connectionState": "接続状態: {state}",
+    "disconnectedState": "切断されました",
+    "metadataUpdate": "[診断] メタデータ更新受信: currentTalker={uid}",
+    "participantJoined": "参加: {name}",
+    "participantLeft": "退出: {name}",
+    "trackSubscribed": "音声トラック購読開始: {name}",
+    "talkHeartbeatFailed": "発話ロックの延長に失敗しました。送話を終了します: {message}",
+    "talkStartFailed": "発話を開始できませんでした: {message}",
+    "micEnableError": "マイク有効化エラー: {message}",
+    "micDisableError": "マイク無効化エラー: {message}"
+  }
+}

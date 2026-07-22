@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { ChatMessage } from '@/types/api'
 import Input from '@/components/ui/Input.vue'
 import Button from '@/components/ui/Button.vue'
 
+const { t } = useI18n()
 defineProps<{
   messages: ChatMessage[]
   myUid?: string | null
@@ -23,7 +25,7 @@ function send() {
 
 <template>
   <div class="border-t border-border px-5 py-4">
-    <div class="mb-2 text-[10px] uppercase tracking-[0.1em] text-muted-foreground">チャット</div>
+    <div class="mb-2 text-[10px] uppercase tracking-[0.1em] text-muted-foreground">{{ t('chat.title') }}</div>
     <div class="mb-2.5 grid max-h-44 gap-1.5 overflow-y-auto text-xs">
       <div
         v-for="m in messages"
@@ -36,8 +38,8 @@ function send() {
     </div>
     <p v-if="errorMessage" class="mb-2 text-[11px] text-destructive">{{ errorMessage }}</p>
     <div class="flex gap-1.5">
-      <Input v-model="draft" placeholder="メッセージを入力" maxlength="2000" @keydown.enter="send" />
-      <Button size="sm" class="w-auto px-4" @click="send">送信</Button>
+      <Input v-model="draft" :placeholder="t('chat.placeholder')" maxlength="2000" @keydown.enter="send" />
+      <Button size="sm" class="w-auto px-4" @click="send">{{ t('chat.send') }}</Button>
     </div>
   </div>
 </template>

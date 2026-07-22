@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useSavedRoomsStore } from '@/stores/savedRooms'
 import { useConnectionStore } from '@/stores/connection'
@@ -8,6 +9,7 @@ import AppHeader from '@/components/AppHeader.vue'
 import AuthView from '@/views/AuthView.vue'
 import OnboardingFlow from '@/components/OnboardingFlow.vue'
 
+const { t } = useI18n()
 const auth = useAuthStore()
 const savedRooms = useSavedRoomsStore()
 const connection = useConnectionStore()
@@ -16,7 +18,7 @@ const onboarding = useOnboardingStore()
 const channelLabel = computed(() =>
 	connection.statusKind === 'connected' || connection.statusKind === 'reconnecting'
 		? `room: ${connection.roomName}`
-		: '未接続',
+		: t('common.notConnected'),
 )
 
 // uidが確定/変化するたびに、そのユーザーのルーム履歴を読み直す

@@ -3,7 +3,10 @@ import { ref } from 'vue'
 import { type Unsubscribe, collection, limit, onSnapshot, orderBy, query } from 'firebase/firestore'
 import { firestoreDb } from '@/lib/firebase'
 import { authedFetch } from '@/lib/api'
+import { i18n } from '@/i18n'
 import type { ChatMessage, ChatMessageDoc, ChatSendResponse } from '@/types/api'
+
+const { t } = i18n.global
 
 // [Phase5] テキストチャット。
 // 書き込みはtoken-server(/rooms/:roomId/messages)経由のみ。配信・履歴表示は
@@ -45,7 +48,7 @@ export const useChatStore = defineStore('chat', () => {
         messages.value = docs
       },
       (e) => {
-        errorMessage.value = `チャット取得エラー: ${e.message}`
+        errorMessage.value = t('errors.chatFetch', { message: e.message })
       },
     )
   }

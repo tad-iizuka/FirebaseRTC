@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Radio, DoorOpen, Mic, MessageSquare } from '@lucide/vue'
 import Button from '@/components/ui/Button.vue'
 
@@ -9,43 +10,32 @@ import Button from '@/components/ui/Button.vue'
 // 最後まで進める/スキップするといずれも 'complete' を emit してストアに書き込む。
 // PttButton.vue と同じく Pointer Events で一本化してスワイプを検出する
 // (マウス/タッチ/ペンをまとめて扱えるため)。
+//
+// [多言語化] スライドの文言(title/description)はロケールファイル
+// (src/locales/{ja,en}.json の onboarding.slides)側で管理する。
+// アイコンだけは言語に依存しないためこのコンポーネント側で保持し、
+// インデックスで対応するロケールの文言と組み合わせる。
 
+const { t, tm } = useI18n()
 const emit = defineEmits<{ complete: [] }>()
 
+const icons = [Radio, DoorOpen, Mic, MessageSquare]
+
 interface Slide {
-  icon: typeof Radio
+  icon: (typeof icons)[number]
   title: string
   description: string
 }
 
-const slides: Slide[] = [
-  {
-    icon: Radio,
-    title: 'PTT Client へようこそ',
-    description: 'トランシーバーのように、押している間だけ声が届くシンプルな音声チャットです。',
-  },
-  {
-    icon: DoorOpen,
-    title: 'ルームを作成・参加',
-    description: 'ルームは招待制です。自分でルームを作成するか、招待コードを受け取って参加しましょう。',
-  },
-  {
-    icon: Mic,
-    title: 'ボタンを押して話す',
-    description:
-      '中央のPTTボタンを押している間だけ音声が送信されます。誰かが話している間は自動的に送話が待機状態になります。',
-  },
-  {
-    icon: MessageSquare,
-    title: 'チャットと参加者管理',
-    description: 'テキストチャットや参加者一覧に加え、モデレーター向けのBAN・通報機能も使えます。',
-  },
-]
+const slides = computed<Slide[]>(() => {
+  const localizedSlides = tm('onboarding.slides') as unknown as { title: string; description: string }[]
+  return localizedSlides.map((slide, i) => ({ icon: icons[i], ...slide }))
+})
 
 const index = ref(0)
 const isFirst = computed(() => index.value === 0)
-const isLast = computed(() => index.value === slides.length - 1)
-const current = computed(() => slides[index.value])
+const isLast = computed(() => index.value === slides.value.length - 1)
+const current = computed(() => slides.value[index.value])
 
 function next() {
   if (isLast.value) {
@@ -93,7 +83,7 @@ function onPointerCancel() {
         class="text-[11px] uppercase tracking-[0.1em] text-muted-foreground underline-offset-2 hover:underline"
         @click="emit('complete')"
       >
-        スキップ
+        {{ t('onboarding.skip') }}
       </button>
     </div>
 
@@ -113,7 +103,7 @@ function onPointerCancel() {
         v-for="(_, i) in slides"
         :key="i"
         type="button"
-        :aria-label="`スライド ${i + 1}`"
+        :aria-label="t('onboarding.slideLabel', { n: i + 1 })"
         class="h-1.5 rounded-full transition-all"
         :class="i === index ? 'w-5 bg-primary' : 'w-1.5 bg-border'"
         @click="goTo(i)"
@@ -121,9 +111,11 @@ function onPointerCancel() {
     </div>
 
     <div class="flex items-center justify-between gap-3 p-5 pt-2">
-      <Button variant="secondary" class="w-auto" :disabled="isFirst" @click="back"> 戻る </Button>
+      <Button variant="secondary" class="w-auto" :disabled="isFirst" @click="back">
+        {{ t('onboarding.back') }}
+      </Button>
       <Button class="w-auto flex-1" @click="next">
-        {{ isLast ? 'はじめる' : '次へ' }}
+        {{ isLast ? t('onboarding.start') : t('onboarding.next') }}
       </Button>
     </div>
   </div>

@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import type { ParticipantInfo } from '@/stores/connection'
 import Badge from '@/components/ui/Badge.vue'
 
+const { t } = useI18n()
 defineProps<{
   participants: ParticipantInfo[]
   canBan: boolean
@@ -14,13 +16,13 @@ const emit = defineEmits<{
 
 <template>
   <div class="border-t border-border px-5 py-4">
-    <div class="mb-2 text-[10px] uppercase tracking-[0.1em] text-muted-foreground">参加者(緑=送話中)</div>
+    <div class="mb-2 text-[10px] uppercase tracking-[0.1em] text-muted-foreground">{{ t('participants.title') }}</div>
     <div class="flex min-h-[22px] flex-wrap gap-1.5">
-      <Badge v-if="participants.length === 0">— なし —</Badge>
+      <Badge v-if="participants.length === 0">{{ t('participants.none') }}</Badge>
       <Badge v-for="p in participants" :key="p.identity" :variant="p.muted ? 'default' : 'live'">
         <span>{{ p.name }}</span>
         <button type="button" class="opacity-70 underline hover:opacity-100" @click="emit('report', p)">
-          通報
+          {{ t('participants.report') }}
         </button>
         <button
           v-if="canBan"
@@ -28,7 +30,7 @@ const emit = defineEmits<{
           class="text-destructive opacity-70 underline hover:opacity-100"
           @click="emit('ban', p)"
         >
-          BAN
+          {{ t('participants.ban') }}
         </button>
       </Badge>
     </div>

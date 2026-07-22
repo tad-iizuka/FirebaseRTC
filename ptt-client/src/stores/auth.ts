@@ -9,6 +9,9 @@ import {
   signOut as firebaseSignOut,
 } from 'firebase/auth'
 import { firebaseAuth } from '@/lib/firebase'
+import { i18n } from '@/i18n'
+
+const { t } = i18n.global
 
 export const useAuthStore = defineStore('auth', () => {
   const currentUser = ref<User | null>(firebaseAuth.currentUser)
@@ -31,7 +34,7 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       await signInWithPopup(firebaseAuth, new GoogleAuthProvider())
     } catch (e) {
-      errorMessage.value = `Googleサインインエラー: ${(e as Error).message}`
+      errorMessage.value = t('errors.googleSignIn', { message: (e as Error).message })
     } finally {
       isSigningIn.value = false
     }
@@ -44,7 +47,7 @@ export const useAuthStore = defineStore('auth', () => {
       // Firebase Console側でApple providerの設定(Service ID等)が済んでいる必要がある
       await signInWithPopup(firebaseAuth, new OAuthProvider('apple.com'))
     } catch (e) {
-      errorMessage.value = `Appleサインインエラー: ${(e as Error).message}`
+      errorMessage.value = t('errors.appleSignIn', { message: (e as Error).message })
     } finally {
       isSigningIn.value = false
     }

@@ -12,7 +12,10 @@ import {
   Track,
 } from 'livekit-client'
 import { authedFetch } from '@/lib/api'
+import { i18n } from '@/i18n'
 import type { RoomMetadataPayload, TalkStartResponse, TokenResponse } from '@/types/api'
+
+const { t } = i18n.global
 
 // [LiveKit移行]
 // マイク取得・Opusエンコード/デコード・送受信は全てLiveKit SDKの Room オブジェクトが
@@ -98,10 +101,10 @@ export const useConnectionStore = defineStore('connection', () => {
   function attachRoomListeners(target: Room) {
     target
       .on(RoomEvent.ConnectionStateChanged, (state: ConnectionState) => {
-        appendLog(`接続状態: ${state}`)
+        appendLog(t('log.connectionState', { state }))
         if (state === ConnectionState.Disconnected && !manuallyDisconnected) {
           statusKind.value = 'error'
-          statusMessage.value = '切断されました'
+          statusMessage.value = t('log.disconnectedState')
           stopTalkHeartbeat()
           currentTalkerUid.value = null
           participants.value = new Map()
@@ -113,10 +116,10 @@ export const useConnectionStore = defineStore('connection', () => {
       })
       .on(RoomEvent.RoomMetadataChanged, (metadata: string | undefined) => {
         applyMetadata(metadata)
-        appendLog(`[診断] メタデータ更新受信: currentTalker=${currentTalkerUid.value ?? 'null'}`)
+        appendLog(t('log.metadataUpdate', { uid: currentTalkerUid.value ?? 'null' }))
       })
       .on(RoomEvent.ParticipantConnected, (p: RemoteParticipant) => {
-        appendLog(`参加: ${p.name || p.identity}`)
+        appendLog(t('log.participantJoined', { name: p.name || p.identity }))
         const pub = p.getTrackPublication(Track.Source.Microphone)
         participants.value = new Map(participants.value).set(p.identity, {
           identity: p.identity,
@@ -125,7 +128,7 @@ export const useConnectionStore = defineStore('connection', () => {
         })
       })
       .on(RoomEvent.ParticipantDisconnected, (p: RemoteParticipant) => {
-        appendLog(`退出: ${p.name || p.identity}`)
+        appendLog(t('log.participantLeft', { name: p.name || p.identity }))
         const next = new Map(participants.value)
         next.delete(p.identity)
         participants.value = next
@@ -133,7 +136,7 @@ export const useConnectionStore = defineStore('connection', () => {
       .on(
         RoomEvent.TrackSubscribed,
         (_track: RemoteTrack, _pub: RemoteTrackPublication, participant: RemoteParticipant) => {
-          appendLog(`音声トラック購読開始: ${participant.name || participant.identity}`)
+          appendLog(t('log.trackSubscribed', { name: participant.name || participant.identity }))
         },
       )
       .on(RoomEvent.TrackMuted, (pub: TrackPublication, participant: Participant) => {
@@ -160,7 +163,7 @@ export const useConnectionStore = defineStore('connection', () => {
 
   async function connect(opts: { tokenServerUrlValue: string; livekitUrlValue: string; roomId: string }) {
     if (room) {
-      appendLog('すでに接続中/接続試行中です')
+      appendLog(t('log.alreadyConnecting'))
       return
     }
     tokenServerUrl = opts.tokenServerUrlValue
@@ -173,14 +176,14 @@ export const useConnectionStore = defineStore('connection', () => {
 
     try {
       const token = await fetchToken(opts.roomId)
-      appendLog('トークン取得成功')
+      appendLog(t('log.tokenFetchSuccess'))
 
       const newRoom = new Room({ audioCaptureDefaults: { echoCancellation: true, noiseSuppression: true } })
       attachRoomListeners(newRoom)
       room = newRoom
 
       await newRoom.connect(livekitUrl, token)
-      appendLog(`ルーム接続完了: room=${opts.roomId}`)
+      appendLog(t('log.roomConnected', { roomId: opts.roomId }))
       await newRoom.localParticipant.setMicrophoneEnabled(false)
 
       applyMetadata(newRoom.metadata)
@@ -189,7 +192,7 @@ export const useConnectionStore = defineStore('connection', () => {
       statusKind.value = 'connected'
       scheduleTokenRefresh()
     } catch (e) {
-      appendLog(`接続エラー: ${(e as Error).message}`)
+      appendLog(t('log.connectionError', { message: (e as Error).message }))
       statusKind.value = 'error'
       statusMessage.value = (e as Error).message
       room = null
@@ -201,18 +204,18 @@ export const useConnectionStore = defineStore('connection', () => {
     const refreshInMs = TOKEN_TTL_SECONDS * 0.9 * 1000
     tokenRefreshTimer = setTimeout(async () => {
       if (!room || manuallyDisconnected) return
-      appendLog('トークン有効期限が近いため再接続します')
+      appendLog(t('log.tokenRefreshNear'))
       try {
         const token = await fetchToken(idTokenProviderRoomId)
         await room.disconnect()
         await room.connect(livekitUrl, token)
         await room.localParticipant.setMicrophoneEnabled(false)
-        appendLog('トークン更新・再接続に成功しました')
+        appendLog(t('log.tokenRefreshSuccess'))
         scheduleTokenRefresh()
       } catch (e) {
-        appendLog(`トークン更新エラー: ${(e as Error).message}`)
+        appendLog(t('log.tokenRefreshError', { message: (e as Error).message }))
         statusKind.value = 'error'
-        statusMessage.value = 'トークン更新失敗'
+        statusMessage.value = t('log.tokenRefreshFailed')
       }
     }, refreshInMs)
   }
@@ -262,7 +265,7 @@ export const useConnectionStore = defineStore('connection', () => {
         })
       } catch (e) {
         // サーバー側で最大発話時間を超えた等、ロックを失った場合はここに来る。
-        appendLog(`発話ロックの延長に失敗しました。送話を終了します: ${(e as Error).message}`)
+        appendLog(t('log.talkHeartbeatFailed', { message: (e as Error).message }))
         await stopTalking(true)
       }
     }, TALK_LOCK_HEARTBEAT_MS)
@@ -284,7 +287,7 @@ export const useConnectionStore = defineStore('connection', () => {
     } catch (e) {
       // 他人が発話中(409 talk_locked)など。RoomMetadataChangedでほぼ同時にボタンも
       // 無効化されるはずだが、競合(ほぼ同時押下)によるレースは起こりうるため、ここでも弾く。
-      appendLog(`発話を開始できませんでした: ${(e as Error).message}`)
+      appendLog(t('log.talkStartFailed', { message: (e as Error).message }))
       pttHeld = false
       return
     }
@@ -303,7 +306,7 @@ export const useConnectionStore = defineStore('connection', () => {
       isSending.value = true
       startTalkHeartbeat()
     } catch (e) {
-      appendLog(`マイク有効化エラー: ${(e as Error).message}`)
+      appendLog(t('log.micEnableError', { message: (e as Error).message }))
       authedFetch(tokenServerUrl, `/rooms/${encodeURIComponent(roomName.value)}/talk/stop`, {
         method: 'POST',
       }).catch(() => {})
@@ -319,7 +322,7 @@ export const useConnectionStore = defineStore('connection', () => {
     try {
       await room.localParticipant.setMicrophoneEnabled(false)
     } catch (e) {
-      appendLog(`マイク無効化エラー: ${(e as Error).message}`)
+      appendLog(t('log.micDisableError', { message: (e as Error).message }))
     }
     if (!forced && roomName.value) {
       authedFetch(tokenServerUrl, `/rooms/${encodeURIComponent(roomName.value)}/talk/stop`, {

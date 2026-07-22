@@ -3,7 +3,10 @@ import { ref } from 'vue'
 import { type Unsubscribe, doc, getDoc, onSnapshot } from 'firebase/firestore'
 import { firestoreDb } from '@/lib/firebase'
 import { authedFetch } from '@/lib/api'
+import { i18n } from '@/i18n'
 import type { BanResponse, RoomMember } from '@/types/api'
+
+const { t } = i18n.global
 
 // [BAN対応]
 // - 自分の rooms/{roomId}/members/{uid} ドキュメントを読み、role(owner/moderator/member)を
@@ -33,7 +36,7 @@ export const useBanStore = defineStore('ban', () => {
       const snap = await getDoc(ref_)
       myRole.value = snap.exists() ? ((snap.data().role as RoomMember['role']) ?? 'member') : null
     } catch (e) {
-      errorMessage.value = `ロール取得エラー: ${(e as Error).message}`
+      errorMessage.value = t('errors.roleFetch', { message: (e as Error).message })
       myRole.value = null
     }
 
@@ -45,7 +48,7 @@ export const useBanStore = defineStore('ban', () => {
         }
       },
       (e) => {
-        errorMessage.value = `BAN監視エラー: ${e.message}`
+        errorMessage.value = t('errors.banWatch', { message: e.message })
       },
     )
   }

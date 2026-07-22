@@ -5,12 +5,14 @@ import App from '@/App.vue'
 import router, { setAuthReadyPromise } from '@/router'
 import { firebaseAuth } from '@/lib/firebase'
 import { useAuthStore } from '@/stores/auth'
+import { i18n } from '@/i18n'
 import '@/style.css'
 
 const app = createApp(App)
 const pinia = createPinia()
 app.use(pinia)
 app.use(router)
+app.use(i18n)
 
 // ルーターガードがFirebase Authの初回復元を待てるよう、
 // onAuthStateChangedの最初の1回で解決するPromiseを先に登録しておく。

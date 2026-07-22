@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { ConnectionStatusKind } from '@/stores/connection'
 import { cn } from '@/lib/utils'
 
+const { t } = useI18n()
 const props = defineProps<{
   kind: ConnectionStatusKind
   message?: string | null
@@ -23,15 +25,15 @@ const dotClass = computed(() =>
 const text = computed(() => {
   switch (props.kind) {
     case 'disconnected':
-      return 'サーバ未接続'
+      return t('status.disconnected')
     case 'connecting':
-      return '接続中...'
+      return t('status.connecting')
     case 'connected':
-      return `接続中 (room=${props.roomId})`
+      return t('status.connected', { roomId: props.roomId })
     case 'reconnecting':
-      return `再接続中... (room=${props.roomId})`
+      return t('status.reconnecting', { roomId: props.roomId })
     case 'error':
-      return `エラー: ${props.message ?? ''}`
+      return t('status.error', { message: props.message ?? '' })
   }
   return ''
 })
