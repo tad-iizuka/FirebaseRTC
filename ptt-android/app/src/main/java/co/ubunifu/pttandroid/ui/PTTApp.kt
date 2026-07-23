@@ -64,11 +64,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import co.ubunifu.pttandroid.R
 import co.ubunifu.pttandroid.auth.PTTAuthManager
 import co.ubunifu.pttandroid.ban.PTTBanStore
 import co.ubunifu.pttandroid.chat.PTTChatStore
@@ -106,6 +109,12 @@ fun PTTApp(
     }
 
     val scope = rememberCoroutineScope()
+
+    // [多言語化] LaunchedEffect/scope.launchのブロックは@Composableコンテキストではないため、
+    // stringResource()はここ(コンポーザブル本体)であらかじめ解決しておく必要がある。
+    val banNoticeText = stringResource(R.string.room_ban_notice)
+    val createdRoomLabel = stringResource(R.string.room_select_created_room_label)
+    val joinedRoomLabel = stringResource(R.string.room_select_joined_room_label)
 
     val currentUser by authManager.currentUser.collectAsState()
     val authError by authManager.lastErrorMessage.collectAsState()
@@ -173,7 +182,7 @@ fun PTTApp(
     // BAN自体の強制力はLiveKit側の即時キック(サーバー)が担うため、ここは表示のための補助。
     LaunchedEffect(isBanned) {
         if (isBanned) {
-            banNotice = "このルームから排除されました"
+            banNotice = banNoticeText
             leaveRoom()
         }
     }
@@ -213,7 +222,7 @@ fun PTTApp(
                 StatusRow(status)
                 InviteBox(currentInviteCode, activeRoomId)
                 OutlinedButton(onClick = { leaveRoom() }, modifier = Modifier.fillMaxWidth()) {
-                    Text("ルームを退出する", fontFamily = Mono)
+                    Text(stringResource(R.string.room_leave_room), fontFamily = Mono)
                 }
                 Spacer(Modifier.height(20.dp))
                 TalkArea(
@@ -272,7 +281,7 @@ fun PTTApp(
                             val idToken = authManager.fetchIdToken()
                             val created = roomManager.createRoom(tokenServerUrl, idToken)
                             currentInviteCode = created.inviteCode
-                            savedRoomsStore.upsert(created.roomId, "自分が作成したルーム", created.inviteCode)
+                            savedRoomsStore.upsert(created.roomId, createdRoomLabel, created.inviteCode)
                             enterRoom(created.roomId)
                         } catch (e: Exception) {
                             // roomManager.lastErrorMessage に理由がセットされている
@@ -293,7 +302,7 @@ fun PTTApp(
                             val idToken = authManager.fetchIdToken()
                             roomManager.joinRoom(tokenServerUrl, idToken, roomId, inviteCode)
                             currentInviteCode = inviteCode // 参加者自身が入力したコードをそのまま保持する(以前はnullで潰していたため招待コード欄が表示されなかった)
-                            savedRoomsStore.upsert(roomId, "招待コードで参加したルーム", inviteCode)
+                            savedRoomsStore.upsert(roomId, joinedRoomLabel, inviteCode)
                             enterRoom(roomId)
                         } catch (e: Exception) {
                             // roomManager.lastErrorMessage に理由がセットされている
@@ -313,10 +322,10 @@ fun PTTApp(
     banTarget?.let { target ->
         AlertDialog(
             onDismissRequest = { banTarget = null },
-            title = { Text("BANしますか?", fontFamily = Mono) },
+            title = { Text(stringResource(R.string.room_ban_confirm_title), fontFamily = Mono) },
             text = {
                 Text(
-                    "${target.name} をこのルームからBANしますか?\nこの操作は取り消せません。",
+                    stringResource(R.string.room_ban_confirm_description, target.name),
                     fontFamily = Mono,
                 )
             },
@@ -325,22 +334,23 @@ fun PTTApp(
                     onClick = { confirmBan(target) },
                     colors = ButtonDefaults.buttonColors(containerColor = PTTColors.Danger),
                 ) {
-                    Text("BANする", fontFamily = Mono)
+                    Text(stringResource(R.string.room_ban_confirm_label), fontFamily = Mono)
                 }
             },
             dismissButton = {
                 OutlinedButton(onClick = { banTarget = null }) {
-                    Text("キャンセル", fontFamily = Mono)
+                    Text(stringResource(R.string.common_cancel), fontFamily = Mono)
                 }
             },
         )
     }
 }
 
+@Composable
 private fun channelLabel(status: ConnectionStatus): String = when (status) {
     is ConnectionStatus.Connected -> "room: ${status.room}"
     is ConnectionStatus.Reconnecting -> "room: ${status.room}"
-    else -> "未接続"
+    else -> stringResource(R.string.common_not_connected)
 }
 
 @Composable
@@ -356,7 +366,7 @@ private fun HeaderRow(currentUserName: String?, channelLabel: String, onSignOut:
                 Text(currentUserName, fontFamily = Mono, fontSize = 12.sp)
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    "サインアウト",
+                    stringResource(R.string.header_sign_out),
                     fontFamily = Mono,
                     fontSize = 11.sp,
                     color = PTTColors.Muted,
@@ -379,7 +389,7 @@ private fun AuthSection(errorMessage: String?, onSignIn: () -> Unit) {
             modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.buttonColors(containerColor = PTTColors.Accent),
         ) {
-            Text("Googleでサインイン", fontFamily = Mono)
+            Text(stringResource(R.string.auth_sign_in_with_google), fontFamily = Mono)
         }
         errorMessage?.let { Text(it, color = PTTColors.Danger, fontFamily = Mono, fontSize = 11.sp) }
     }
@@ -388,11 +398,11 @@ private fun AuthSection(errorMessage: String?, onSignIn: () -> Unit) {
 @Composable
 private fun StatusRow(status: ConnectionStatus) {
     val (color, text) = when (status) {
-        is ConnectionStatus.Disconnected -> PTTColors.Muted to "サーバ未接続"
-        is ConnectionStatus.Connecting -> PTTColors.Muted to "接続中..."
-        is ConnectionStatus.Connected -> PTTColors.Live to "接続中 (room=${status.room})"
-        is ConnectionStatus.Reconnecting -> PTTColors.Warning to "再接続中... (room=${status.room})"
-        is ConnectionStatus.Error -> PTTColors.Danger to "エラー: ${status.message}"
+        is ConnectionStatus.Disconnected -> PTTColors.Muted to stringResource(R.string.status_disconnected)
+        is ConnectionStatus.Connecting -> PTTColors.Muted to stringResource(R.string.status_connecting)
+        is ConnectionStatus.Connected -> PTTColors.Live to stringResource(R.string.status_connected, status.room)
+        is ConnectionStatus.Reconnecting -> PTTColors.Warning to stringResource(R.string.status_reconnecting, status.room)
+        is ConnectionStatus.Error -> PTTColors.Danger to stringResource(R.string.status_error, status.message)
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(
@@ -415,9 +425,9 @@ private fun InviteBox(inviteCode: String?, roomId: String?) {
     if (inviteCode == null || roomId == null) return
     Card(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
         Column(Modifier.padding(10.dp)) {
-            Text("このルームの招待コード(参加者に共有してください):", fontFamily = Mono, fontSize = 12.sp)
+            Text(stringResource(R.string.invite_label), fontFamily = Mono, fontSize = 12.sp)
             Text(inviteCode, fontFamily = Mono, fontSize = 18.sp, color = PTTColors.Accent)
-            Text("ルームID: $roomId", fontFamily = Mono, fontSize = 12.sp, color = PTTColors.Muted)
+            Text(stringResource(R.string.invite_room_id, roomId), fontFamily = Mono, fontSize = 12.sp, color = PTTColors.Muted)
         }
     }
 }
@@ -444,14 +454,14 @@ private fun RoomSelectionSection(
         OutlinedTextField(
             value = tokenServerUrl,
             onValueChange = onTokenServerUrlChange,
-            label = { Text("トークンサーバーURL", fontFamily = Mono, fontSize = 10.sp) },
+            label = { Text(stringResource(R.string.auth_token_server_url), fontFamily = Mono, fontSize = 10.sp) },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
         )
         OutlinedTextField(
             value = livekitUrl,
             onValueChange = onLivekitUrlChange,
-            label = { Text("LiveKit URL (wss://)", fontFamily = Mono, fontSize = 10.sp) },
+            label = { Text(stringResource(R.string.auth_livekit_url), fontFamily = Mono, fontSize = 10.sp) },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
         )
@@ -463,36 +473,36 @@ private fun RoomSelectionSection(
             colors = ButtonDefaults.buttonColors(containerColor = PTTColors.Accent),
         ) {
             if (isWorking) CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White)
-            else Text("新しいルームを作成する", fontFamily = Mono)
+            else Text(stringResource(R.string.room_select_create_room), fontFamily = Mono)
         }
 
-        Text("— または —", fontFamily = Mono, fontSize = 10.sp, color = PTTColors.Muted, modifier = Modifier.fillMaxWidth())
+        Text(stringResource(R.string.common_or_divider), fontFamily = Mono, fontSize = 10.sp, color = PTTColors.Muted, modifier = Modifier.fillMaxWidth())
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedTextField(
                 value = joinRoomId,
                 onValueChange = onJoinRoomIdChange,
-                label = { Text("ルームID", fontFamily = Mono, fontSize = 10.sp) },
+                label = { Text(stringResource(R.string.room_select_room_id_label), fontFamily = Mono, fontSize = 10.sp) },
                 modifier = Modifier.weight(1f),
                 singleLine = true,
             )
             OutlinedTextField(
                 value = joinInviteCode,
                 onValueChange = onJoinInviteCodeChange,
-                label = { Text("招待コード", fontFamily = Mono, fontSize = 10.sp) },
+                label = { Text(stringResource(R.string.room_select_invite_code_label), fontFamily = Mono, fontSize = 10.sp) },
                 modifier = Modifier.weight(1f),
                 singleLine = true,
             )
         }
         OutlinedButton(onClick = onJoinRoom, enabled = !isWorking, modifier = Modifier.fillMaxWidth()) {
-            Text("招待コードで参加する", fontFamily = Mono)
+            Text(stringResource(R.string.room_select_join_room), fontFamily = Mono)
         }
 
         errorMessage?.let { Text(it, color = PTTColors.Danger, fontFamily = Mono, fontSize = 11.sp) }
 
         if (savedRooms.isNotEmpty()) {
             Text(
-                "— 最近使ったルーム —",
+                stringResource(R.string.room_select_recent_rooms),
                 fontFamily = Mono, fontSize = 10.sp, color = PTTColors.Muted,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -526,7 +536,7 @@ private fun SavedRoomRow(saved: SavedRoom, onOpen: (SavedRoom) -> Unit, onRemove
             }
         }
         Text(
-            "削除",
+            stringResource(R.string.common_remove),
             fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Muted,
             modifier = Modifier.pointerInput(saved.roomId) {
                 detectTapGestures(onTap = { onRemove(saved.roomId) })
@@ -579,9 +589,9 @@ private fun TalkArea(
             }
             Text(
                 text = when {
-                    isSending -> "送話中"
-                    someoneElseTalking -> "$talkerName が送話中"
-                    else -> "押して送話"
+                    isSending -> stringResource(R.string.ptt_talking)
+                    someoneElseTalking -> stringResource(R.string.ptt_talking_by_name, talkerName)
+                    else -> stringResource(R.string.ptt_press_to_talk)
                 },
                 fontFamily = Mono,
                 fontSize = 13.sp,
@@ -592,7 +602,7 @@ private fun TalkArea(
         }
         Spacer(Modifier.height(14.dp))
         Text(
-            "ボタンを押している間だけ音声が送信されます",
+            stringResource(R.string.room_ptt_hint),
             fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Muted,
         )
     }
@@ -606,10 +616,10 @@ private fun ParticipantsSection(
     onRequestBan: (ParticipantInfo) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth()) {
-        Text("参加者(緑=送話中)", fontFamily = Mono, fontSize = 10.sp, color = PTTColors.Muted)
+        Text(stringResource(R.string.participants_title), fontFamily = Mono, fontSize = 10.sp, color = PTTColors.Muted)
         Spacer(Modifier.height(6.dp))
         if (participants.isEmpty()) {
-            Text("— なし —", fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Muted)
+            Text(stringResource(R.string.participants_none), fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Muted)
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 participants.values.sortedBy { it.name }.forEach { info ->
@@ -658,7 +668,7 @@ private fun ChatSection(
     onSend: () -> Unit,
 ) {
     Column(Modifier.fillMaxWidth()) {
-        Text("チャット", fontFamily = Mono, fontSize = 10.sp, color = PTTColors.Muted)
+        Text(stringResource(R.string.chat_title), fontFamily = Mono, fontSize = 10.sp, color = PTTColors.Muted)
         Spacer(Modifier.height(6.dp))
         LazyColumn(Modifier.fillMaxWidth().height(160.dp)) {
             items(messages) { message ->
@@ -677,13 +687,13 @@ private fun ChatSection(
                 onValueChange = onInputChange,
                 modifier = Modifier.weight(1f),
                 singleLine = true,
-                placeholder = { Text("メッセージを入力", fontFamily = Mono, fontSize = 12.sp) },
+                placeholder = { Text(stringResource(R.string.chat_placeholder), fontFamily = Mono, fontSize = 12.sp) },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { onSend() }),
             )
             Spacer(Modifier.width(8.dp))
             Button(onClick = onSend, enabled = input.isNotBlank()) {
-                Text("送信", fontFamily = Mono)
+                Text(stringResource(R.string.chat_send), fontFamily = Mono)
             }
         }
     }

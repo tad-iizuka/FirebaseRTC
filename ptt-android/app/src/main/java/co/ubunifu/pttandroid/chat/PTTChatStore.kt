@@ -14,6 +14,8 @@
  */
 package co.ubunifu.pttandroid.chat
 
+import android.content.Context
+import co.ubunifu.pttandroid.R
 import co.ubunifu.pttandroid.model.ChatMessage
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
@@ -30,11 +32,14 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 class PTTChatStore(
+    context: Context,
     private val httpClient: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .build(),
 ) {
+    // [多言語化] エラーメッセージのローカライズ用。
+    private val appContext = context.applicationContext
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
     private val db = FirebaseFirestore.getInstance()
 
@@ -54,7 +59,7 @@ class PTTChatStore(
             .limit(200)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    _errorMessage.value = "チャット履歴の取得に失敗しました: ${error.message}"
+                    _errorMessage.value = appContext.getString(R.string.errors_chat_fetch, error.message)
                     return@addSnapshotListener
                 }
                 val docs = snapshot?.documents.orEmpty().map { doc ->
@@ -100,7 +105,7 @@ class PTTChatStore(
                         }
                     } catch (e: Exception) {
                         null
-                    } ?: "メッセージの送信に失敗しました (HTTP ${response.code})"
+                    } ?: appContext.getString(R.string.errors_chat_send_failed, response.code)
                     _errorMessage.value = message
                     throw IllegalStateException(message)
                 }

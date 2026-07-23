@@ -1,0 +1,113 @@
+<resources>
+    <!-- [Localization] English strings, mirroring the copy/keys used in
+         ptt-client/src/locales/en.json and the iOS app, so the wording is
+         consistent across all three platforms. -->
+
+    <!-- common -->
+    <string name="common_skip">Skip</string>
+    <string name="common_back">Back</string>
+    <string name="common_next">Next</string>
+    <string name="common_get_started">Get Started</string>
+    <string name="common_cancel">Cancel</string>
+    <string name="common_remove">Remove</string>
+    <string name="common_or_divider">— or —</string>
+    <string name="common_not_connected">Not connected</string>
+
+    <!-- header -->
+    <string name="header_sign_out">Sign out</string>
+
+    <!-- auth -->
+    <string name="auth_token_server_url">Token Server URL</string>
+    <string name="auth_livekit_url">LiveKit URL (wss://)</string>
+    <string name="auth_sign_in_with_google">Sign in with Google</string>
+
+    <!-- onboarding -->
+    <string name="onboarding_skip">Skip</string>
+    <string name="onboarding_back">Back</string>
+    <string name="onboarding_next">Next</string>
+    <string name="onboarding_start">Get Started</string>
+    <string name="onboarding_slide1_title">Welcome to PTT Client</string>
+    <string name="onboarding_slide1_description">A simple push-to-talk voice chat, just like a walkie-talkie: your voice is sent only while you hold the button.</string>
+    <string name="onboarding_slide2_title">Create or join a room</string>
+    <string name="onboarding_slide2_description">Rooms are invite-only. Create your own room, or join one using an invite code you received.</string>
+    <string name="onboarding_slide3_title">Press the button to talk</string>
+    <string name="onboarding_slide3_description">Audio is sent only while you hold the PTT button in the center. Talk is automatically put on hold while someone else is speaking.</string>
+    <string name="onboarding_slide4_title">Chat and manage participants</string>
+    <string name="onboarding_slide4_description">Along with the text chat and participant list, moderators can also ban participants.</string>
+
+    <!-- roomSelect -->
+    <string name="room_select_create_room">Create a new room</string>
+    <string name="room_select_room_id_label">Room ID</string>
+    <string name="room_select_invite_code_label">Invite code</string>
+    <string name="room_select_join_room">Join with invite code</string>
+    <string name="room_select_recent_rooms">— Recently used rooms —</string>
+    <string name="room_select_created_room_label">Room you created</string>
+    <string name="room_select_joined_room_label">Room joined with an invite code</string>
+
+    <!-- room -->
+    <string name="room_leave_room">Leave room</string>
+    <string name="room_ptt_hint">Audio is sent only while the button is pressed</string>
+    <string name="room_ban_notice">You have been removed from this room</string>
+    <string name="room_ban_confirm_title">Ban this participant?</string>
+    <string name="room_ban_confirm_description">Ban %1$s from this room?\nThis action cannot be undone.</string>
+    <string name="room_ban_confirm_label">Ban</string>
+
+    <!-- status -->
+    <string name="status_disconnected">Not connected to server</string>
+    <string name="status_connecting">Connecting...</string>
+    <string name="status_connected">Connected (room=%1$s)</string>
+    <string name="status_reconnecting">Reconnecting... (room=%1$s)</string>
+    <string name="status_error">Error: %1$s</string>
+
+    <!-- invite -->
+    <string name="invite_label">Invite code for this room (share with participants):</string>
+    <string name="invite_room_id">Room ID: %1$s</string>
+
+    <!-- ptt -->
+    <string name="ptt_talking_by_name">%1$s is talking</string>
+    <string name="ptt_talking">Talking</string>
+    <string name="ptt_press_to_talk">Press to talk</string>
+
+    <!-- participants -->
+    <string name="participants_title">Participants (green = talking)</string>
+    <string name="participants_none">— None —</string>
+
+    <!-- chat -->
+    <string name="chat_title">Chat</string>
+    <string name="chat_placeholder">Type a message</string>
+    <string name="chat_send">Send</string>
+
+    <!-- errors -->
+    <string name="errors_not_signed_in">Not signed in</string>
+    <string name="errors_google_sign_in">Google sign-in error: %1$s</string>
+    <string name="errors_google_token_missing">Could not get a token from Google sign-in</string>
+    <string name="errors_id_token_fetch_failed">Failed to obtain an ID token</string>
+    <string name="errors_role_fetch">Role fetch error: %1$s</string>
+    <string name="errors_ban_watch">Ban monitoring error: %1$s</string>
+    <string name="errors_chat_fetch">Failed to fetch chat history: %1$s</string>
+    <string name="errors_unknown">Unknown error</string>
+    <string name="errors_connection_failed_generic">Connection failed</string>
+    <string name="errors_room_request_failed">Request failed (HTTP %1$d)</string>
+    <string name="errors_ban_action_failed">Ban failed (HTTP %1$d)</string>
+    <string name="errors_chat_send_failed">Failed to send message (HTTP %1$d)</string>
+    <string name="errors_talk_lock_failed">Talk lock operation failed (HTTP %1$d)</string>
+    <string name="errors_token_fetch_failed">Token fetch failed (HTTP %1$d)</string>
+
+    <!-- log -->
+    <string name="log_already_connecting">Already connected or connecting</string>
+    <string name="log_token_fetch_success">Token fetch succeeded</string>
+    <string name="log_room_connected">Room connected: room=%1$s</string>
+    <string name="log_connection_error">Connection error: %1$s</string>
+    <string name="log_disconnected_by_user">Disconnected</string>
+    <string name="log_disconnected_event">Disconnected: %1$s</string>
+    <string name="log_reconnecting">Reconnecting...</string>
+    <string name="log_reconnected">Reconnected successfully</string>
+    <string name="log_connect_failed">Connection failed: %1$s</string>
+    <string name="log_metadata_update">[Diag] Metadata update received: currentTalker=%1$s</string>
+    <string name="log_participant_joined">Joined: %1$s</string>
+    <string name="log_participant_left">Left: %1$s</string>
+    <string name="log_talk_heartbeat_failed">Failed to extend the talk lock. Ending talk: %1$s</string>
+    <string name="log_talk_start_failed">Could not start talking: %1$s</string>
+    <string name="log_mic_enable_error">Microphone enable error: %1$s</string>
+    <string name="log_mic_disable_error">Microphone disable error: %1$s</string>
+</resources>

@@ -8,4 +8,117 @@
       リポジトリに含めない値として管理することを推奨する。
     -->
     <string name="default_web_client_id" translatable="false">REPLACE_WITH_YOUR_WEB_CLIENT_ID.apps.googleusercontent.com</string>
+
+    <!-- [多言語化] Web版(ptt-client/src/locales)・iOS版と同じ文言・キー構成に揃えている。
+         デフォルト(values/)は日本語。英語は values-en/strings.xml を参照。
+         端末の言語設定がja/en以外の場合はこの日本語版にフォールバックする
+         (Web版のi18n.ts: fallbackLocale: 'ja' と同じ挙動)。 -->
+
+    <!-- common -->
+    <string name="common_skip">スキップ</string>
+    <string name="common_back">戻る</string>
+    <string name="common_next">次へ</string>
+    <string name="common_get_started">はじめる</string>
+    <string name="common_cancel">キャンセル</string>
+    <string name="common_remove">削除</string>
+    <string name="common_or_divider">— または —</string>
+    <string name="common_not_connected">未接続</string>
+
+    <!-- header -->
+    <string name="header_sign_out">サインアウト</string>
+
+    <!-- auth -->
+    <string name="auth_token_server_url">トークンサーバーURL</string>
+    <string name="auth_livekit_url">LiveKit URL (wss://)</string>
+    <string name="auth_sign_in_with_google">Googleでサインイン</string>
+
+    <!-- onboarding -->
+    <string name="onboarding_skip">スキップ</string>
+    <string name="onboarding_back">戻る</string>
+    <string name="onboarding_next">次へ</string>
+    <string name="onboarding_start">はじめる</string>
+    <string name="onboarding_slide1_title">PTT Client へようこそ</string>
+    <string name="onboarding_slide1_description">トランシーバーのように、押している間だけ声が届くシンプルな音声チャットです。</string>
+    <string name="onboarding_slide2_title">ルームを作成・参加</string>
+    <string name="onboarding_slide2_description">ルームは招待制です。自分でルームを作成するか、招待コードを受け取って参加しましょう。</string>
+    <string name="onboarding_slide3_title">ボタンを押して話す</string>
+    <string name="onboarding_slide3_description">中央のPTTボタンを押している間だけ音声が送信されます。誰かが話している間は自動的に送話が待機状態になります。</string>
+    <string name="onboarding_slide4_title">チャットと参加者管理</string>
+    <string name="onboarding_slide4_description">テキストチャットや参加者一覧に加え、モデレーター向けのBAN・通報機能も使えます。</string>
+
+    <!-- roomSelect -->
+    <string name="room_select_create_room">新しいルームを作成する</string>
+    <string name="room_select_room_id_label">ルームID</string>
+    <string name="room_select_invite_code_label">招待コード</string>
+    <string name="room_select_join_room">招待コードで参加する</string>
+    <string name="room_select_recent_rooms">— 最近使ったルーム —</string>
+    <string name="room_select_created_room_label">自分が作成したルーム</string>
+    <string name="room_select_joined_room_label">招待コードで参加したルーム</string>
+
+    <!-- room -->
+    <string name="room_leave_room">ルームを退出する</string>
+    <string name="room_ptt_hint">ボタンを押している間だけ音声が送信されます</string>
+    <string name="room_ban_notice">このルームから排除されました</string>
+    <string name="room_ban_confirm_title">BANしますか?</string>
+    <string name="room_ban_confirm_description">%1$s をこのルームからBANしますか?\nこの操作は取り消せません。</string>
+    <string name="room_ban_confirm_label">BANする</string>
+
+    <!-- status -->
+    <string name="status_disconnected">サーバ未接続</string>
+    <string name="status_connecting">接続中...</string>
+    <string name="status_connected">接続中 (room=%1$s)</string>
+    <string name="status_reconnecting">再接続中... (room=%1$s)</string>
+    <string name="status_error">エラー: %1$s</string>
+
+    <!-- invite -->
+    <string name="invite_label">このルームの招待コード(参加者に共有してください):</string>
+    <string name="invite_room_id">ルームID: %1$s</string>
+
+    <!-- ptt -->
+    <string name="ptt_talking_by_name">%1$s が送話中</string>
+    <string name="ptt_talking">送話中</string>
+    <string name="ptt_press_to_talk">押して送話</string>
+
+    <!-- participants -->
+    <string name="participants_title">参加者(緑=送話中)</string>
+    <string name="participants_none">— なし —</string>
+
+    <!-- chat -->
+    <string name="chat_title">チャット</string>
+    <string name="chat_placeholder">メッセージを入力</string>
+    <string name="chat_send">送信</string>
+
+    <!-- errors -->
+    <string name="errors_not_signed_in">サインインしていません</string>
+    <string name="errors_google_sign_in">Googleサインインエラー: %1$s</string>
+    <string name="errors_google_token_missing">Googleサインインからトークンを取得できませんでした</string>
+    <string name="errors_id_token_fetch_failed">ID Tokenの取得に失敗しました</string>
+    <string name="errors_role_fetch">ロール取得エラー: %1$s</string>
+    <string name="errors_ban_watch">BAN監視エラー: %1$s</string>
+    <string name="errors_chat_fetch">チャット履歴の取得に失敗しました: %1$s</string>
+    <string name="errors_unknown">不明なエラー</string>
+    <string name="errors_connection_failed_generic">接続失敗</string>
+    <string name="errors_room_request_failed">リクエストに失敗しました (HTTP %1$d)</string>
+    <string name="errors_ban_action_failed">BAN処理に失敗しました (HTTP %1$d)</string>
+    <string name="errors_chat_send_failed">メッセージの送信に失敗しました (HTTP %1$d)</string>
+    <string name="errors_talk_lock_failed">発話ロックの操作に失敗しました (HTTP %1$d)</string>
+    <string name="errors_token_fetch_failed">トークン取得に失敗しました (HTTP %1$d)</string>
+
+    <!-- log -->
+    <string name="log_already_connecting">すでに接続中/接続試行中です</string>
+    <string name="log_token_fetch_success">トークン取得成功</string>
+    <string name="log_room_connected">ルーム接続完了: room=%1$s</string>
+    <string name="log_connection_error">接続エラー: %1$s</string>
+    <string name="log_disconnected_by_user">切断しました</string>
+    <string name="log_disconnected_event">切断されました: %1$s</string>
+    <string name="log_reconnecting">再接続を開始しました</string>
+    <string name="log_reconnected">再接続に成功しました</string>
+    <string name="log_connect_failed">接続失敗: %1$s</string>
+    <string name="log_metadata_update">[診断] メタデータ更新受信: currentTalker=%1$s</string>
+    <string name="log_participant_joined">参加: %1$s</string>
+    <string name="log_participant_left">退出: %1$s</string>
+    <string name="log_talk_heartbeat_failed">発話ロックの延長に失敗しました。送話を終了します: %1$s</string>
+    <string name="log_talk_start_failed">発話を開始できませんでした: %1$s</string>
+    <string name="log_mic_enable_error">マイク有効化エラー: %1$s</string>
+    <string name="log_mic_disable_error">マイク無効化エラー: %1$s</string>
 </resources>

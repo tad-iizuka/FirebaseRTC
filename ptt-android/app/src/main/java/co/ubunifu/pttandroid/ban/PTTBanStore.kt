@@ -19,6 +19,8 @@
  */
 package co.ubunifu.pttandroid.ban
 
+import android.content.Context
+import co.ubunifu.pttandroid.R
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import kotlinx.coroutines.Dispatchers
@@ -34,11 +36,14 @@ import java.util.concurrent.TimeUnit
 class BanApiException(val statusCode: Int, message: String) : Exception(message)
 
 class PTTBanStore(
+    context: Context,
     private val httpClient: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .build(),
 ) {
+    // [多言語化] エラーメッセージのローカライズ用。
+    private val appContext = context.applicationContext
     private val db = FirebaseFirestore.getInstance()
 
     /** 現在入室中のルームでの自分のロール。"owner" | "moderator" | "member" | null(未取得/不明) */
@@ -66,13 +71,13 @@ class PTTBanStore(
                 _myRole.value = if (snap.exists()) (snap.getString("role") ?: "member") else null
             }
             .addOnFailureListener { e ->
-                _errorMessage.value = "ロール取得エラー: ${e.message}"
+                _errorMessage.value = appContext.getString(R.string.errors_role_fetch, e.message)
                 _myRole.value = null
             }
 
         listener = ref.addSnapshotListener { snapshot, error ->
             if (error != null) {
-                _errorMessage.value = "BAN監視エラー: ${error.message}"
+                _errorMessage.value = appContext.getString(R.string.errors_ban_watch, error.message)
                 return@addSnapshotListener
             }
             if (snapshot != null && snapshot.exists() && snapshot.getString("status") == "banned") {
@@ -112,7 +117,7 @@ class PTTBanStore(
                         }
                     } catch (e: Exception) {
                         null
-                    } ?: "BAN処理に失敗しました (HTTP ${response.code})"
+                    } ?: appContext.getString(R.string.errors_ban_action_failed, response.code)
                     _errorMessage.value = message
                     throw BanApiException(response.code, message)
                 }

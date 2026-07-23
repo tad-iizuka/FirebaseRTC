@@ -69,11 +69,11 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val scope = rememberCoroutineScope()
-            val roomManager = remember { PTTRoomManager() }
+            val roomManager = remember { PTTRoomManager(applicationContext) }
             val savedRoomsStore = remember { PTTSavedRoomsStore(applicationContext) }
             val connectionManager = remember { PTTConnectionManager(applicationContext, scope) }
-            val chatStore = remember { PTTChatStore() }
-            val banStore = remember { PTTBanStore() }
+            val chatStore = remember { PTTChatStore(applicationContext) }
+            val banStore = remember { PTTBanStore(applicationContext) }
             // [オンボーディング] 初回起動時のスワイプ形式チュートリアルの完了状態
             // (SharedPreferencesベース。Web版のonboarding.ts/iOS版のPTTOnboardingStore.swiftと同じ設計)。
             val onboardingStore = remember { PTTOnboardingStore(applicationContext) }

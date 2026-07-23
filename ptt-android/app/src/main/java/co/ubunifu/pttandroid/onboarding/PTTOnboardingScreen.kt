@@ -51,42 +51,47 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import co.ubunifu.pttandroid.R
 import co.ubunifu.pttandroid.ui.theme.PTTColors
 import kotlinx.coroutines.launch
 
 private val Mono = FontFamily.Monospace
 
+// [多言語化] 文言はres/values(-en)/strings.xmlのリソースIDとして保持し、
+// 表示時にstringResource()で現在のロケールの文字列に解決する
+// (Web版のi18n.tsのlocalesディレクトリ・iOS版のLocalizable.stringsと同じ役割)。
 private data class OnboardingSlide(
     val emoji: String,
-    val title: String,
-    val description: String,
+    val titleRes: Int,
+    val descriptionRes: Int,
 )
 
 private val onboardingSlides = listOf(
     OnboardingSlide(
         emoji = "\uD83D\uDCE1", // 📡
-        title = "PTT Client へようこそ",
-        description = "トランシーバーのように、押している間だけ声が届くシンプルな音声チャットです。",
+        titleRes = R.string.onboarding_slide1_title,
+        descriptionRes = R.string.onboarding_slide1_description,
     ),
     OnboardingSlide(
         emoji = "\uD83D\uDEAA", // 🚪
-        title = "ルームを作成・参加",
-        description = "ルームは招待制です。自分でルームを作成するか、招待コードを受け取って参加しましょう。",
+        titleRes = R.string.onboarding_slide2_title,
+        descriptionRes = R.string.onboarding_slide2_description,
     ),
     OnboardingSlide(
         emoji = "\uD83C\uDF99", // 🎙
-        title = "ボタンを押して話す",
-        description = "中央のPTTボタンを押している間だけ音声が送信されます。誰かが話している間は自動的に送話が待機状態になります。",
+        titleRes = R.string.onboarding_slide3_title,
+        descriptionRes = R.string.onboarding_slide3_description,
     ),
     OnboardingSlide(
         emoji = "\uD83D\uDCAC", // 💬
-        title = "チャットと参加者管理",
-        description = "テキストチャットや参加者一覧に加え、モデレーター向けのBAN・通報機能も使えます。",
+        titleRes = R.string.onboarding_slide4_title,
+        descriptionRes = R.string.onboarding_slide4_description,
     ),
 )
 
@@ -101,7 +106,7 @@ fun PTTOnboardingScreen(onComplete: () -> Unit) {
     Column(Modifier.fillMaxSize().background(PTTColors.Background)) {
         Row(Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.End) {
             Text(
-                "スキップ",
+                stringResource(R.string.onboarding_skip),
                 fontFamily = Mono,
                 fontSize = 11.sp,
                 color = PTTColors.Muted,
@@ -141,7 +146,7 @@ fun PTTOnboardingScreen(onComplete: () -> Unit) {
                 enabled = !isFirst,
                 modifier = Modifier.weight(1f),
             ) {
-                Text("戻る", fontFamily = Mono)
+                Text(stringResource(R.string.onboarding_back), fontFamily = Mono)
             }
             Button(
                 onClick = {
@@ -154,7 +159,10 @@ fun PTTOnboardingScreen(onComplete: () -> Unit) {
                 modifier = Modifier.weight(1f),
                 colors = ButtonDefaults.buttonColors(containerColor = PTTColors.Accent),
             ) {
-                Text(if (isLast) "はじめる" else "次へ", fontFamily = Mono)
+                Text(
+                    stringResource(if (isLast) R.string.onboarding_start else R.string.onboarding_next),
+                    fontFamily = Mono,
+                )
             }
         }
     }
@@ -170,7 +178,7 @@ private fun SlideContent(slide: OnboardingSlide) {
         Text(slide.emoji, fontSize = 44.sp)
         Spacer(Modifier.height(20.dp))
         Text(
-            slide.title,
+            stringResource(slide.titleRes),
             fontFamily = Mono,
             fontSize = 16.sp,
             fontWeight = FontWeight.SemiBold,
@@ -179,7 +187,7 @@ private fun SlideContent(slide: OnboardingSlide) {
         )
         Spacer(Modifier.height(10.dp))
         Text(
-            slide.description,
+            stringResource(slide.descriptionRes),
             fontFamily = Mono,
             fontSize = 13.sp,
             textAlign = TextAlign.Center,

@@ -11,6 +11,8 @@
  */
 package co.ubunifu.pttandroid.room
 
+import android.content.Context
+import co.ubunifu.pttandroid.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -27,11 +29,15 @@ data class CreatedRoom(val roomId: String, val inviteCode: String)
 class RoomApiException(val statusCode: Int, message: String) : Exception(message)
 
 class PTTRoomManager(
+    context: Context,
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
 ) {
+    // [多言語化] エラーメッセージのローカライズにres/values(-en)/strings.xmlを使うため、
+    // applicationContextを保持しておく(このクラス自体はActivity/Composeに依存しない)。
+    private val appContext = context.applicationContext
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
     private val _isWorking = MutableStateFlow(false)
@@ -68,7 +74,8 @@ class PTTRoomManager(
                 client.newCall(request).execute().use { response ->
                     val text = response.body?.string()
                     if (response.code != 201) {
-                        val message = parseServerError(text) ?: "リクエストに失敗しました (HTTP ${response.code})"
+                        val message = parseServerError(text)
+                            ?: appContext.getString(R.string.errors_room_request_failed, response.code)
                         _lastErrorMessage.value = message
                         throw RoomApiException(response.code, message)
                     }
@@ -97,7 +104,7 @@ class PTTRoomManager(
                 client.newCall(request).execute().use { response ->
                     if (response.code != 200) {
                         val message = parseServerError(response.body?.string())
-                            ?: "リクエストに失敗しました (HTTP ${response.code})"
+                            ?: appContext.getString(R.string.errors_room_request_failed, response.code)
                         _lastErrorMessage.value = message
                         throw RoomApiException(response.code, message)
                     }

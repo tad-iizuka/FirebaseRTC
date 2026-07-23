@@ -17,6 +17,7 @@ package co.ubunifu.pttandroid.auth
 
 import android.content.Context
 import android.content.Intent
+import co.ubunifu.pttandroid.R
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInClient
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
@@ -31,6 +32,9 @@ import kotlinx.coroutines.tasks.await
 
 class PTTAuthManager(context: Context, webClientId: String) {
 
+    // [多言語化] エラーメッセージのローカライズ用。
+    private val appContext = context.applicationContext
+
     private val auth: FirebaseAuth = FirebaseAuth.getInstance()
 
     private val googleSignInClient: GoogleSignInClient by lazy {
@@ -38,7 +42,7 @@ class PTTAuthManager(context: Context, webClientId: String) {
             .requestIdToken(webClientId)
             .requestEmail()
             .build()
-        GoogleSignIn.getClient(context.applicationContext, options)
+        GoogleSignIn.getClient(appContext, options)
     }
 
     private val _currentUser = MutableStateFlow(auth.currentUser)
@@ -72,13 +76,13 @@ class PTTAuthManager(context: Context, webClientId: String) {
             val account = task.await()
             val idToken = account.idToken
             if (idToken == null) {
-                _lastErrorMessage.value = "Googleサインインからトークンを取得できませんでした"
+                _lastErrorMessage.value = appContext.getString(R.string.errors_google_token_missing)
                 return
             }
             val credential = GoogleAuthProvider.getCredential(idToken, null)
             auth.signInWithCredential(credential).await()
         } catch (e: Exception) {
-            _lastErrorMessage.value = "サインインエラー: ${e.message}"
+            _lastErrorMessage.value = appContext.getString(R.string.errors_google_sign_in, e.message)
         }
     }
 
@@ -93,8 +97,8 @@ class PTTAuthManager(context: Context, webClientId: String) {
      * 呼び出し側は毎回これを呼ぶだけでよい。
      */
     suspend fun fetchIdToken(): String {
-        val user = auth.currentUser ?: throw IllegalStateException("サインインしていません")
+        val user = auth.currentUser ?: throw IllegalStateException(appContext.getString(R.string.errors_not_signed_in))
         val result = user.getIdToken(false).await()
-        return result.token ?: throw IllegalStateException("ID Tokenの取得に失敗しました")
+        return result.token ?: throw IllegalStateException(appContext.getString(R.string.errors_id_token_fetch_failed))
     }
 }

@@ -37,6 +37,7 @@
 package co.ubunifu.pttandroid.connection
 
 import android.content.Context
+import co.ubunifu.pttandroid.R
 import co.ubunifu.pttandroid.model.ConnectionStatus
 import co.ubunifu.pttandroid.model.ParticipantInfo
 import io.livekit.android.LiveKit
@@ -128,7 +129,7 @@ class PTTConnectionManager(
         idTokenProvider: suspend () -> String,
     ) {
         if (room != null) {
-            appendLog("すでに接続中/接続試行中です")
+            appendLog(appContext.getString(R.string.log_already_connecting))
             return
         }
 
@@ -142,7 +143,7 @@ class PTTConnectionManager(
         scope.launch {
             try {
                 val token = fetchToken()
-                appendLog("トークン取得成功")
+                appendLog(appContext.getString(R.string.log_token_fetch_success))
 
                 val newRoom = LiveKit.create(appContext)
                 room = newRoom
@@ -172,10 +173,10 @@ class PTTConnectionManager(
                 }
 
                 _status.value = ConnectionStatus.Connected(roomNameParam)
-                appendLog("ルーム接続完了: room=$roomNameParam")
+                appendLog(appContext.getString(R.string.log_room_connected, roomNameParam))
             } catch (e: Exception) {
-                appendLog("接続エラー: ${e.message}")
-                _status.value = ConnectionStatus.Error(e.message ?: "不明なエラー")
+                appendLog(appContext.getString(R.string.log_connection_error, e.message))
+                _status.value = ConnectionStatus.Error(e.message ?: appContext.getString(R.string.errors_unknown))
                 room = null
             }
         }
@@ -202,7 +203,7 @@ class PTTConnectionManager(
             _isSending.value = false
             _currentTalkerUid.value = null
             _status.value = ConnectionStatus.Disconnected
-            appendLog("切断しました")
+            appendLog(appContext.getString(R.string.log_disconnected_by_user))
         }
     }
 
@@ -223,7 +224,7 @@ class PTTConnectionManager(
             } catch (e: Exception) {
                 // 他人が発話中(409 talk_locked)など。RoomMetadataChangedでほぼ同時に
                 // ボタンも無効化されるはずだが、競合(ほぼ同時押下)によるレースは起こりうる。
-                appendLog("発話を開始できませんでした: ${e.message}")
+                appendLog(appContext.getString(R.string.log_talk_start_failed, e.message))
                 if (myToken == talkRequestToken) pttHeld = false
                 return@launch
             }
@@ -248,7 +249,7 @@ class PTTConnectionManager(
                 _isSending.value = true
                 startTalkHeartbeat()
             } catch (e: Exception) {
-                appendLog("マイク有効化エラー: ${e.message}")
+                appendLog(appContext.getString(R.string.log_mic_enable_error, e.message))
                 launch {
                     try {
                         talkRequest(TalkAction.STOP)
@@ -275,7 +276,7 @@ class PTTConnectionManager(
             try {
                 current.localParticipant.setMicrophoneEnabled(false)
             } catch (e: Exception) {
-                appendLog("マイク無効化エラー: ${e.message}")
+                appendLog(appContext.getString(R.string.log_mic_disable_error, e.message))
             }
             if (!forced) {
                 try {
@@ -300,7 +301,7 @@ class PTTConnectionManager(
                     // サーバー側で最大発話時間(MAX_HOLD_MS)を超えた等、ロックを失った場合は
                     // ここに来る。本来は次のRoomMetadataChangedでもUIが追従するが、
                     // 念のため即座に強制的に送話を止める。
-                    appendLog("発話ロックの延長に失敗しました。送話を終了します: ${e.message}")
+                    appendLog(appContext.getString(R.string.log_talk_heartbeat_failed, e.message))
                     stopTalking(forced = true)
                     break
                 }
@@ -314,7 +315,7 @@ class PTTConnectionManager(
     }
 
     private suspend fun talkRequest(action: TalkAction) = withContext(Dispatchers.IO) {
-        val provider = idTokenProvider ?: throw TokenFetchException(401, "サインインしていません")
+        val provider = idTokenProvider ?: throw TokenFetchException(401, appContext.getString(R.string.errors_not_signed_in))
         val idToken = provider()
 
         val encodedRoomId = java.net.URLEncoder.encode(roomName, "UTF-8")
@@ -333,7 +334,7 @@ class PTTConnectionManager(
                     }
                 } catch (e: Exception) {
                     null
-                } ?: "発話ロックの操作に失敗しました (HTTP ${response.code})"
+                } ?: appContext.getString(R.string.errors_talk_lock_failed, response.code)
                 throw TokenFetchException(response.code, message)
             }
         }
@@ -359,7 +360,7 @@ class PTTConnectionManager(
 
     private suspend fun fetchToken(): String = withContext(Dispatchers.IO) {
         val provider = idTokenProvider
-            ?: throw TokenFetchException(401, "サインインしていません")
+            ?: throw TokenFetchException(401, appContext.getString(R.string.errors_not_signed_in))
         val idToken = provider()
 
         val encodedRoom = java.net.URLEncoder.encode(roomName, "UTF-8")
@@ -376,7 +377,7 @@ class PTTConnectionManager(
                     body?.let { JSONObject(it).optString("error").takeIf { s -> s.isNotEmpty() } }
                 } catch (e: Exception) {
                     null
-                } ?: "トークン取得に失敗しました (HTTP ${response.code})"
+                } ?: appContext.getString(R.string.errors_token_fetch_failed, response.code)
                 throw TokenFetchException(response.code, message)
             }
             JSONObject(body ?: "{}").getString("token")
@@ -397,7 +398,7 @@ class PTTConnectionManager(
     private fun handleEvent(target: Room, event: RoomEvent) {
         when (event) {
             is RoomEvent.Disconnected -> {
-                appendLog("切断されました: ${event.reason}")
+                appendLog(appContext.getString(R.string.log_disconnected_event, event.reason?.toString() ?: "null"))
                 _participants.value = emptyMap()
                 _isSending.value = false
                 _currentTalkerUid.value = null
@@ -408,14 +409,14 @@ class PTTConnectionManager(
             }
 
             is RoomEvent.Reconnecting -> {
-                appendLog("再接続を開始しました")
+                appendLog(appContext.getString(R.string.log_reconnecting))
                 if (_status.value !is ConnectionStatus.Error) {
                     _status.value = ConnectionStatus.Reconnecting(roomName)
                 }
             }
 
             is RoomEvent.Reconnected -> {
-                appendLog("再接続に成功しました")
+                appendLog(appContext.getString(R.string.log_reconnected))
                 if (_status.value !is ConnectionStatus.Error) {
                     _status.value = ConnectionStatus.Connected(roomName)
                 }
@@ -425,13 +426,16 @@ class PTTConnectionManager(
             }
 
             is RoomEvent.FailedToConnect -> {
-                appendLog("接続失敗: ${event.error?.message ?: "不明なエラー"}")
-                _status.value = ConnectionStatus.Error(event.error?.message ?: "接続失敗")
+                val message = event.error?.message ?: appContext.getString(R.string.errors_unknown)
+                appendLog(appContext.getString(R.string.log_connect_failed, message))
+                _status.value = ConnectionStatus.Error(
+                    event.error?.message ?: appContext.getString(R.string.errors_connection_failed_generic)
+                )
             }
 
             is RoomEvent.ParticipantConnected -> {
                 val id = event.participant.identity?.value ?: "?"
-                appendLog("参加: $id")
+                appendLog(appContext.getString(R.string.log_participant_joined, id))
                 // ParticipantConnected発火時点で既にトラック情報(publish済みか)を
                 // 持っている場合があるため、初期同期時と同じくmutedを実際の値から取得する。
                 // 音声トラックがまだ無い参加者は安全側に倒して「未送話」扱いにする。
@@ -442,7 +446,7 @@ class PTTConnectionManager(
 
             is RoomEvent.ParticipantDisconnected -> {
                 val id = event.participant.identity?.value ?: "?"
-                appendLog("退出: $id")
+                appendLog(appContext.getString(R.string.log_participant_left, id))
                 _participants.update { it - id }
             }
 
@@ -452,7 +456,7 @@ class PTTConnectionManager(
                 // イベント自体のペイロードのフィールド名はSDKバージョンで変わりうるため依存せず、
                 // 保持しているRoomオブジェクトの最新metadataを都度読み直す実装にしている。
                 _currentTalkerUid.value = parseCurrentTalker(target.metadata)
-                appendLog("[診断] メタデータ更新受信: currentTalker=${_currentTalkerUid.value ?: "null"}")
+                appendLog(appContext.getString(R.string.log_metadata_update, _currentTalkerUid.value ?: "null"))
             }
 
             is RoomEvent.TrackMuted -> {
