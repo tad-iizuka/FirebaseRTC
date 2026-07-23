@@ -11,11 +11,12 @@
 //
 
 import SwiftUI
+import Foundation
 
 private struct PTTOnboardingSlide {
     let systemImage: String
-    let title: String
-    let description: String
+    let title: LocalizedStringKey
+    let description: LocalizedStringKey
 }
 
 private let pttOnboardingSlides: [PTTOnboardingSlide] = [
@@ -96,7 +97,7 @@ struct PTTOnboardingView: View {
                         withAnimation { pageIndex += 1 }
                     }
                 } label: {
-                    Text(isLast ? "はじめる" : "次へ")
+                    Text(isLast ? String(localized: "はじめる") : String(localized: "次へ"))
                         .font(.system(size: 12, weight: .medium, design: .monospaced))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 9)

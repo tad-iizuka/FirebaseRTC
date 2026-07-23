@@ -46,7 +46,7 @@ final class PTTBanStore: ObservableObject {
         var errorDescription: String? {
             switch self {
             case let .serverError(statusCode, message):
-                return message ?? "BAN処理に失敗しました (HTTP \(statusCode))"
+                return message ?? String(format: NSLocalizedString("BAN処理に失敗しました (HTTP %d)", comment: "Ban request failed"), statusCode)
             }
         }
     }
@@ -63,7 +63,7 @@ final class PTTBanStore: ObservableObject {
                 let snapshot = try await ref.getDocument()
                 myRole = snapshot.exists ? (snapshot.data()?["role"] as? String ?? "member") : nil
             } catch {
-                errorMessage = "ロール取得エラー: \(error.localizedDescription)"
+                errorMessage = String(format: NSLocalizedString("ロール取得エラー: %@", comment: "Role fetch error"), error.localizedDescription)
                 myRole = nil
             }
         }
@@ -71,7 +71,7 @@ final class PTTBanStore: ObservableObject {
         listener = ref.addSnapshotListener { [weak self] snapshot, error in
             guard let self else { return }
             if let error {
-                self.errorMessage = "BAN監視エラー: \(error.localizedDescription)"
+                self.errorMessage = String(format: NSLocalizedString("BAN監視エラー: %@", comment: "Ban watch error"), error.localizedDescription)
                 return
             }
             guard let snapshot, snapshot.exists else { return }

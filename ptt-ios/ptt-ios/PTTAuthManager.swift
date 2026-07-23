@@ -54,7 +54,7 @@ final class PTTAuthManager: NSObject, ObservableObject {
     func signInWithGoogle() async {
         lastErrorMessage = nil
         guard let presentingVC = Self.topViewController() else {
-            lastErrorMessage = "サインイン画面を表示できませんでした"
+            lastErrorMessage = String(localized: "サインイン画面を表示できませんでした")
             return
         }
         isSigningIn = true
@@ -63,7 +63,7 @@ final class PTTAuthManager: NSObject, ObservableObject {
         do {
             let result = try await GIDSignIn.sharedInstance.signIn(withPresenting: presentingVC)
             guard let idToken = result.user.idToken?.tokenString else {
-                lastErrorMessage = "Googleサインインからトークンを取得できませんでした"
+                lastErrorMessage = String(localized: "Googleサインインからトークンを取得できませんでした")
                 return
             }
             let credential = GoogleAuthProvider.credential(
@@ -72,7 +72,7 @@ final class PTTAuthManager: NSObject, ObservableObject {
             )
             try await Auth.auth().signIn(with: credential)
         } catch {
-            lastErrorMessage = "サインインエラー: \(error.localizedDescription)"
+            lastErrorMessage = String(format: NSLocalizedString("サインインエラー: %@", comment: "Sign-in error"), error.localizedDescription)
         }
     }
 
@@ -81,7 +81,7 @@ final class PTTAuthManager: NSObject, ObservableObject {
             try Auth.auth().signOut()
             GIDSignIn.sharedInstance.signOut()
         } catch {
-            lastErrorMessage = "サインアウトエラー: \(error.localizedDescription)"
+            lastErrorMessage = String(format: NSLocalizedString("サインアウトエラー: %@", comment: "Sign-out error"), error.localizedDescription)
         }
     }
 
@@ -93,7 +93,7 @@ final class PTTAuthManager: NSObject, ObservableObject {
             throw NSError(
                 domain: "PTTAuthManager",
                 code: 401,
-                userInfo: [NSLocalizedDescriptionKey: "サインインしていません"]
+                userInfo: [NSLocalizedDescriptionKey: String(localized: "サインインしていません")]
             )
         }
         return try await user.getIDToken()

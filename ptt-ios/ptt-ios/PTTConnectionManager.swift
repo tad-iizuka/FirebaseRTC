@@ -75,7 +75,7 @@ final class PTTConnectionManager: NSObject, ObservableObject {
     ///   返すクロージャ。呼び出し側(PTTAuthManager)が期限切れ検知・自動リフレッシュを担う。
     func connect(tokenServerURL: String, livekitURL: String, room roomName: String, idTokenProvider: @escaping () async throws -> String) {
         guard room == nil else {
-            appendLog("すでに接続中/接続試行中です")
+            appendLog(String(localized: "すでに接続中/接続試行中です"))
             return
         }
 
@@ -89,7 +89,7 @@ final class PTTConnectionManager: NSObject, ObservableObject {
         Task {
             do {
                 let token = try await fetchToken()
-                appendLog("トークン取得成功")
+                appendLog(String(localized: "トークン取得成功"))
 
                 let newRoom = Room(delegate: self)
                 room = newRoom
@@ -122,9 +122,9 @@ final class PTTConnectionManager: NSObject, ObservableObject {
                 participants = initialParticipants
 
                 status = .connected(room: roomName)
-                appendLog("ルーム接続完了: room=\(roomName)")
+                appendLog(String(format: NSLocalizedString("ルーム接続完了: room=%@", comment: "Room connected log"), roomName))
             } catch {
-                appendLog("接続エラー: \(error.localizedDescription)")
+                appendLog(String(format: NSLocalizedString("接続エラー: %@", comment: "Connection error log"), error.localizedDescription))
                 status = .error(error.localizedDescription)
                 room = nil
             }
@@ -148,7 +148,7 @@ final class PTTConnectionManager: NSObject, ObservableObject {
             isSending = false
             currentTalkerUid = nil
             status = .disconnected
-            appendLog("切断しました")
+            appendLog(String(localized: "切断しました"))
         }
     }
 
@@ -169,7 +169,7 @@ final class PTTConnectionManager: NSObject, ObservableObject {
             } catch {
                 // 他人が発話中(409 talk_locked)など。RoomMetadataの更新でほぼ同時に
                 // ボタンも無効化されるはずだが、競合(ほぼ同時押下)によるレースは起こりうる。
-                appendLog("発話を開始できませんでした: \(error.localizedDescription)")
+                appendLog(String(format: NSLocalizedString("発話を開始できませんでした: %@", comment: "Talk start failure"), error.localizedDescription))
                 if myToken == self.talkRequestToken { self.pttHeld = false }
                 return
             }
@@ -188,7 +188,7 @@ final class PTTConnectionManager: NSObject, ObservableObject {
                 self.isSending = true
                 self.startTalkHeartbeat()
             } catch {
-                self.appendLog("マイク有効化エラー: \(error.localizedDescription)")
+                self.appendLog(String(format: NSLocalizedString("マイク有効化エラー: %@", comment: "Microphone enable error"), error.localizedDescription))
                 Task { try? await self.talkRequest(.stop) }
             }
         }
@@ -208,7 +208,7 @@ final class PTTConnectionManager: NSObject, ObservableObject {
             do {
                 try await room.localParticipant.setMicrophone(enabled: false)
             } catch {
-                self.appendLog("マイク無効化エラー: \(error.localizedDescription)")
+                self.appendLog(String(format: NSLocalizedString("マイク無効化エラー: %@", comment: "Microphone disable error"), error.localizedDescription))
             }
             if !forced {
                 try? await self.talkRequest(.stop)
@@ -237,7 +237,7 @@ final class PTTConnectionManager: NSObject, ObservableObject {
                     // サーバー側で最大発話時間(MAX_HOLD_MS)を超えた等、ロックを失った
                     // 場合はここに来る。本来は次のRoomMetadata更新でもUIが追従するが、
                     // 念のため即座に強制的に送話を止める。
-                    self.appendLog("発話ロックの延長に失敗しました。送話を終了します: \(error.localizedDescription)")
+                    self.appendLog(String(format: NSLocalizedString("発話ロックの延長に失敗しました。送話を終了します: %@", comment: "Talk heartbeat failure"), error.localizedDescription))
                     self.stopTalking(forced: true)
                     break
                 }
@@ -252,7 +252,7 @@ final class PTTConnectionManager: NSObject, ObservableObject {
 
     private func talkRequest(_ action: TalkAction) async throws {
         guard let idTokenProvider else {
-            throw TokenFetchError.serverError(statusCode: 401, message: "サインインしていません")
+            throw TokenFetchError.serverError(statusCode: 401, message: String(localized: "サインインしていません"))
         }
         let idToken = try await idTokenProvider()
 
@@ -311,14 +311,14 @@ final class PTTConnectionManager: NSObject, ObservableObject {
         var errorDescription: String? {
             switch self {
             case let .serverError(statusCode, message):
-                return message ?? "トークン取得に失敗しました (HTTP \(statusCode))"
+                return message ?? String(format: NSLocalizedString("トークン取得に失敗しました (HTTP %d)", comment: "Token fetch failure"), statusCode)
             }
         }
     }
 
     private func fetchToken() async throws -> String {
         guard let idTokenProvider else {
-            throw TokenFetchError.serverError(statusCode: 401, message: "サインインしていません")
+            throw TokenFetchError.serverError(statusCode: 401, message: String(localized: "サインインしていません"))
         }
         let idToken = try await idTokenProvider()
 
@@ -361,7 +361,7 @@ extension PTTConnectionManager: RoomDelegate {
 
     nonisolated func room(_ room: Room, didUpdateConnectionState connectionState: ConnectionState, from oldConnectionState: ConnectionState) {
         Task { @MainActor in
-            self.appendLog("接続状態: \(oldConnectionState) → \(connectionState)")
+            self.appendLog(String(format: NSLocalizedString("接続状態: %@ → %@", comment: "Connection state changed"), String(describing: oldConnectionState), String(describing: connectionState)))
             if connectionState == .disconnected {
                 self.participants.removeAll()
                 self.isSending = false
@@ -381,7 +381,7 @@ extension PTTConnectionManager: RoomDelegate {
     /// ネットワーク瞬断からの自動復旧中であることをUIに反映するためのフック。
     nonisolated func room(_ room: Room, didStartReconnectWithMode reconnectMode: ReconnectMode) {
         Task { @MainActor in
-            self.appendLog("再接続を開始しました (mode=\(reconnectMode))")
+            self.appendLog(String(format: NSLocalizedString("再接続を開始しました (mode=%@)", comment: "Reconnect started"), String(describing: reconnectMode)))
             if case .error = self.status {
                 // 既にエラー表示中ならそのまま維持する
             } else {
@@ -393,7 +393,7 @@ extension PTTConnectionManager: RoomDelegate {
     /// 再接続成功。
     nonisolated func room(_ room: Room, didCompleteReconnectWithMode reconnectMode: ReconnectMode) {
         Task { @MainActor in
-            self.appendLog("再接続に成功しました (mode=\(reconnectMode))")
+            self.appendLog(String(format: NSLocalizedString("再接続に成功しました (mode=%@)", comment: "Reconnect succeeded"), String(describing: reconnectMode)))
             if case .error = self.status {
                 // 既にエラー表示中ならそのまま維持する
             } else {
@@ -411,17 +411,18 @@ extension PTTConnectionManager: RoomDelegate {
     nonisolated func room(_ room: Room, didDisconnectWithError error: LiveKitError?) {
         Task { @MainActor in
             if let error {
-                self.appendLog("予期しない切断: \(error.localizedDescription)")
+                self.appendLog(String(format: NSLocalizedString("予期しない切断: %@", comment: "Unexpected disconnect"), error.localizedDescription))
             } else {
-                self.appendLog("切断されました")
+                self.appendLog(String(localized: "切断されました"))
             }
         }
     }
 
     nonisolated func room(_ room: Room, didFailToConnectWithError error: LiveKitError?) {
         Task { @MainActor in
-            self.appendLog("接続失敗: \(error?.localizedDescription ?? "不明なエラー")")
-            self.status = .error(error?.localizedDescription ?? "接続失敗")
+            let reason = error?.localizedDescription ?? String(localized: "不明なエラー")
+            self.appendLog(String(format: NSLocalizedString("接続失敗: %@", comment: "Connection failed log"), reason))
+            self.status = .error(error?.localizedDescription ?? String(localized: "接続失敗"))
         }
     }
 
@@ -436,14 +437,14 @@ extension PTTConnectionManager: RoomDelegate {
     nonisolated func room(_ room: Room, didUpdateMetadata metadata: String?) {
         Task { @MainActor in
             self.updateCurrentTalker(fromMetadataString: metadata)
-            self.appendLog("[診断] メタデータ更新受信: currentTalker=\(self.currentTalkerUid ?? "null")")
+            self.appendLog(String(format: NSLocalizedString("[診断] メタデータ更新受信: currentTalker=%@", comment: "Metadata update diagnostic log"), self.currentTalkerUid ?? "null"))
         }
     }
 
     nonisolated func room(_ room: Room, participantDidConnect participant: RemoteParticipant) {
         Task { @MainActor in
             let uid = participant.identity?.stringValue ?? "?"
-            self.appendLog("参加: \(uid)")
+            self.appendLog(String(format: NSLocalizedString("参加: %@", comment: "Participant joined log"), uid))
             // participantDidConnect発火時点で既にトラック情報(publish済みか)を
             // 持っている場合があるため、初期同期時と同じくisMutedを実際の値から取得する。
             // 音声トラックがまだ無い参加者は安全側に倒して「未送話」扱いにする。
@@ -456,7 +457,7 @@ extension PTTConnectionManager: RoomDelegate {
     nonisolated func room(_ room: Room, participantDidDisconnect participant: RemoteParticipant) {
         Task { @MainActor in
             let id = participant.identity?.stringValue ?? "?"
-            self.appendLog("退出: \(id)")
+            self.appendLog(String(format: NSLocalizedString("退出: %@", comment: "Participant left log"), id))
             self.participants.removeValue(forKey: id)
         }
     }

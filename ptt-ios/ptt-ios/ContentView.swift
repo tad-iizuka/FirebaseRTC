@@ -24,6 +24,7 @@
 //
 
 import SwiftUI
+import Foundation
 import FirebaseAuth
 
 struct ContentView: View {
@@ -86,7 +87,7 @@ struct ContentView: View {
         // BAN自体の強制力はLiveKit側の即時キック(サーバー)が担うため、ここは表示のための補助。
         .onChange(of: ban.isBanned) { _, isBanned in
             guard isBanned else { return }
-            banNotice = "このルームから排除されました"
+            banNotice = String(localized: "このルームから排除されました")
             leaveRoom()
         }
         .alert(
@@ -100,7 +101,7 @@ struct ContentView: View {
             Button("BANする", role: .destructive) { confirmBan(target) }
             Button("キャンセル", role: .cancel) { banTarget = nil }
         } message: { target in
-            Text("\(target.name) をこのルームからBANしますか?\nこの操作は取り消せません。")
+            Text(String(format: NSLocalizedString("%@ をこのルームからBANしますか?\nこの操作は取り消せません。", comment: "Ban confirmation dialog message"), target.name))
         }
     }
 
@@ -112,7 +113,7 @@ struct ContentView: View {
             Button {
                 Task { await auth.signInWithGoogle() }
             } label: {
-                Text(auth.isSigningIn ? "サインイン中..." : "Googleでサインイン")
+                Text(auth.isSigningIn ? String(localized: "サインイン中...") : String(localized: "Googleでサインイン"))
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 9)
@@ -165,7 +166,7 @@ struct ContentView: View {
         switch connection.status {
         case .connected(let room): return "room: \(room)"
         case .reconnecting(let room): return "room: \(room)"
-        default: return "未接続"
+        default: return String(localized: "未接続")
         }
     }
 
@@ -196,11 +197,14 @@ struct ContentView: View {
 
     private var statusText: String {
         switch connection.status {
-        case .disconnected: return "サーバ未接続"
-        case .connecting: return "接続中..."
-        case .connected(let room): return "接続中 (room=\(room))"
-        case .reconnecting(let room): return "再接続中... (room=\(room))"
-        case .error(let message): return "エラー: \(message)"
+        case .disconnected: return String(localized: "サーバ未接続")
+        case .connecting: return String(localized: "接続中...")
+        case .connected(let room):
+            return String(format: NSLocalizedString("接続中 (room=%@)", comment: "Connected status"), room)
+        case .reconnecting(let room):
+            return String(format: NSLocalizedString("再接続中... (room=%@)", comment: "Reconnecting status"), room)
+        case .error(let message):
+            return String(format: NSLocalizedString("エラー: %@", comment: "Error status"), message)
         }
     }
 
@@ -220,7 +224,7 @@ struct ContentView: View {
             field(label: "LiveKit URL (wss://)", text: $livekitURL)
 
             Button(action: handleCreateRoom) {
-                Text(roomManager.isWorking ? "作成中..." : "新しいルームを作成する")
+                Text(roomManager.isWorking ? String(localized: "作成中...") : String(localized: "新しいルームを作成する"))
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 9)
@@ -240,7 +244,7 @@ struct ContentView: View {
                 field(label: "招待コード", text: $joinInviteCode, placeholder: "8文字のコード")
             }
             Button(action: handleJoinRoom) {
-                Text(roomManager.isWorking ? "参加中..." : "招待コードで参加する")
+                Text(roomManager.isWorking ? String(localized: "参加中...") : String(localized: "招待コードで参加する"))
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 9)
@@ -294,7 +298,7 @@ struct ContentView: View {
             .buttonStyle(.plain)
             .background(.pttPanel.opacity(0.6))
 
-            Button("削除") {
+            Button(String(localized: "削除")) {
                 savedRooms.remove(roomId: saved.roomId)
             }
             .font(.system(size: 11, design: .monospaced))
@@ -312,7 +316,7 @@ struct ContentView: View {
                 Text(code)
                     .font(.system(size: 18, weight: .bold, design: .monospaced))
                     .foregroundColor(.pttAccent)
-                Text("ルームID: \(roomId)")
+                Text(String(format: NSLocalizedString("ルームID: %@", comment: "Room ID label"), roomId))
                     .font(.system(size: 12, design: .monospaced))
                     .foregroundColor(.pttMuted)
             }
@@ -341,7 +345,7 @@ struct ContentView: View {
         .padding(14)
     }
 
-    private func field(label: String, text: Binding<String>, placeholder: String = "") -> some View {
+    private func field(label: LocalizedStringKey, text: Binding<String>, placeholder: LocalizedStringKey = "") -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label)
                 .font(.system(size: 10, design: .monospaced))
@@ -380,7 +384,7 @@ struct ContentView: View {
                 let idToken = try await auth.fetchIDToken()
                 let (roomId, inviteCode) = try await roomManager.createRoom(tokenServerURL: tokenServerURL, idToken: idToken)
                 currentInviteCode = inviteCode
-                savedRooms.upsert(roomId: roomId, label: "自分が作成したルーム", inviteCode: inviteCode)
+                savedRooms.upsert(roomId: roomId, label: String(localized: "自分が作成したルーム"), inviteCode: inviteCode)
                 enterRoom(roomId)
             } catch {
                 // roomManager.lastErrorMessage に理由がセットされているのでUIには既に反映済み
@@ -398,7 +402,7 @@ struct ContentView: View {
                 let idToken = try await auth.fetchIDToken()
                 try await roomManager.joinRoom(tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId, inviteCode: inviteCode)
                 currentInviteCode = inviteCode // 参加者自身が入力したコードをそのまま保持する(以前はnilで潰していたため招待コード欄が表示されなかった)
-                savedRooms.upsert(roomId: roomId, label: "招待コードで参加したルーム", inviteCode: inviteCode)
+                savedRooms.upsert(roomId: roomId, label: String(localized: "招待コードで参加したルーム"), inviteCode: inviteCode)
                 enterRoom(roomId)
             } catch {
                 // roomManager.lastErrorMessage に理由がセットされているのでUIには既に反映済み
@@ -488,9 +492,11 @@ struct ContentView: View {
     }
 
     private var talkAreaLabel: String {
-        if connection.isSending { return "送話中" }
-        if someoneElseIsTalking { return "\(currentTalkerName) が送話中" }
-        return "押して送話"
+        if connection.isSending { return String(localized: "送話中") }
+        if someoneElseIsTalking {
+            return String(format: NSLocalizedString("%@ が送話中", comment: "Someone else is talking"), currentTalkerName)
+        }
+        return String(localized: "押して送話")
     }
 
     // MARK: - Talkers / Participants

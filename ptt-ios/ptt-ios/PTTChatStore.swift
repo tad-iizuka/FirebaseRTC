@@ -47,7 +47,7 @@ final class PTTChatStore: ObservableObject {
         listener = query.addSnapshotListener { [weak self] snapshot, error in
             guard let self else { return }
             if let error {
-                self.errorMessage = "チャット履歴の取得に失敗しました: \(error.localizedDescription)"
+                self.errorMessage = String(format: NSLocalizedString("チャット履歴の取得に失敗しました: %@", comment: "Chat fetch error"), error.localizedDescription)
                 return
             }
             guard let snapshot else { return }
@@ -83,7 +83,7 @@ final class PTTChatStore: ObservableObject {
         guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
         guard http.statusCode == 201 else {
             let message = try? JSONDecoder().decode(ServerErrorResponse.self, from: data).error
-            let errorText = message ?? "メッセージの送信に失敗しました (HTTP \(http.statusCode))"
+            let errorText = message ?? String(format: NSLocalizedString("メッセージの送信に失敗しました (HTTP %d)", comment: "Message send failure"), http.statusCode)
             self.errorMessage = errorText
             throw URLError(.badServerResponse)
         }

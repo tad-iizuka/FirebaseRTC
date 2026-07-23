@@ -40,7 +40,7 @@ final class PTTRoomManager: ObservableObject {
         var errorDescription: String? {
             switch self {
             case let .serverError(statusCode, message):
-                return message ?? "リクエストに失敗しました (HTTP \(statusCode))"
+                return message ?? String(format: NSLocalizedString("リクエストに失敗しました (HTTP %d)", comment: "Request failure"), statusCode)
             }
         }
     }
