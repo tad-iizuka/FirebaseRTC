@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">PTT Client</string>
+    <string name="app_name" translatable="false">PTT Client</string>
     <!--
       Google Sign-In用のWebクライアントID。
       Firebase Console > Authentication > Sign-in method > Google > ウェブSDK構成 から取得できる
