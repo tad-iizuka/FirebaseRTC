@@ -9,6 +9,8 @@
  *   5. LiveKitのWebhookを受信し、利用状況をログ/Firestoreに記録する (routes/webhooks.js) [Phase 4で追加]
  *   6. テキストチャット(履歴付き)を管理する (routes/messages.js) [Phase 5で追加]
  *   7. 管理者向けの複数ルーム横断監視API (routes/admin.js) [Phase 5で追加]
+ *   8. 録音(Egress)の開始/停止/状態取得・履歴・ダウンロードURL発行を管理する
+ *      (routes/recording.js) [Phase 5/8で追加]
  *
  * [経緯]
  * 旧 ptt-server/server.js (WS制御 + Opusミキシング) はLiveKitサーバー本体に
@@ -32,6 +34,7 @@ const reportsRouter = require('./routes/reports');
 const webhooksRouter = require('./routes/webhooks');
 const messagesRouter = require('./routes/messages');
 const adminRouter = require('./routes/admin');
+const recordingRouter = require('./routes/recording');
 
 const PORT = process.env.PORT || 8080;
 
@@ -89,6 +92,7 @@ app.get('/', (req, res) => res.send('ptt-token-server OK'));
 app.use('/rooms', roomsRouter);
 app.use('/rooms', talkRouter); // POST /rooms/:roomId/talk/{start,heartbeat,stop}
 app.use('/rooms', messagesRouter); // POST /rooms/:roomId/messages
+app.use('/rooms', recordingRouter); // POST/GET /rooms/:roomId/recording/*, /recordings*
 app.use('/token', tokenRouter);
 app.use('/reports', reportsRouter);
 app.use('/admin', adminRouter); // GET /admin/rooms, GET /admin/rooms/:roomId [Phase 5]
