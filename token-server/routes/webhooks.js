@@ -7,8 +7,16 @@
  * Webhookでしか確実に検知できない。そのため、Firestore上の
  * recording.active を false に確定させる処理はこのファイルに一本化する。
  *
- * 現状は egress_ended イベントのみ処理する。将来的に room_started /
- * room_finished 等の他イベントを扱う場合もこのファイルに追加していく想定。
+ * egress_ended に加えて room_started(ルームに最初の参加者が入室した瞬間)も
+ * 処理する。room_finished 等、他のイベントを今後扱う場合もこのファイルに
+ * 追加していく想定。
+ *
+ * [Phase9で追加: 自動録音]
+ * rooms/{roomId}.settings.autoRecording が true の場合、room_started
+ * イベントを受けてrecording.jsのstartRecordingInternalを呼び、録音を
+ * 自動開始する。「誰かの発話を検知してから録音開始」だとPTT特有のEgress起動
+ * レイテンシ問題(頭切れ)を踏むため、ルームがアクティブになった最も早い
+ * タイミングで開始しておく設計にしている(詳細はrecording.js冒頭のコメント参照)。
  *
  * [重要] WebhookReceiver.receive() は署名検証のため「生のリクエストボディ
  * 文字列」を必要とする。server.js側でこのルートにだけ express.json() より
@@ -30,6 +38,7 @@ const express = require('express');
 const { WebhookReceiver } = require('livekit-server-sdk');
 const { db } = require('../lib/firebaseAdmin');
 const { syncRoomMetadata } = require('../lib/roomMetadata');
+const { startRecordingInternal } = require('./recording');
 
 const router = express.Router();
 
@@ -54,8 +63,10 @@ router.post('/livekit', async (req, res) => {
   try {
     if (event.event === 'egress_ended') {
       await handleEgressEnded(event.egressInfo);
+    } else if (event.event === 'room_started') {
+      await handleRoomStarted(event.room);
     }
-    // 他のイベント種別(room_started等)は現状無視する。
+    // 他のイベント種別は現状無視する。
   } catch (e) {
     console.error('[Webhook処理エラー]', e.message);
     // LiveKit側の再送を招かないよう、処理側のエラーでも200を返す
@@ -120,6 +131,7 @@ async function handleEgressEnded(egressInfo) {
       endedAt: new Date(),
       status: statusName,
       startedByUid: room.recording.startedByUid || null,
+      trigger: room.recording.trigger || 'manual', // 'manual' | 'auto'
     });
   } catch (e) {
     console.warn(`[録音履歴保存失敗] room=${roomId} egressId=${egressInfo.egressId}: ${e.message}`);
@@ -138,6 +150,45 @@ async function handleEgressEnded(egressInfo) {
     console.error(
       `[録音失敗詳細] room=${roomId} egressId=${egressInfo.egressId} error=${egressInfo.error || '(詳細情報なし)'}`
     );
+  }
+}
+
+/**
+ * room_startedイベントの処理本体。
+ *
+ * ルームに最初の参加者が入室し、LiveKit側でルームが実体化した瞬間に届く。
+ * rooms/{roomId}.settings.autoRecording が true の場合のみ、ここで
+ * 録音を自動開始する(routes/rooms.js の PATCH /:roomId/settings で
+ * on/offを切り替え可能)。
+ *
+ * 既に録音中(手動開始と競合した等)の場合は startRecordingInternal が
+ * 黙って null を返すので、ここでもエラー扱いにしない(冪等)。
+ *
+ * この処理が失敗してもWebhookエンドポイント自体は200を返す
+ * (LiveKit側の不要な再送ループを避けるため。egress_ended同様の方針)。
+ */
+async function handleRoomStarted(roomInfo) {
+  const roomId = roomInfo?.name;
+  if (!roomId) return;
+
+  const roomRef = db.collection('rooms').doc(roomId);
+  const snap = await roomRef.get();
+  if (!snap.exists) return;
+
+  const room = snap.data();
+  if (!room.settings?.autoRecording) return;
+
+  try {
+    const result = await startRecordingInternal(roomId, {
+      startedByUid: room.ownerUid || null,
+      trigger: 'auto',
+    });
+    if (result) {
+      console.log(`[自動録音開始] room=${roomId} egressId=${result.egressId}`);
+    }
+    // result が null = 既に録音中 → 何もせず正常終了(冪等)
+  } catch (e) {
+    console.error(`[自動録音開始エラー] room=${roomId}: ${e.message}`);
   }
 }
 

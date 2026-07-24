@@ -25,7 +25,7 @@
 const fs = require('fs');
 const express = require('express');
 const { Storage } = require('@google-cloud/storage');
-const { EgressClient, EncodedFileType, GCPUpload, RoomServiceClient, TrackType } = require('livekit-server-sdk');
+const { EgressClient, EncodedFileType, GCPUpload } = require('livekit-server-sdk');
 const { db } = require('../lib/firebaseAdmin');
 const { syncRoomMetadata } = require('../lib/roomMetadata');
 const { logAdminAction } = require('../lib/auditLog');
@@ -39,31 +39,24 @@ const egressClient = new EgressClient(
   process.env.LIVEKIT_API_SECRET
 );
 
-// [Egress起動前チェック用]
+// [Egress起動シグナルについて]
 // Room Composite Egressはコンポジタ(ヘッドレスブラウザ)が「描画対象のトラックが
 // 最低1つ存在する」ことを検知して初めて録画を開始する。この検知シグナルを
 // 一定時間受け取れないと、LiveKit側は EGRESS_ABORTED(error: "Start signal not
 // received") として自然終了する(実運用ログで確認済み)。
-// 本アプリはPTT設計上、ボタンを押している間だけ音声トラックを発行するため、
-// 「誰も話していないタイミングで録音を開始する」と高確率でこの失敗を踏む。
-// startRoomCompositeEgress を呼ぶ前に検知・ブロックし、分かりやすいエラーを返す。
-const roomService = new RoomServiceClient(
-  process.env.LIVEKIT_HOST,
-  process.env.LIVEKIT_API_KEY,
-  process.env.LIVEKIT_API_SECRET
-);
-
-async function hasActiveAudioTrack(roomId) {
-  try {
-    const participants = await roomService.listParticipants(roomId);
-    return participants.some((p) => p.tracks.some((t) => t.type === TrackType.AUDIO && !t.muted));
-  } catch (e) {
-    // 参加者一覧の取得自体に失敗した場合は判定不能。誤検知で録音開始を
-    // ブロックしてしまう方が実害が大きいため、安全側でtrue(あるとみなす)を返す。
-    console.warn(`[録音開始前チェック] 参加者一覧の取得に失敗しました: ${e.message}`);
-    return true;
-  }
-}
+//
+// [旧実装からの変更点]
+// 以前は「録音開始APIを呼んだ瞬間に誰かが発話中(=マイクトラックがpublishされて
+// いる)か」をここで同期チェックしていたが、PTTは発話中しかトラックが存在しない
+// ため、この判定は(1)ほとんどの場合ブロックしてしまい実質録音を開始できない、
+// (2)チェックが通ってもEgress起動のレイテンシにその発話自体が追い越され
+// 「頭切れ」が起きる、という2つの問題があった。
+// 現在はクライアント側(ptt-client/src/stores/connection.ts)が接続中ずっと
+// 無音のkeep-aliveトラックをpublishし続ける運用に変更しており、ルームに
+// 誰か1人でも接続していればEgressの起動シグナルは常に満たされる。そのため
+// このファイルでは発話状態のチェックを行わない
+// (自動録音のトリガーであるroom_startedイベント自体が「誰か接続した」ことの
+// シグナルなので、routes/webhooks.js 側でも同様に不要)。
 
 /**
  * GCSアップロード用サービスアカウントの認証情報(JSON文字列)を読み込む。
@@ -117,12 +110,89 @@ function requireModeratorOrOwner(req, res, next) {
 }
 
 /**
+ * Firestore仮登録 → Egress起動、の内部共通処理。
+ *
+ * 呼び出し元は2箇所:
+ *   - POST /:roomId/recording/start (このファイル。moderator/ownerによる手動開始)
+ *   - routes/webhooks.js の room_started イベントハンドラ
+ *     (rooms/{roomId}.settings.autoRecording が true の場合の自動開始)
+ *
+ * 既に録音中の場合はEgressを呼ばずに null を返す(冪等)。エラーにするか
+ * 黙って無視するかは呼び出し元の責務とする(手動APIは409を返したいが、
+ * 自動起動側は「既に録っているなら何もしない」で正常なため)。
+ *
+ * Egress APIを呼ぶ前にFirestore側へ仮のactive状態を書き込むことで、
+ * ほぼ同時に複数回呼ばれた場合(手動開始と自動開始が競合する場合を含む)の
+ * 二重起動をトランザクションで防ぐ。
+ */
+async function startRecordingInternal(roomId, { startedByUid, trigger }) {
+  const roomRef = db.collection('rooms').doc(roomId);
+
+  const alreadyActive = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(roomRef);
+    if (!snap.exists) {
+      throw { httpStatus: 404, message: 'ルームが見つかりません' };
+    }
+    if (snap.data().recording && snap.data().recording.active) {
+      return true;
+    }
+    // egressIdはEgress API成功後に確定するため、まずnullで仮登録しておく
+    tx.update(roomRef, {
+      recording: {
+        active: true,
+        egressId: null,
+        startedAt: new Date(),
+        startedByUid: startedByUid ?? null,
+        trigger, // 'manual' | 'auto' (Phase8で追加した録音履歴・監査ログでの識別用)
+      },
+    });
+    return false;
+  });
+
+  if (alreadyActive) {
+    return null;
+  }
+
+  let info;
+  let output;
+  try {
+    output = buildOutput(roomId);
+    info = await egressClient.startRoomCompositeEgress(
+      roomId,
+      { file: output },
+      { audioOnly: true }
+    );
+  } catch (egressError) {
+    // Egress API自体が失敗した場合は、仮登録したactive状態を必ず戻す
+    await roomRef.update({ recording: null }).catch(() => {});
+    throw egressError;
+  }
+
+  // [Phase8] 録音履歴一覧・ダウンロードURL発行のため、filepathも保存しておく。
+  await roomRef.update({
+    'recording.egressId': info.egressId,
+    'recording.filepath': output.filepath,
+  });
+  await syncRoomMetadata(roomId);
+
+  await logAdminAction({
+    actorUid: startedByUid ?? null,
+    action: 'recording:start',
+    targetRoomId: roomId,
+    detail: { egressId: info.egressId, trigger },
+  });
+
+  console.log(
+    `[録音開始] room=${roomId} egressId=${info.egressId} trigger=${trigger} by=${startedByUid ?? '(auto)'}`
+  );
+  return { egressId: info.egressId };
+}
+
+/**
  * POST /rooms/:roomId/recording/start
  *
  * 既に録音中なら409(冪等ではなく明示的にエラーにする。「二重に録音が
  * 走っていないか」をUI側が誤認しないようにするため)。
- * Egress APIを呼ぶ前にFirestore側へ仮のactive状態を書き込むことで、
- * ほぼ同時に複数回叩かれた場合の二重起動をトランザクションで防ぐ。
  */
 router.post(
   '/:roomId/recording/start',
@@ -132,74 +202,13 @@ router.post(
   async (req, res) => {
     const { roomId } = req.params;
     const uid = req.firebaseUser.uid;
-    const roomRef = db.collection('rooms').doc(roomId);
 
     try {
-      // Firestoreの仮登録・Egress API呼び出しより前に検証する。ここでブロックすれば
-      // recording.active:true の書き込みや実際のEgress起動を一切発生させずに済む。
-      if (!(await hasActiveAudioTrack(roomId))) {
-        return res.status(409).json({
-          error:
-            '録音を開始できません: 現在ルーム内で発話しているユーザーがいません。誰か1人がPTTボタンを押して発話している状態で開始してください',
-          code: 'no_active_audio_track',
-        });
-      }
-
-      const alreadyActive = await db.runTransaction(async (tx) => {
-        const snap = await tx.get(roomRef);
-        if (!snap.exists) {
-          throw { httpStatus: 404, message: 'ルームが見つかりません' };
-        }
-        if (snap.data().recording && snap.data().recording.active) {
-          return true;
-        }
-        // egressIdはEgress API成功後に確定するため、まずnullで仮登録しておく
-        tx.update(roomRef, {
-          recording: {
-            active: true,
-            egressId: null,
-            startedAt: new Date(),
-            startedByUid: uid,
-          },
-        });
-        return false;
-      });
-
-      if (alreadyActive) {
+      const result = await startRecordingInternal(roomId, { startedByUid: uid, trigger: 'manual' });
+      if (!result) {
         return res.status(409).json({ error: 'すでに録音中です' });
       }
-
-      let info;
-      let output;
-      try {
-        output = buildOutput(roomId);
-        info = await egressClient.startRoomCompositeEgress(
-          roomId,
-          { file: output },
-          { audioOnly: true }
-        );
-      } catch (egressError) {
-        // Egress API自体が失敗した場合は、仮登録したactive状態を必ず戻す
-        await roomRef.update({ recording: null }).catch(() => {});
-        throw egressError;
-      }
-
-      // [Phase8] 録音履歴一覧・ダウンロードURL発行のため、filepathも保存しておく。
-      await roomRef.update({
-        'recording.egressId': info.egressId,
-        'recording.filepath': output.filepath,
-      });
-      await syncRoomMetadata(roomId);
-
-      await logAdminAction({
-        actorUid: uid,
-        action: 'recording:start',
-        targetRoomId: roomId,
-        detail: { egressId: info.egressId },
-      });
-
-      console.log(`[録音開始] room=${roomId} egressId=${info.egressId} by=${uid}`);
-      res.json({ started: true, egressId: info.egressId });
+      res.json({ started: true, egressId: result.egressId });
     } catch (e) {
       if (e && e.httpStatus) {
         return res.status(e.httpStatus).json({ error: e.message });
@@ -395,3 +404,5 @@ router.get(
 );
 
 module.exports = router;
+// routes/webhooks.js の room_started ハンドラ(自動録音)から利用する。
+module.exports.startRecordingInternal = startRecordingInternal;

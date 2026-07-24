@@ -133,6 +133,7 @@
     "talkHeartbeatFailed": "発話ロックの延長に失敗しました。送話を終了します: {message}",
     "talkStartFailed": "発話を開始できませんでした: {message}",
     "micEnableError": "マイク有効化エラー: {message}",
-    "micDisableError": "マイク無効化エラー: {message}"
+    "micDisableError": "マイク無効化エラー: {message}",
+    "keepAlivePublishError": "録音用キープアライブトラックの送出に失敗しました: {message}"
   }
 }

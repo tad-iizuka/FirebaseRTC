@@ -133,6 +133,7 @@
     "talkHeartbeatFailed": "Failed to extend the talk lock. Ending talk: {message}",
     "talkStartFailed": "Could not start talking: {message}",
     "micEnableError": "Microphone enable error: {message}",
-    "micDisableError": "Microphone disable error: {message}"
+    "micDisableError": "Microphone disable error: {message}",
+    "keepAlivePublishError": "Failed to publish recording keep-alive track: {message}"
   }
 }

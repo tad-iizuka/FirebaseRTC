@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import {
   ConnectionState,
+  LocalAudioTrack,
   Room,
   RoomEvent,
   type RemoteParticipant,
@@ -28,6 +29,21 @@ const { t } = i18n.global
 // サーバー(token-server/routes/talk.js)のFirestoreトランザクションで実効的に強制される。
 // PTTボタンはロック取得(/talk/start)に成功して初めてマイクを有効化し、保持中は
 // TTL(15秒, サーバー側 LOCK_TTL_MS)より短い間隔でheartbeatを送って延長し続ける。
+//
+// [Phase9: keep-aliveトラック]
+// PTTはボタンを押している間だけマイクトラックをpublish/unpublishするため、
+// 「ルームに音声トラックが存在する瞬間」は発話中に限られる。ところが
+// サーバー側のRoom Composite Egress(録音)は「録画対象のトラックが最低1つ
+// 存在する」ことを起動シグナルとして待つ設計であり、発話が無い間は
+// このシグナルが得られずEgressが起動できない(または起動レイテンシに
+// 実際の発話が追い越され、録音の頭が切れる)。
+// これを避けるため、接続直後から実マイクとは無関係に無音のダミー音声
+// トラックを常時publishし続ける(切断まで保持)。マイクを直接ミュートせず
+// Web Audio APIで合成した無音ストリームを使うのは、ブラウザの「マイク使用中」
+// インジケータを常時点灯させたくないため(PTTアプリとしての「押していない間は
+// マイクは使われていない」という利用者への信頼を損なわないようにする)。
+// token-server/routes/recording.js・routes/webhooks.js 側の設計はこの
+// keep-aliveトラックの存在を前提にしている(参照: 各ファイル冒頭コメント)。
 
 export type ConnectionStatusKind = 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'error'
 
@@ -71,6 +87,8 @@ export const useConnectionStore = defineStore('connection', () => {
   let talkHeartbeatTimer: ReturnType<typeof setInterval> | null = null
   let pttHeld = false
   let talkRequestToken = 0
+  let keepAliveTrack: LocalAudioTrack | null = null
+  let keepAliveAudioContext: AudioContext | null = null
 
   function appendLog(line: string) {
     const time = new Date().toLocaleTimeString()
@@ -179,6 +197,57 @@ export const useConnectionStore = defineStore('connection', () => {
       })
   }
 
+  /**
+   * Web Audio APIで実質無音の音声トラックを合成する。
+   * gainを完全な0ではなく極小値にしているのは、一部環境でのDTX(無音区間の
+   * パケット送出抑制)により「trackはpublishされているのにRTPパケットが
+   * 全く流れない=コンポジタから見て存在しないのと同じ」状態になることを
+   * 避けるため(publishTrack呼び出し側でも dtx: false を明示している)。
+   */
+  function createKeepAliveTrack(): LocalAudioTrack {
+    const ctx = new AudioContext()
+    keepAliveAudioContext = ctx
+    const dest = ctx.createMediaStreamDestination()
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    gain.gain.value = 0.0001
+    osc.connect(gain).connect(dest)
+    osc.start()
+    return new LocalAudioTrack(dest.stream.getAudioTracks()[0])
+  }
+
+  /**
+   * [Phase9] keep-aliveトラックをpublishする。実マイクの状態(PTTのon/off)とは
+   * 完全に独立しており、接続している間はずっとpublishされたままにする。
+   * 失敗してもPTT自体の利用には影響しないため、ログのみでスタータスは
+   * エラー扱いにしない(録音機能を使わない/自動録音offのルームでは
+   * 実質的に無害・無関係なため)。
+   */
+  async function publishKeepAliveTrack(target: Room) {
+    try {
+      const track = createKeepAliveTrack()
+      await target.localParticipant.publishTrack(track, {
+        name: 'keepalive',
+        source: Track.Source.Unknown,
+        dtx: false,
+      })
+      keepAliveTrack = track
+    } catch (e) {
+      appendLog(t('log.keepAlivePublishError', { message: (e as Error).message }))
+    }
+  }
+
+  function stopKeepAliveTrack() {
+    if (keepAliveTrack) {
+      keepAliveTrack.stop()
+      keepAliveTrack = null
+    }
+    if (keepAliveAudioContext) {
+      keepAliveAudioContext.close().catch(() => {})
+      keepAliveAudioContext = null
+    }
+  }
+
   async function connect(opts: { tokenServerUrlValue: string; livekitUrlValue: string; roomId: string }) {
     if (room) {
       appendLog(t('log.alreadyConnecting'))
@@ -203,6 +272,7 @@ export const useConnectionStore = defineStore('connection', () => {
       await newRoom.connect(livekitUrl, token)
       appendLog(t('log.roomConnected', { roomId: opts.roomId }))
       await newRoom.localParticipant.setMicrophoneEnabled(false)
+      await publishKeepAliveTrack(newRoom)
 
       applyMetadata(newRoom.metadata)
       syncParticipantsFromRoom(newRoom)
@@ -225,9 +295,11 @@ export const useConnectionStore = defineStore('connection', () => {
       appendLog(t('log.tokenRefreshNear'))
       try {
         const token = await fetchToken(idTokenProviderRoomId)
+        stopKeepAliveTrack() // 一旦切断するため、古いトラックのAudioContextを先に破棄しておく
         await room.disconnect()
         await room.connect(livekitUrl, token)
         await room.localParticipant.setMicrophoneEnabled(false)
+        await publishKeepAliveTrack(room)
         appendLog(t('log.tokenRefreshSuccess'))
         scheduleTokenRefresh()
       } catch (e) {
@@ -252,6 +324,7 @@ export const useConnectionStore = defineStore('connection', () => {
       clearTimeout(tokenRefreshTimer)
       tokenRefreshTimer = null
     }
+    stopKeepAliveTrack()
     if (room) {
       await room.disconnect()
       room = null

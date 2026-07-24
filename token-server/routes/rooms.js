@@ -71,6 +71,10 @@ router.post('/', requireFirebaseAuth, async (req, res) => {
       visibility: 'invite_only',
       inviteCode,
       maxMembers,
+      // [Phase9] ルームがアクティブになった瞬間(room_startedイベント)に
+      // 自動で録音を開始するかどうか。デフォルトはfalse(従来通り手動開始)。
+      // routes/webhooks.js の handleRoomStarted / PATCH /:roomId/settings 参照。
+      settings: { autoRecording: false },
     });
 
     await roomRef.collection('members').doc(uid).set({
@@ -139,7 +143,12 @@ router.post('/:roomId/join', requireFirebaseAuth, async (req, res) => {
       console.log(`[ルーム参加] roomId=${roomId} uid=${uid}`);
     }
 
-    res.json({ roomId, joined: true });
+    // [同意/開示] 自動録音が有効なルームであることを、実際に接続する前の
+    // このレスポンス時点でクライアントに伝える。録音中であることをRoom
+    // Metadata経由で開示する既存方針(recording.js冒頭コメント参照)を、
+    // 「まだ誰も録音開始ボタンを押していないのに録音が始まる」自動録音の
+    // ケースでも入室前から満たすため。
+    res.json({ roomId, joined: true, autoRecording: !!room.settings?.autoRecording });
   } catch (e) {
     console.error('[ルーム参加エラー]', e.message);
     res.status(500).json({ error: 'ルームへの参加に失敗しました' });
@@ -274,6 +283,60 @@ router.post('/:roomId/members/:targetUid/role', requireFirebaseAuth, async (req,
   } catch (e) {
     console.error('[role変更エラー]', e.message);
     res.status(500).json({ error: 'roleの変更に失敗しました' });
+  }
+});
+
+/**
+ * PATCH /rooms/:roomId/settings
+ * body: { autoRecording: boolean }
+ *
+ * [Phase9で追加] owner/moderatorのみ。ルームがアクティブになるたび
+ * (room_startedイベント。誰かが最初に入室した瞬間)に録音を自動開始するか
+ * どうかを切り替える(routes/webhooks.js の handleRoomStarted 参照)。
+ *
+ * [注意] falseにしても、その時点で既に進行中の録音は止まらない。
+ * 「次回以降ルームがアクティブになったときに自動開始しない」という
+ * 意味に留め、設定変更が録音状態に直接副作用を持たないようにしている
+ * (録音を止めたい場合は既存の POST /:roomId/recording/stop を使う)。
+ */
+router.patch('/:roomId/settings', requireFirebaseAuth, async (req, res) => {
+  const uid = req.firebaseUser.uid;
+  const { roomId } = req.params;
+
+  if (!isValidRoomId(roomId)) {
+    return res.status(400).json({ error: 'roomId が不正です' });
+  }
+  if (typeof req.body?.autoRecording !== 'boolean') {
+    return res.status(400).json({ error: 'autoRecording はboolean型で指定してください' });
+  }
+
+  try {
+    const roomRef = db.collection('rooms').doc(roomId);
+
+    const actorSnap = await roomRef.collection('members').doc(uid).get();
+    if (!actorSnap.exists || !['owner', 'moderator'].includes(actorSnap.data().role)) {
+      return res.status(403).json({ error: '権限がありません' });
+    }
+
+    const roomSnap = await roomRef.get();
+    if (!roomSnap.exists) {
+      return res.status(404).json({ error: 'ルームが見つかりません' });
+    }
+
+    await roomRef.update({ 'settings.autoRecording': req.body.autoRecording });
+
+    await logAdminAction({
+      actorUid: uid,
+      action: 'room:settings_update',
+      targetRoomId: roomId,
+      detail: { autoRecording: req.body.autoRecording },
+    });
+
+    console.log(`[設定更新] roomId=${roomId} autoRecording=${req.body.autoRecording} by=${uid}`);
+    res.json({ roomId, autoRecording: req.body.autoRecording });
+  } catch (e) {
+    console.error('[設定更新エラー]', e.message);
+    res.status(500).json({ error: '設定の更新に失敗しました' });
   }
 });
 
