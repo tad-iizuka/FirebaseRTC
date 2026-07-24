@@ -39,10 +39,45 @@ export const useAdminRecordingsStore = defineStore('adminRecordings', () => {
     return data.url
   }
 
+  // [録音削除] download-urlと同様 owner/moderator限定を想定。
+  // token-server側に DELETE /rooms/:roomId/recordings/:recordingId の実装が必要。
+  // 楽観的に一覧から取り除きつつ、失敗時は再取得して整合を戻す。
+  const deletingIds = ref<Set<string>>(new Set())
+
+  async function deleteRecording(baseUrl: string, roomId: string, recordingId: string): Promise<void> {
+    deletingIds.value.add(recordingId)
+    errorMessage.value = null
+    const before = recordings.value
+    recordings.value = recordings.value.filter((r) => r.recordingId !== recordingId)
+    try {
+      await authedFetch<void>(
+        baseUrl,
+        `/rooms/${encodeURIComponent(roomId)}/recordings/${encodeURIComponent(recordingId)}`,
+        { method: 'DELETE' },
+      )
+    } catch (e) {
+      recordings.value = before
+      errorMessage.value = (e as Error).message
+      throw e
+    } finally {
+      deletingIds.value.delete(recordingId)
+    }
+  }
+
   function clear() {
     recordings.value = []
     errorMessage.value = null
+    deletingIds.value.clear()
   }
 
-  return { recordings, isLoading, errorMessage, fetchRecordings, issueDownloadUrl, clear }
+  return {
+    recordings,
+    isLoading,
+    errorMessage,
+    deletingIds,
+    fetchRecordings,
+    issueDownloadUrl,
+    deleteRecording,
+    clear,
+  }
 })

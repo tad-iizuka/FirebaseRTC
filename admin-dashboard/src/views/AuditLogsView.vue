@@ -37,7 +37,12 @@ function nextPage() {
     <p v-else-if="auditLogs.errorMessage" class="text-xs text-destructive">
       監査ログの取得に失敗しました: {{ auditLogs.errorMessage }}
     </p>
-    <p v-else-if="auditLogs.isLoading" class="text-xs text-muted-foreground">読み込み中...</p>
+    <p
+      v-else-if="auditLogs.isLoading && auditLogs.logs.length === 0"
+      class="text-xs text-muted-foreground"
+    >
+      読み込み中...
+    </p>
 
     <table v-if="auditLogs.logs.length" class="w-full border-collapse text-xs">
       <thead>

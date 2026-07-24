@@ -48,7 +48,12 @@ function openRoom(roomId: string) {
     <p v-else-if="rooms.errorMessage" class="text-xs text-destructive">
       ルーム一覧の取得に失敗しました: {{ rooms.errorMessage }}
     </p>
-    <p v-else-if="rooms.isLoadingList" class="text-xs text-muted-foreground">読み込み中...</p>
+    <p
+      v-else-if="rooms.isLoadingList && rooms.rooms.length === 0"
+      class="text-xs text-muted-foreground"
+    >
+      読み込み中...
+    </p>
 
     <table v-if="rooms.rooms.length" class="w-full border-collapse text-xs">
       <thead>

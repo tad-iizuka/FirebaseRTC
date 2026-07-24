@@ -55,7 +55,12 @@ async function revoke() {
       管理者権限がありません(adminUsers/&#123;uid&#125;.permissions に admins:manage が必要です)。
     </p>
     <p v-else-if="adminUsers.errorMessage" class="text-xs text-destructive">{{ adminUsers.errorMessage }}</p>
-    <p v-else-if="adminUsers.isLoading" class="text-xs text-muted-foreground">読み込み中...</p>
+    <p
+      v-else-if="adminUsers.isLoading && adminUsers.admins.length === 0"
+      class="text-xs text-muted-foreground"
+    >
+      読み込み中...
+    </p>
 
     <table v-if="adminUsers.admins.length" class="mb-6 w-full border-collapse text-xs">
       <thead>

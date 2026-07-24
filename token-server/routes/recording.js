@@ -439,6 +439,85 @@ router.get(
   }
 );
 
+/**
+ * DELETE /rooms/:roomId/recordings/:recordingId
+ *
+ * [録音削除] download-url発行と同様 owner/moderator限定。
+ * GCS上の実ファイルとFirestoreの履歴ドキュメントの両方を削除する。
+ *
+ * [設計方針]
+ * - 録音中(該当egressIdがまだrecording.activeとして進行中)のものを誤って
+ *   消してしまわないよう、まずrooms/{roomId}のrecording.egressIdと一致する
+ *   場合はactive中は削除させない(409)。egress_endedで確定した履歴のみ対象。
+ * - GCS削除はベストエフォート: ファイルが既に存在しない(404)場合はそれを
+ *   エラーにせず、Firestore側のドキュメント削除だけ進める(手動で先に消えて
+ *   いた等のケースでも管理画面からの掃除を諦めないため)。
+ * - GCS削除自体が失敗した場合(権限エラー等、404以外)はFirestoreドキュメントを
+ *   残したまま500を返す。ファイル本体を消せなかったのに履歴だけ消えてしまうと
+ *   「どのファイルを消し忘れたか」が分からなくなるため。
+ */
+router.delete(
+  '/:roomId/recordings/:recordingId',
+  requireFirebaseAuth,
+  requireRoomMembership,
+  requireModeratorOrOwner,
+  async (req, res) => {
+    const { roomId, recordingId } = req.params;
+    try {
+      const roomRef = db.collection('rooms').doc(roomId);
+      const docRef = roomRef.collection('recordings').doc(recordingId);
+      const snap = await docRef.get();
+      if (!snap.exists) {
+        return res.status(404).json({ error: '録音が見つかりません' });
+      }
+      const recording = snap.data();
+
+      const roomSnap = await roomRef.get();
+      const currentRecording = roomSnap.exists ? roomSnap.data().recording : null;
+      if (
+        currentRecording &&
+        currentRecording.active &&
+        currentRecording.egressId &&
+        currentRecording.egressId === recordingId
+      ) {
+        return res.status(409).json({
+          error: '録音中のため削除できません(停止後にもう一度お試しください)',
+          code: 'recording_in_progress',
+        });
+      }
+
+      if (recording.filepath) {
+        try {
+          const storage = new Storage({ credentials: JSON.parse(loadGcsCredentials()) });
+          const bucket = storage.bucket(process.env.RECORDING_GCS_BUCKET);
+          await bucket.file(recording.filepath).delete();
+        } catch (gcsError) {
+          if (gcsError.code !== 404) {
+            console.error('[録音削除エラー(GCS)]', gcsError.message);
+            return res.status(500).json({ error: '録音ファイルの削除に失敗しました' });
+          }
+          // 404(既に存在しない)はFirestore側の掃除だけ進める
+        }
+      }
+
+      await docRef.delete();
+
+      await logAdminAction({
+        actorUid: req.firebaseUser.uid,
+        action: 'recording:deleted',
+        targetRoomId: roomId,
+        detail: { recordingId, filepath: recording.filepath ?? null },
+      });
+
+      console.log(`[録音削除] room=${roomId} recordingId=${recordingId} by=${req.firebaseUser.uid}`);
+      res.json({ deleted: true });
+    } catch (e) {
+      console.error('[録音削除エラー]', e.message);
+      res.status(500).json({ error: '録音の削除に失敗しました' });
+    }
+  }
+);
+
 module.exports = router;
 // routes/webhooks.js の room_started/participant_joined ハンドラ(自動録音開始)、
 // および participant_left/room_finished ハンドラ(自動録音停止)から利用する。

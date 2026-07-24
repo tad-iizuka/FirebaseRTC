@@ -52,6 +52,20 @@ async function download(recordingId: string) {
     recordings.errorMessage = (e as Error).message
   }
 }
+
+/**
+ * 録音削除。取り消せない操作のため確認ダイアログを挟む。
+ */
+async function remove(recordingId: string) {
+  if (!window.confirm('この録音を削除します。この操作は取り消せません。よろしいですか?')) {
+    return
+  }
+  try {
+    await recordings.deleteRecording(settings.tokenServerUrl, roomId.value, recordingId)
+  } catch {
+    // errorMessageはstore側で設定済み
+  }
+}
 </script>
 
 <template>
@@ -62,7 +76,12 @@ async function download(recordingId: string) {
     <p v-else-if="rooms.errorMessage" class="text-xs text-destructive">
       詳細の取得に失敗しました: {{ rooms.errorMessage }}
     </p>
-    <p v-else-if="rooms.isLoadingDetail" class="text-xs text-muted-foreground">読み込み中...</p>
+    <p
+      v-else-if="rooms.isLoadingDetail && !rooms.detail"
+      class="text-xs text-muted-foreground"
+    >
+      読み込み中...
+    </p>
 
     <template v-if="rooms.detail">
       <h2 class="mb-1 text-sm font-semibold">room: {{ rooms.detail.roomId }}</h2>
@@ -121,7 +140,12 @@ async function download(recordingId: string) {
 
       <h3 class="mb-2 text-[12px] font-medium">録音履歴</h3>
       <p v-if="recordings.errorMessage" class="mb-2 text-xs text-destructive">{{ recordings.errorMessage }}</p>
-      <p v-else-if="recordings.isLoading" class="mb-2 text-xs text-muted-foreground">読み込み中...</p>
+      <p
+        v-else-if="recordings.isLoading && recordings.recordings.length === 0"
+        class="mb-2 text-xs text-muted-foreground"
+      >
+        読み込み中...
+      </p>
       <table class="w-full border-collapse text-xs">
         <thead>
           <tr class="border-b border-border text-[10px] uppercase tracking-[0.06em] text-muted-foreground">
@@ -142,13 +166,23 @@ async function download(recordingId: string) {
             <td class="whitespace-nowrap p-2">{{ formatTime(r.endedAt) }}</td>
             <td class="p-2">{{ r.status }}</td>
             <td class="p-2">
-              <button
-                type="button"
-                class="text-[11px] text-primary underline-offset-2 hover:underline"
-                @click="download(r.recordingId)"
-              >
-                ダウンロードURL発行
-              </button>
+              <div class="flex items-center gap-3">
+                <button
+                  type="button"
+                  class="text-[11px] text-primary underline-offset-2 hover:underline"
+                  @click="download(r.recordingId)"
+                >
+                  ダウンロードURL発行
+                </button>
+                <button
+                  type="button"
+                  class="text-[11px] text-destructive underline-offset-2 hover:underline disabled:pointer-events-none disabled:opacity-40"
+                  :disabled="recordings.deletingIds.has(r.recordingId)"
+                  @click="remove(r.recordingId)"
+                >
+                  {{ recordings.deletingIds.has(r.recordingId) ? '削除中...' : '削除' }}
+                </button>
+              </div>
             </td>
           </tr>
         </tbody>
