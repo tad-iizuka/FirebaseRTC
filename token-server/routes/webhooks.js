@@ -46,7 +46,7 @@ const express = require('express');
 const { WebhookReceiver } = require('livekit-server-sdk');
 const { db } = require('../lib/firebaseAdmin');
 const { syncRoomMetadata } = require('../lib/roomMetadata');
-const { startRecordingInternal } = require('./recording');
+const { startRecordingInternal, stopRecordingInternal } = require('./recording');
 
 const router = express.Router();
 
@@ -73,6 +73,13 @@ router.post('/livekit', async (req, res) => {
       await handleEgressEnded(event.egressInfo);
     } else if (event.event === 'room_started' || event.event === 'participant_joined') {
       await handleAutoRecordingTrigger(event.room);
+    } else if (event.event === 'participant_left') {
+      await handleAutoRecordingStopTrigger(event.room);
+    } else if (event.event === 'room_finished') {
+      // 空室検知(participant_left)を取りこぼした場合の保険。
+      // room_finished時点ではroomはLiveKit側で既にクローズしているため
+      // numParticipantsでの判定はせず、録音中なら無条件で停止する。
+      await handleAutoRecordingStopTrigger(event.room, { force: true });
     }
     // 他のイベント種別は現状無視する。
   } catch (e) {
@@ -205,6 +212,47 @@ async function handleAutoRecordingTrigger(roomInfo) {
     // result が null = 既に録音中 → 何もせず正常終了(冪等)
   } catch (e) {
     console.error(`[自動録音開始エラー] room=${roomId}: ${e.message}`);
+  }
+}
+
+/**
+ * participant_left / room_finished イベント共通の処理本体。
+ *
+ * ルームが空室になった時点で、進行中の録音(手動/自動を問わず)を停止する。
+ * 空室のまま録音を続けても意味がないため、trigger種別による分岐はしない。
+ *
+ * - participant_left: event.room.numParticipantsは「退室者を除いた後の
+ *   人数」としてLiveKitから届く。これが0になった時点で空室と判定する。
+ * - room_finished: ルーム自体がクローズした後に届くため、numParticipants
+ *   の値を信用せず(force=true)、録音中なら無条件で停止する。
+ *   participant_leftの取りこぼし(Webhook配送順序の乱れ・欠落等)に対する
+ *   保険として位置づける。
+ *
+ * 実際の停止確定(recording:nullへの更新・録音履歴の書き込み)は
+ * handleEgressEnded側で行う。ここではEgressの停止を「依頼」するのみ
+ * (routes/recording.js の /stop と同じ立て付け)。
+ *
+ * この処理が失敗してもWebhookエンドポイント自体は200を返す
+ * (egress_ended/handleAutoRecordingTrigger同様の方針)。
+ */
+async function handleAutoRecordingStopTrigger(roomInfo, { force = false } = {}) {
+  const roomId = roomInfo?.name;
+  if (!roomId) return;
+
+  if (!force && roomInfo?.numParticipants !== 0) return;
+
+  try {
+    // 録音中かどうかの判定・冪等性はstopRecordingInternal側に委譲する
+    // (手動停止APIと同じ関数を使うため、ここでFirestoreを二重に読まない)。
+    const result = await stopRecordingInternal(roomId, { actorUid: null });
+    if (result) {
+      console.log(`[空室検知による録音停止依頼] room=${roomId} egressId=${result.egressId}`);
+    }
+    // 実際のrecording:nullへの更新とrecordings履歴への書き込みは
+    // これに続くegress_endedイベントで行われる。
+  } catch (e) {
+    if (e && e.httpStatus === 404) return; // ルームが既に削除されている等
+    console.error(`[空室検知による録音停止エラー] room=${roomId}: ${e.message}`);
   }
 }
 

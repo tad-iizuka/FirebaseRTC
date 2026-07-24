@@ -189,6 +189,49 @@ async function startRecordingInternal(roomId, { startedByUid, trigger }) {
 }
 
 /**
+ * Egress停止依頼の内部共通処理。
+ *
+ * 呼び出し元は2箇所:
+ *   - POST /:roomId/recording/stop (このファイル。moderator/ownerによる手動停止)
+ *   - routes/webhooks.js の participant_left / room_finished イベントハンドラ
+ *     (ルームが空室になった場合の自動停止)
+ *
+ * startRecordingInternal と同様、「停止を依頼する」だけであり
+ * recording.active の解除はしない(egress_endedイベントで確定させる、
+ * という本ファイル冒頭のコメントの方針をここでも踏襲する)。
+ *
+ * 録音中でなければ何もせず null を返す(冪等)。手動APIは元々録音中で
+ * なくても200(stopped:true)を返す仕様のため、エラー扱いにはしない。
+ */
+async function stopRecordingInternal(roomId, { actorUid = null } = {}) {
+  const roomRef = db.collection('rooms').doc(roomId);
+  const snap = await roomRef.get();
+  if (!snap.exists) {
+    throw { httpStatus: 404, message: 'ルームが見つかりません' };
+  }
+  const room = snap.data();
+  if (!room.recording || !room.recording.active) {
+    return null; // 元々録音中でなければ何もしない(冪等)
+  }
+
+  if (room.recording.egressId) {
+    await egressClient.stopEgress(room.recording.egressId);
+  }
+
+  await logAdminAction({
+    actorUid,
+    action: 'recording:stop_requested',
+    targetRoomId: roomId,
+    detail: { egressId: room.recording.egressId },
+  });
+
+  console.log(
+    `[録音停止依頼] room=${roomId} egressId=${room.recording.egressId} by=${actorUid ?? '(auto)'}`
+  );
+  return { egressId: room.recording.egressId };
+}
+
+/**
  * POST /rooms/:roomId/recording/start
  *
  * 既に録音中なら409(冪等ではなく明示的にエラーにする。「二重に録音が
@@ -234,34 +277,19 @@ router.post(
   async (req, res) => {
     const { roomId } = req.params;
     const uid = req.firebaseUser.uid;
-    const roomRef = db.collection('rooms').doc(roomId);
 
     try {
-      const snap = await roomRef.get();
-      if (!snap.exists) {
-        return res.status(404).json({ error: 'ルームが見つかりません' });
-      }
-      const room = snap.data();
-      if (!room.recording || !room.recording.active) {
+      const result = await stopRecordingInternal(roomId, { actorUid: uid });
+      if (!result) {
         return res.json({ stopped: true }); // 元々録音中でなければ冪等に成功扱い
       }
-
-      if (room.recording.egressId) {
-        await egressClient.stopEgress(room.recording.egressId);
-      }
-
-      await logAdminAction({
-        actorUid: uid,
-        action: 'recording:stop_requested',
-        targetRoomId: roomId,
-        detail: { egressId: room.recording.egressId },
-      });
-
-      console.log(`[録音停止依頼] room=${roomId} egressId=${room.recording.egressId} by=${uid}`);
       // active:falseへの確定はegress_endedのWebhookで行うため、
       // ここでは「依頼が受理された」ことのみを返す。
       res.json({ stopping: true });
     } catch (e) {
+      if (e && e.httpStatus) {
+        return res.status(e.httpStatus).json({ error: e.message });
+      }
       console.error('[録音停止エラー]', e.message);
       res.status(500).json({ error: '録音の停止に失敗しました' });
     }
@@ -412,5 +440,7 @@ router.get(
 );
 
 module.exports = router;
-// routes/webhooks.js の room_started ハンドラ(自動録音)から利用する。
+// routes/webhooks.js の room_started/participant_joined ハンドラ(自動録音開始)、
+// および participant_left/room_finished ハンドラ(自動録音停止)から利用する。
 module.exports.startRecordingInternal = startRecordingInternal;
+module.exports.stopRecordingInternal = stopRecordingInternal;
