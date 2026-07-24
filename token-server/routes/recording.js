@@ -25,7 +25,7 @@
 const fs = require('fs');
 const express = require('express');
 const { Storage } = require('@google-cloud/storage');
-const { EgressClient, EncodedFileType, GCPUpload } = require('livekit-server-sdk');
+const { EgressClient, EncodedFileType, GCPUpload, RoomServiceClient, TrackType } = require('livekit-server-sdk');
 const { db } = require('../lib/firebaseAdmin');
 const { syncRoomMetadata } = require('../lib/roomMetadata');
 const { logAdminAction } = require('../lib/auditLog');
@@ -38,6 +38,32 @@ const egressClient = new EgressClient(
   process.env.LIVEKIT_API_KEY,
   process.env.LIVEKIT_API_SECRET
 );
+
+// [Egress起動前チェック用]
+// Room Composite Egressはコンポジタ(ヘッドレスブラウザ)が「描画対象のトラックが
+// 最低1つ存在する」ことを検知して初めて録画を開始する。この検知シグナルを
+// 一定時間受け取れないと、LiveKit側は EGRESS_ABORTED(error: "Start signal not
+// received") として自然終了する(実運用ログで確認済み)。
+// 本アプリはPTT設計上、ボタンを押している間だけ音声トラックを発行するため、
+// 「誰も話していないタイミングで録音を開始する」と高確率でこの失敗を踏む。
+// startRoomCompositeEgress を呼ぶ前に検知・ブロックし、分かりやすいエラーを返す。
+const roomService = new RoomServiceClient(
+  process.env.LIVEKIT_HOST,
+  process.env.LIVEKIT_API_KEY,
+  process.env.LIVEKIT_API_SECRET
+);
+
+async function hasActiveAudioTrack(roomId) {
+  try {
+    const participants = await roomService.listParticipants(roomId);
+    return participants.some((p) => p.tracks.some((t) => t.type === TrackType.AUDIO && !t.muted));
+  } catch (e) {
+    // 参加者一覧の取得自体に失敗した場合は判定不能。誤検知で録音開始を
+    // ブロックしてしまう方が実害が大きいため、安全側でtrue(あるとみなす)を返す。
+    console.warn(`[録音開始前チェック] 参加者一覧の取得に失敗しました: ${e.message}`);
+    return true;
+  }
+}
 
 /**
  * GCSアップロード用サービスアカウントの認証情報(JSON文字列)を読み込む。
@@ -109,6 +135,16 @@ router.post(
     const roomRef = db.collection('rooms').doc(roomId);
 
     try {
+      // Firestoreの仮登録・Egress API呼び出しより前に検証する。ここでブロックすれば
+      // recording.active:true の書き込みや実際のEgress起動を一切発生させずに済む。
+      if (!(await hasActiveAudioTrack(roomId))) {
+        return res.status(409).json({
+          error:
+            '録音を開始できません: 現在ルーム内で発話しているユーザーがいません。誰か1人がPTTボタンを押して発話している状態で開始してください',
+          code: 'no_active_audio_track',
+        });
+      }
+
       const alreadyActive = await db.runTransaction(async (tx) => {
         const snap = await tx.get(roomRef);
         if (!snap.exists) {
@@ -307,13 +343,37 @@ router.get(
         return res.status(404).json({ error: '録音が見つかりません' });
       }
       const recording = snap.data();
-      if (!recording.filepath) {
-        return res.status(409).json({ error: 'このファイルはまだアップロードが完了していません' });
+
+      // [重要] filepathはrecording/start時点(=アップロード成功が確定する前)に
+      // 仮登録される値であり、webhooks.jsのhandleEgressEndedはstatusに関わらず
+      // filepathをそのままrecordings履歴へコピーする。そのため
+      // EGRESS_ABORTED/EGRESS_FAILEDのように録音が実際には完了しなかった
+      // ケースでもfilepathは非nullのままであり、filepathの有無だけでは
+      // 「ダウンロード可能かどうか」を判定できない。必ずstatusも確認する。
+      if (!recording.filepath || recording.status !== 'EGRESS_COMPLETE') {
+        return res.status(409).json({
+          error: `この録音は正常に完了しなかったため、ダウンロードできません(status: ${recording.status ?? '不明'})`,
+          code: 'recording_not_downloadable',
+        });
       }
 
       const storage = new Storage({ credentials: JSON.parse(loadGcsCredentials()) });
       const bucket = storage.bucket(process.env.RECORDING_GCS_BUCKET);
-      const [url] = await bucket.file(recording.filepath).getSignedUrl({
+      const file = bucket.file(recording.filepath);
+
+      // [念のための実在確認] statusがEGRESS_COMPLETEであっても、保存先の
+      // ライフサイクルポリシー等により実体が既に存在しない可能性はゼロでは
+      // ないため、署名付きURLを発行する前に実在を確認し、存在しないファイルへの
+      // URLを誤って返さないようにする(NoSuchKeyの再発防止)。
+      const [exists] = await file.exists();
+      if (!exists) {
+        return res.status(404).json({
+          error: '録音ファイルの実体が見つかりません(保存先から削除された可能性があります)',
+          code: 'recording_file_missing',
+        });
+      }
+
+      const [url] = await file.getSignedUrl({
         version: 'v4',
         action: 'read',
         expires: Date.now() + 5 * 60 * 1000,
