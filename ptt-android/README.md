@@ -96,5 +96,3 @@ Android Studio で `ptt-android/` をプロジェクトとして開き、Gradle 
 - バックグラウンドでの送受話継続には非対応。`AndroidManifest.xml` に
   `FOREGROUND_SERVICE_MICROPHONE` 権限は宣言済みだが、実際のフォアグラウンドサービス化
   (通知の表示・`Service`の実装)はまだ行っていない。
-- ネットワーク状況によるジッターバッファ等の音質チューニングはLiveKit SDKの
-  デフォルト挙動に任せている。
