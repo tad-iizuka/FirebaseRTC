@@ -85,14 +85,6 @@ Android Studio で `ptt-android/` をプロジェクトとして開き、Gradle 
 
 ## 既知の制約・次の改善ポイント(iOS版と共通)
 
-- 送話ロック(`token-server/routes/talk.js` の `/talk/start` 等)はまだAndroid側から
-  呼び出していない。現状は複数人が同時にマイクを有効化できてしまうため、
-  Web版と同じ排他制御をUIに組み込む場合は `PTTApp.kt` の `TalkArea` から
-  `/rooms/:roomId/talk/{start,heartbeat,stop}` を呼ぶ処理を追加する必要がある。
-- BAN・通報機能のUIは未実装(iOS版でも同様に未実装)。追加する場合は
-  Web版(`ptt-client/public/index.html`)の `banParticipant`/`reportParticipant` を参考に、
-  `myRole` の取得(`rooms/{roomId}/members/{uid}` の読み取り)とBANリアルタイム監視
-  (`addSnapshotListener`)を実装する。
 - バックグラウンドでの送受話継続には非対応。`AndroidManifest.xml` に
   `FOREGROUND_SERVICE_MICROPHONE` 権限は宣言済みだが、実際のフォアグラウンドサービス化
   (通知の表示・`Service`の実装)はまだ行っていない。
