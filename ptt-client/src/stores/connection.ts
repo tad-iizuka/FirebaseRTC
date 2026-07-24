@@ -52,6 +52,13 @@ export const useConnectionStore = defineStore('connection', () => {
   const isSending = ref(false)
   /** サーバー(routes/talk.js)がRoom Metadataに書き込む現在の発話ロック保持者。 */
   const currentTalkerUid = ref<string | null>(null)
+  // [録音の開示]
+  // サーバー(routes/recording.js)は録音中であることを同意の観点で必須の情報として
+  // 扱っており、talkLockと同じRoom Metadataの仕組みで全参加者へブロードキャストする
+  // (token-server/lib/roomMetadata.js)。ここで受信・保持し、全クライアントの画面に
+  // 「録音中である」ことを常時表示できるようにする。
+  const isRecording = ref(false)
+  const recordingStartedAt = ref<number | null>(null)
 
   const isConnected = computed(() => statusKind.value === 'connected')
 
@@ -84,8 +91,12 @@ export const useConnectionStore = defineStore('connection', () => {
     try {
       const parsed = metadata ? (JSON.parse(metadata) as RoomMetadataPayload) : null
       currentTalkerUid.value = parsed?.currentTalker ?? null
+      isRecording.value = parsed?.recording?.active ?? false
+      recordingStartedAt.value = parsed?.recording?.startedAt ?? null
     } catch {
       currentTalkerUid.value = null
+      isRecording.value = false
+      recordingStartedAt.value = null
     }
   }
 
@@ -107,6 +118,8 @@ export const useConnectionStore = defineStore('connection', () => {
           statusMessage.value = t('log.disconnectedState')
           stopTalkHeartbeat()
           currentTalkerUid.value = null
+          isRecording.value = false
+          recordingStartedAt.value = null
           participants.value = new Map()
         } else if (state === ConnectionState.Reconnecting) {
           statusKind.value = 'reconnecting'
@@ -116,7 +129,12 @@ export const useConnectionStore = defineStore('connection', () => {
       })
       .on(RoomEvent.RoomMetadataChanged, (metadata: string | undefined) => {
         applyMetadata(metadata)
-        appendLog(t('log.metadataUpdate', { uid: currentTalkerUid.value ?? 'null' }))
+        appendLog(
+          t('log.metadataUpdate', {
+            uid: currentTalkerUid.value ?? 'null',
+            recording: isRecording.value,
+          }),
+        )
       })
       .on(RoomEvent.ParticipantConnected, (p: RemoteParticipant) => {
         appendLog(t('log.participantJoined', { name: p.name || p.identity }))
@@ -241,6 +259,8 @@ export const useConnectionStore = defineStore('connection', () => {
     participants.value = new Map()
     isSending.value = false
     currentTalkerUid.value = null
+    isRecording.value = false
+    recordingStartedAt.value = null
     roomName.value = null
     statusKind.value = 'disconnected'
     statusMessage.value = null
@@ -339,6 +359,8 @@ export const useConnectionStore = defineStore('connection', () => {
     logLines,
     isSending,
     currentTalkerUid,
+    isRecording,
+    recordingStartedAt,
     isConnected,
     pttDisabledFor,
     connect,

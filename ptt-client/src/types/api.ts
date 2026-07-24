@@ -35,6 +35,16 @@ export interface ChatSendResponse {
   messageId: string
 }
 
+export interface RecordingStartResponse {
+  started: true
+  egressId: string
+}
+
+export interface RecordingStopResponse {
+  stopping?: true
+  stopped?: true
+}
+
 export interface BanResponse {
   roomId: string
   targetUid: string

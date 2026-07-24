@@ -69,6 +69,17 @@
     "reportPromptLabel": "{name} を通報する理由を入力してください",
     "reportError": "通報エラー: {message}"
   },
+  "recording": {
+    "badge": "録音中",
+    "consentNotice": "この通話は録音されています。参加を続けることで、録音への同意とみなされます。",
+    "start": "録音を開始",
+    "starting": "開始中...",
+    "stop": "録音を停止",
+    "stopping": "停止中...",
+    "startConfirmTitle": "録音を開始しますか?",
+    "startConfirmDescription": "開始すると、全参加者の画面に録音中であることが通知されます。\n参加者から必要な同意を得た上で開始してください。",
+    "startConfirmLabel": "録音を開始する"
+  },
   "status": {
     "disconnected": "サーバ未接続",
     "connecting": "接続中...",
@@ -115,7 +126,7 @@
     "tokenRefreshFailed": "トークン更新失敗",
     "connectionState": "接続状態: {state}",
     "disconnectedState": "切断されました",
-    "metadataUpdate": "[診断] メタデータ更新受信: currentTalker={uid}",
+    "metadataUpdate": "[診断] メタデータ更新受信: currentTalker={uid}, recording={recording}",
     "participantJoined": "参加: {name}",
     "participantLeft": "退出: {name}",
     "trackSubscribed": "音声トラック購読開始: {name}",

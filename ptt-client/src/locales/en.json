@@ -69,6 +69,17 @@
     "reportPromptLabel": "Enter the reason for reporting {name}",
     "reportError": "Report error: {message}"
   },
+  "recording": {
+    "badge": "Recording",
+    "consentNotice": "This call is being recorded. By continuing to participate, you consent to being recorded.",
+    "start": "Start recording",
+    "starting": "Starting...",
+    "stop": "Stop recording",
+    "stopping": "Stopping...",
+    "startConfirmTitle": "Start recording?",
+    "startConfirmDescription": "Starting will notify all participants on their screen that recording is in progress.\nMake sure you have obtained any necessary consent from participants before starting.",
+    "startConfirmLabel": "Start recording"
+  },
   "status": {
     "disconnected": "Not connected to server",
     "connecting": "Connecting...",
@@ -115,7 +126,7 @@
     "tokenRefreshFailed": "Token refresh failed",
     "connectionState": "Connection state: {state}",
     "disconnectedState": "Disconnected",
-    "metadataUpdate": "[Diag] Metadata update received: currentTalker={uid}",
+    "metadataUpdate": "[Diag] Metadata update received: currentTalker={uid}, recording={recording}",
     "participantJoined": "Joined: {name}",
     "participantLeft": "Left: {name}",
     "trackSubscribed": "Audio track subscription started: {name}",

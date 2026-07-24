@@ -8,10 +8,12 @@ import { useRoomStore } from '@/stores/room'
 import { useBanStore } from '@/stores/ban'
 import { useChatStore } from '@/stores/chat'
 import { useConnectionStore, type ParticipantInfo } from '@/stores/connection'
+import { useRecordingStore } from '@/stores/recording'
 import Button from '@/components/ui/Button.vue'
 import StatusRow from '@/components/StatusRow.vue'
 import InviteBox from '@/components/InviteBox.vue'
 import PttButton from '@/components/PttButton.vue'
+import RecordingBar from '@/components/RecordingBar.vue'
 import ParticipantList from '@/components/ParticipantList.vue'
 import ChatPanel from '@/components/ChatPanel.vue'
 import LogPanel from '@/components/LogPanel.vue'
@@ -27,12 +29,14 @@ const roomStore = useRoomStore()
 const ban = useBanStore()
 const chat = useChatStore()
 const connection = useConnectionStore()
+const recording = useRecordingStore()
 
 const roomId = computed(() => String(route.params.roomId))
 const banTarget = ref<ParticipantInfo | null>(null)
 const banNotice = ref<string | null>(null)
 
 const canBan = computed(() => ban.myRole === 'owner' || ban.myRole === 'moderator')
+const canControlRecording = computed(() => ban.myRole === 'owner' || ban.myRole === 'moderator')
 const pttDisabled = computed(() => connection.pttDisabledFor(auth.currentUser?.uid))
 const lockedByName = computed(() => {
   const uid = connection.currentTalkerUid
@@ -98,6 +102,21 @@ async function reportParticipant(p: ParticipantInfo) {
   }
 }
 
+async function startRecording() {
+  try {
+    await recording.startRecording(settings.tokenServerUrl, roomId.value)
+  } catch {
+    // recording.errorMessage に理由がセットされているのでUIには既に反映済み
+  }
+}
+async function stopRecording() {
+  try {
+    await recording.stopRecording(settings.tokenServerUrl, roomId.value)
+  } catch {
+    // recording.errorMessage に理由がセットされているのでUIには既に反映済み
+  }
+}
+
 async function sendChat(text: string) {
   try {
     await chat.sendMessage(settings.tokenServerUrl, roomId.value, text)
@@ -119,6 +138,16 @@ onUnmounted(() => {
     <p v-if="banNotice" class="px-5 py-2 text-xs text-destructive">{{ banNotice }}</p>
 
     <StatusRow :kind="connection.statusKind" :message="connection.statusMessage" :room-id="roomId" />
+    <RecordingBar
+      :is-recording="connection.isRecording"
+      :started-at="connection.recordingStartedAt"
+      :can-control="canControlRecording"
+      :starting="recording.starting"
+      :stopping="recording.stopping"
+      :error-message="recording.errorMessage"
+      @start="startRecording"
+      @stop="stopRecording"
+    />
     <InviteBox :invite-code="roomStore.currentInviteCode" :room-id="roomId" />
 
     <div class="px-5 pb-0 pt-2">
