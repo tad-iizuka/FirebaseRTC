@@ -7,16 +7,24 @@
  * Webhookでしか確実に検知できない。そのため、Firestore上の
  * recording.active を false に確定させる処理はこのファイルに一本化する。
  *
- * egress_ended に加えて room_started(ルームに最初の参加者が入室した瞬間)も
- * 処理する。room_finished 等、他のイベントを今後扱う場合もこのファイルに
+ * egress_ended に加えて room_started・participant_joined も処理する。
+ * room_finished 等、他のイベントを今後扱う場合もこのファイルに
  * 追加していく想定。
  *
  * [Phase9で追加: 自動録音]
- * rooms/{roomId}.settings.autoRecording が true の場合、room_started
- * イベントを受けてrecording.jsのstartRecordingInternalを呼び、録音を
- * 自動開始する。「誰かの発話を検知してから録音開始」だとPTT特有のEgress起動
- * レイテンシ問題(頭切れ)を踏むため、ルームがアクティブになった最も早い
- * タイミングで開始しておく設計にしている(詳細はrecording.js冒頭のコメント参照)。
+ * rooms/{roomId}.settings.autoRecording が true の場合、録音を自動開始する。
+ * 「誰かの発話を検知してから録音開始」だとPTT特有のEgress起動レイテンシ問題
+ * (頭切れ)を踏むため、ルームがアクティブになった最も早いタイミングで
+ * 開始しておく設計にしている(詳細はrecording.js冒頭のコメント参照)。
+ *
+ * [重要] トリガーには room_started だけでなく participant_joined も
+ * 必要。room_started は「誰もいない状態から最初の1人が入室した瞬間」
+ * にしか発火しない。「1人目が入室した後にautoRecordingをONにし、
+ * その後2人目が入室する」というよくある運用では room_started は
+ * 発火せず(参加者2人目以降は participant_joined のみ)、これが無いと
+ * 録音が始まらなかった。両イベントとも同じ handleAutoRecordingTrigger を
+ * 呼び、既に録音中なら startRecordingInternal 側の冪等性(Firestore
+ * トランザクション)で二重起動を防いでいる。
  *
  * [重要] WebhookReceiver.receive() は署名検証のため「生のリクエストボディ
  * 文字列」を必要とする。server.js側でこのルートにだけ express.json() より
@@ -63,8 +71,8 @@ router.post('/livekit', async (req, res) => {
   try {
     if (event.event === 'egress_ended') {
       await handleEgressEnded(event.egressInfo);
-    } else if (event.event === 'room_started') {
-      await handleRoomStarted(event.room);
+    } else if (event.event === 'room_started' || event.event === 'participant_joined') {
+      await handleAutoRecordingTrigger(event.room);
     }
     // 他のイベント種別は現状無視する。
   } catch (e) {
@@ -154,20 +162,27 @@ async function handleEgressEnded(egressInfo) {
 }
 
 /**
- * room_startedイベントの処理本体。
+ * room_started / participant_joined イベント共通の処理本体。
  *
- * ルームに最初の参加者が入室し、LiveKit側でルームが実体化した瞬間に届く。
  * rooms/{roomId}.settings.autoRecording が true の場合のみ、ここで
  * 録音を自動開始する(routes/rooms.js の PATCH /:roomId/settings で
  * on/offを切り替え可能)。
  *
- * 既に録音中(手動開始と競合した等)の場合は startRecordingInternal が
- * 黙って null を返すので、ここでもエラー扱いにしない(冪等)。
+ * - room_started: ルームに最初の参加者が入室し、LiveKit側でルームが
+ *   実体化した瞬間に届く(空室→非空室の遷移でのみ発火)。
+ * - participant_joined: 2人目以降も含め、誰かが入室するたびに届く。
+ *   「1人目入室後にautoRecordingをONにし、その後2人目が入室する」
+ *   ケースをカバーするために必要(room_startedだけでは拾えない)。
+ *
+ * 既に録音中(手動開始・別イベント経由の自動開始と競合した等)の場合は
+ * startRecordingInternal が黙って null を返すので、ここでもエラー扱いに
+ * しない(冪等)。参加者が入室するたびに毎回呼ばれる想定のため、この
+ * 冪等性がないと入室者数だけEgressが起動してしまう。
  *
  * この処理が失敗してもWebhookエンドポイント自体は200を返す
  * (LiveKit側の不要な再送ループを避けるため。egress_ended同様の方針)。
  */
-async function handleRoomStarted(roomInfo) {
+async function handleAutoRecordingTrigger(roomInfo) {
   const roomId = roomInfo?.name;
   if (!roomId) return;
 
@@ -177,6 +192,7 @@ async function handleRoomStarted(roomInfo) {
 
   const room = snap.data();
   if (!room.settings?.autoRecording) return;
+  if (room.recording && room.recording.active) return; // 既に録音中なら何もしない(無駄なFirestoreトランザクションを避ける)
 
   try {
     const result = await startRecordingInternal(roomId, {
