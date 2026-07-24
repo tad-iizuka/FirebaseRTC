@@ -9,16 +9,21 @@ const { t } = useI18n()
 const props = defineProps<{
   isRecording: boolean
   startedAt: number | null
-  /** owner/moderatorのみ true。開始/停止ボタンの表示可否。 */
+  /** owner/moderatorのみ true。開始/停止ボタン・自動録音トグルの表示可否。 */
   canControl: boolean
   starting: boolean
   stopping: boolean
   errorMessage: string | null
+  /** null = まだ取得できていない(入室直後の一瞬)。 */
+  autoRecording: boolean | null
+  autoRecordingLoading: boolean
+  autoRecordingErrorMessage: string | null
 }>()
 
 const emit = defineEmits<{
   start: []
   stop: []
+  'update-auto-recording': [value: boolean]
 }>()
 
 const showStartConfirm = ref(false)
@@ -54,6 +59,10 @@ function onConfirmStart() {
   showStartConfirm.value = false
   emit('start')
 }
+function onToggleAutoRecording() {
+  if (props.autoRecording === null || props.autoRecordingLoading) return
+  emit('update-auto-recording', !props.autoRecording)
+}
 </script>
 
 <template>
@@ -74,7 +83,21 @@ function onConfirmStart() {
       <span class="basis-full text-[11px] text-muted-foreground sm:basis-auto">{{ t('recording.consentNotice') }}</span>
     </div>
 
-    <div v-if="canControl" class="flex items-center gap-2 px-5 pb-0 pt-2">
+    <!-- [同意表示: 自動録音の事前開示] まだ録音は始まっていないが、次に誰かが
+         入室した瞬間に自動的に録音が始まるルームであることを、ロールに
+         関わらず全員へ常時開示する(録音中バナーと同じ同意の考え方)。 -->
+    <div
+      v-else-if="autoRecording"
+      role="status"
+      class="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-amber-500/40 bg-amber-500/10 px-5 py-2.5 text-xs text-amber-500"
+    >
+      <span class="font-semibold">{{ t('recording.autoRecordingBadge') }}</span>
+      <span class="basis-full text-[11px] text-muted-foreground sm:basis-auto">{{
+        t('recording.autoRecordingNotice')
+      }}</span>
+    </div>
+
+    <div v-if="canControl" class="flex flex-wrap items-center gap-2 px-5 pb-0 pt-2">
       <Button
         v-if="!isRecording"
         variant="secondary"
@@ -87,7 +110,22 @@ function onConfirmStart() {
       <Button v-else variant="destructive" size="sm" :disabled="stopping" @click="emit('stop')">
         {{ stopping ? t('recording.stopping') : t('recording.stop') }}
       </Button>
+
+      <Button
+        variant="secondary"
+        size="sm"
+        :disabled="autoRecording === null || autoRecordingLoading"
+        @click="onToggleAutoRecording"
+      >
+        {{
+          autoRecording
+            ? t('recording.autoRecordingToggleOn')
+            : t('recording.autoRecordingToggleOff')
+        }}
+      </Button>
+
       <p v-if="errorMessage" class="text-xs text-destructive">{{ errorMessage }}</p>
+      <p v-if="autoRecordingErrorMessage" class="text-xs text-destructive">{{ autoRecordingErrorMessage }}</p>
     </div>
 
     <ConfirmDialog

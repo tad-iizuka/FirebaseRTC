@@ -14,6 +14,7 @@ export interface CreateRoomResponse {
 export interface JoinRoomResponse {
   roomId: string
   joined: true
+  autoRecording: boolean
 }
 
 export interface TokenResponse {
@@ -43,6 +44,17 @@ export interface RecordingStartResponse {
 export interface RecordingStopResponse {
   stopping?: true
   stopped?: true
+}
+
+export interface RecordingStatusResponse {
+  active: boolean
+  startedAt: number | null
+  autoRecording: boolean
+}
+
+export interface RoomSettingsResponse {
+  roomId: string
+  autoRecording: boolean
 }
 
 export interface BanResponse {

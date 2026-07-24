@@ -49,6 +49,9 @@ async function enter() {
   banNotice.value = null
   await ban.start(roomId.value, auth.currentUser?.uid ?? '')
   chat.start(roomId.value)
+  // [Phase9] /join を経由しない再入室や、入室後に他のowner/moderatorが
+  // 設定を変更した場合にも対応できるよう、入室のたびに最新値を取り直す。
+  roomStore.fetchAutoRecording(settings.tokenServerUrl, roomId.value)
   await connection.connect({
     tokenServerUrlValue: settings.tokenServerUrl,
     livekitUrlValue: settings.livekitUrl,
@@ -116,6 +119,13 @@ async function stopRecording() {
     // recording.errorMessage に理由がセットされているのでUIには既に反映済み
   }
 }
+async function toggleAutoRecording(value: boolean) {
+  try {
+    await roomStore.setAutoRecording(settings.tokenServerUrl, roomId.value, value)
+  } catch {
+    // roomStore.autoRecordingErrorMessage に理由がセットされているのでUIには既に反映済み
+  }
+}
 
 async function sendChat(text: string) {
   try {
@@ -145,8 +155,12 @@ onUnmounted(() => {
       :starting="recording.starting"
       :stopping="recording.stopping"
       :error-message="recording.errorMessage"
+      :auto-recording="roomStore.autoRecording"
+      :auto-recording-loading="roomStore.autoRecordingLoading"
+      :auto-recording-error-message="roomStore.autoRecordingErrorMessage"
       @start="startRecording"
       @stop="stopRecording"
+      @update-auto-recording="toggleAutoRecording"
     />
     <InviteBox :invite-code="roomStore.currentInviteCode" :room-id="roomId" />
 

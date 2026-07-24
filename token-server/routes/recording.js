@@ -272,6 +272,12 @@ router.post(
  * GET /rooms/:roomId/recording/status
  * 現在の録音状態を確認する(ポーリング用途。通常はRoom Metadata経由の
  * リアルタイム通知で十分だが、入室直後の初期表示等で使うことを想定)。
+ *
+ * [Phase9] settings.autoRecording も併せて返す。/join のレスポンスは
+ * 「招待コードで新規参加した瞬間」にしか autoRecording を返せないため、
+ * 保存済みルームへの再入室時にも設定状態を取得できるよう、入室のたびに
+ * 呼ばれるこのエンドポイントに持たせている(ptt-client/src/stores/room.ts
+ * の fetchAutoRecording 参照)。
  */
 router.get(
   '/:roomId/recording/status',
@@ -283,10 +289,12 @@ router.get(
       if (!snap.exists) {
         return res.status(404).json({ error: 'ルームが見つかりません' });
       }
-      const recording = snap.data().recording || { active: false };
+      const room = snap.data();
+      const recording = room.recording || { active: false };
       res.json({
         active: !!recording.active,
         startedAt: recording.startedAt?.toMillis?.() ?? null,
+        autoRecording: !!room.settings?.autoRecording,
       });
     } catch (e) {
       console.error('[録音状態取得エラー]', e.message);

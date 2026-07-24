@@ -78,7 +78,11 @@
     "stopping": "Stopping...",
     "startConfirmTitle": "Start recording?",
     "startConfirmDescription": "Starting will notify all participants on their screen that recording is in progress.\nMake sure you have obtained any necessary consent from participants before starting.",
-    "startConfirmLabel": "Start recording"
+    "startConfirmLabel": "Start recording",
+    "autoRecordingBadge": "Auto-recording: on",
+    "autoRecordingNotice": "This room automatically starts recording as soon as someone joins. By continuing to participate, you consent to being recorded.",
+    "autoRecordingToggleOn": "Auto-recording: ON",
+    "autoRecordingToggleOff": "Auto-recording: OFF"
   },
   "status": {
     "disconnected": "Not connected to server",
