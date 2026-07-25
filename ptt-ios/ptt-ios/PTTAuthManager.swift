@@ -76,6 +76,22 @@ final class PTTAuthManager: NSObject, ObservableObject {
         }
     }
 
+    /// [Phase10: Guestロール]
+    /// Firebase匿名認証でサインインする。Web版(stores/auth.ts)のsignInAsGuestに相当。
+    /// token-server側(routes/rooms.js の POST /:roomId/join)がIDトークンの
+    /// firebase.sign_in_provider を見て自動的にrole:'guest'を割り当てるため、
+    /// クライアント側は「匿名でサインインする」以外に特別なパラメータを送る必要はない。
+    func signInAsGuest() async {
+        lastErrorMessage = nil
+        isSigningIn = true
+        defer { isSigningIn = false }
+        do {
+            try await Auth.auth().signInAnonymously()
+        } catch {
+            lastErrorMessage = String(format: NSLocalizedString("ゲストサインインエラー: %@", comment: "Guest sign-in error"), error.localizedDescription)
+        }
+    }
+
     func signOut() {
         do {
             try Auth.auth().signOut()

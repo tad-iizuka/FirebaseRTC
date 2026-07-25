@@ -60,6 +60,9 @@ struct ContentView: View {
     /// テキスト入力欄付きのalertダイアログで理由を入力させる。
     @State private var reportTarget: PTTParticipantInfo?
     @State private var reportReasonText: String = ""
+    /// [Phase10: Guestロール] ニックネーム編集中かどうか、および編集中のテキスト。
+    @State private var isEditingNickname = false
+    @State private var nicknameDraft: String = ""
 
     var body: some View {
         Group {
@@ -74,6 +77,7 @@ struct ContentView: View {
                             authSection
                         } else if activeRoomId != nil {
                             statusRow
+                            guestStatusSection
                             recordingSection
                             inviteBox
                             voiceSection
@@ -164,6 +168,25 @@ struct ContentView: View {
             .foregroundColor(.pttAccent)
             .disabled(auth.isSigningIn)
 
+            // [Phase10: Guestロール] Firebase匿名認証でサインインする。
+            // 以降のルーム参加フロー(招待コード必須)は他のサインイン方法と全く同じ。
+            Button {
+                Task { await auth.signInAsGuest() }
+            } label: {
+                Text(String(localized: "ゲストとして参加"))
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 9)
+            }
+            .buttonStyle(.plain)
+            .overlay(RoundedRectangle(cornerRadius: 2).stroke(.pttLine, lineWidth: 1))
+            .foregroundColor(.pttMuted)
+            .disabled(auth.isSigningIn)
+
+            Text("ゲストは登録不要ですが、送信内容や参加履歴は削除されず保持されます。")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.pttMuted)
+
             if let message = auth.lastErrorMessage {
                 Text(message)
                     .font(.system(size: 11, design: .monospaced))
@@ -182,7 +205,7 @@ struct ContentView: View {
                 .foregroundColor(.pttMuted)
             Spacer()
             if auth.currentUser != nil {
-                Text(auth.displayName ?? "")
+                Text(headerDisplayName)
                     .font(.system(size: 12, design: .monospaced))
                     .lineLimit(1)
                 Button("サインアウト") {
@@ -198,6 +221,17 @@ struct ContentView: View {
                 .font(.system(size: 13, design: .monospaced))
         }
         .padding(14)
+    }
+
+    /// ヘッダーに表示する名前。Google/Appleサインインならプロフィール名/メール、
+    /// Guest(匿名認証)の場合はauth.displayNameがnilになるため、入室中ならニックネーム、
+    /// 未入室ならラベル文字列にフォールバックする。
+    private var headerDisplayName: String {
+        if let name = auth.displayName { return name }
+        if auth.currentUser?.isAnonymous == true {
+            return ban.myDisplayName ?? String(localized: "ゲスト")
+        }
+        return ""
     }
 
     private var channelLabel: String {
@@ -261,21 +295,31 @@ struct ContentView: View {
             field(label: "トークンサーバーURL", text: $tokenServerURL)
             field(label: "LiveKit URL (wss://)", text: $livekitURL)
 
-            Button(action: handleCreateRoom) {
-                Text(roomManager.isWorking ? String(localized: "作成中...") : String(localized: "新しいルームを作成する"))
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 9)
-            }
-            .buttonStyle(.plain)
-            .overlay(RoundedRectangle(cornerRadius: 2).stroke(Color.pttAccent, lineWidth: 1))
-            .foregroundColor(.pttAccent)
-            .disabled(roomManager.isWorking)
+            // [Phase10: Guestロール] 匿名認証ユーザーがルームを作成すると、
+            // 本人確認のできないownerが永続的に残ってしまう(Guestの「一時参加」という
+            // 設計思想と矛盾する)ため、Guestには「ルームを作成」自体を見せない。
+            // token-server側(POST /rooms)はrole判定をしないため、この制御はクライアント側のみ。
+            if auth.currentUser?.isAnonymous != true {
+                Button(action: handleCreateRoom) {
+                    Text(roomManager.isWorking ? String(localized: "作成中...") : String(localized: "新しいルームを作成する"))
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 9)
+                }
+                .buttonStyle(.plain)
+                .overlay(RoundedRectangle(cornerRadius: 2).stroke(Color.pttAccent, lineWidth: 1))
+                .foregroundColor(.pttAccent)
+                .disabled(roomManager.isWorking)
 
-            Text("— または —")
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundColor(.pttMuted)
-                .frame(maxWidth: .infinity)
+                Text("— または —")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.pttMuted)
+                    .frame(maxWidth: .infinity)
+            } else {
+                Text("ゲストはルームを作成できません。招待コードで既存のルームに参加してください。")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.pttMuted)
+            }
 
             HStack(spacing: 10) {
                 field(label: "ルームID", text: $joinRoomId, placeholder: "招待された側が入力")
@@ -341,6 +385,83 @@ struct ContentView: View {
             }
             .font(.system(size: 11, design: .monospaced))
             .foregroundColor(.pttMuted)
+        }
+    }
+
+    // MARK: - Guest status (Phase10: Guestロール 5.1)
+
+    /// 自分がGuest(匿名認証)の場合のみ表示するバッジ+ニックネーム変更UI。
+    /// 他の参加者がGuestかどうかはこのクライアントからは判定できない
+    /// (firestore.rulesにより自分自身のmembersドキュメントしか読めないため)ので、
+    /// ここで扱うのは常に自分自身の状態のみ。Web版のGuestStatusBar.vueに相当。
+    @ViewBuilder
+    private var guestStatusSection: some View {
+        if ban.myRole == "guest" {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Text("ゲスト")
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .overlay(RoundedRectangle(cornerRadius: 2).stroke(Color.pttAccent, lineWidth: 1))
+                        .foregroundColor(.pttAccent)
+
+                    if isEditingNickname {
+                        TextField("ニックネーム", text: $nicknameDraft)
+                            .font(.system(size: 12, design: .monospaced))
+                            .padding(6)
+                            .background(.pttPanel.opacity(0.6))
+                            .frame(maxWidth: 160)
+                            .onSubmit { submitNicknameChange() }
+
+                        Button(ban.nicknameUpdating ? String(localized: "保存中...") : String(localized: "保存")) {
+                            submitNicknameChange()
+                        }
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.pttAccent)
+                        .disabled(ban.nicknameUpdating)
+
+                        Button(String(localized: "キャンセル")) {
+                            isEditingNickname = false
+                        }
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.pttMuted)
+                    } else {
+                        Text(ban.myDisplayName ?? String(localized: "ニックネーム未設定"))
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundColor(.pttMuted)
+
+                        Button(String(localized: "ニックネームを変更")) {
+                            nicknameDraft = ban.myDisplayName ?? ""
+                            isEditingNickname = true
+                        }
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.pttMuted)
+                    }
+                }
+
+                if let message = ban.nicknameErrorMessage {
+                    Text(message)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.pttDanger)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.bottom, 10)
+        }
+    }
+
+    private func submitNicknameChange() {
+        let trimmed = nicknameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let roomId = activeRoomId else { return }
+        isEditingNickname = false
+        Task {
+            do {
+                let idToken = try await auth.fetchIDToken()
+                try await ban.updateNickname(tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId, displayName: trimmed)
+            } catch {
+                // ban.nicknameErrorMessage に理由がセットされているのでUIには既に反映済み
+            }
         }
     }
 
