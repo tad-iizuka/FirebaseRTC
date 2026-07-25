@@ -17,6 +17,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.LaunchedEffect
@@ -25,6 +28,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import co.ubunifu.pttandroid.auth.PTTAuthManager
@@ -90,7 +94,12 @@ class MainActivity : ComponentActivity() {
 
             MaterialTheme {
                 Surface {
-                    Box {
+                    // targetSdk 35(Android 15)ではデフォルトでedge-to-edge描画になり、
+                    // 何もしないとヘッダー行がステータスバー/カメラのくり抜き部分と重なって
+                    // しまう(サインアウト操作が押せなくなる不具合の原因)。safeDrawing insetsを
+                    // 明示的に余白として消費し、ノッチ・ステータスバー・ナビゲーションバーの
+                    // 内側にコンテンツ全体を収める。
+                    Box(modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
                         PTTApp(
                             authManager = authManager,
                             roomManager = roomManager,
