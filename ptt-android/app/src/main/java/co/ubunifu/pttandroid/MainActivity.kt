@@ -32,6 +32,8 @@ import co.ubunifu.pttandroid.ban.PTTBanStore
 import co.ubunifu.pttandroid.chat.PTTChatStore
 import co.ubunifu.pttandroid.connection.PTTConnectionManager
 import co.ubunifu.pttandroid.onboarding.PTTOnboardingStore
+import co.ubunifu.pttandroid.recording.PTTRecordingStore
+import co.ubunifu.pttandroid.report.PTTReportStore
 import co.ubunifu.pttandroid.room.PTTRoomManager
 import co.ubunifu.pttandroid.room.PTTSavedRoomsStore
 import co.ubunifu.pttandroid.ui.PTTApp
@@ -74,6 +76,8 @@ class MainActivity : ComponentActivity() {
             val connectionManager = remember { PTTConnectionManager(applicationContext, scope) }
             val chatStore = remember { PTTChatStore(applicationContext) }
             val banStore = remember { PTTBanStore(applicationContext) }
+            val recordingStore = remember { PTTRecordingStore(applicationContext) }
+            val reportStore = remember { PTTReportStore(applicationContext) }
             // [オンボーディング] 初回起動時のスワイプ形式チュートリアルの完了状態
             // (SharedPreferencesベース。Web版のonboarding.ts/iOS版のPTTOnboardingStore.swiftと同じ設計)。
             val onboardingStore = remember { PTTOnboardingStore(applicationContext) }
@@ -94,6 +98,8 @@ class MainActivity : ComponentActivity() {
                             connectionManager = connectionManager,
                             chatStore = chatStore,
                             banStore = banStore,
+                            recordingStore = recordingStore,
+                            reportStore = reportStore,
                             onboardingStore = onboardingStore,
                             onRequestGoogleSignIn = { signInLauncher.launch(authManager.signInIntent()) },
                         )

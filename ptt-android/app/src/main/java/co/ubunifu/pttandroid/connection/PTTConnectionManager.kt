@@ -94,6 +94,16 @@ class PTTConnectionManager(
     private val _currentTalkerUid = MutableStateFlow<String?>(null)
     val currentTalkerUid: StateFlow<String?> = _currentTalkerUid
 
+    // [録音UI] サーバー(routes/recording.js)がLiveKitのRoom Metadataに書き込む
+    // recording.active。true の間は全参加者への開示バナーを表示する
+    // (Web版RecordingBar.vue・iOS版PTTConnectionManager.swiftと同じ「同意表示」の考え方)。
+    private val _isRecording = MutableStateFlow(false)
+    val isRecording: StateFlow<Boolean> = _isRecording
+
+    // 録音開始時刻(経過時間表示にのみ使う。epoch millis)。isRecordingがfalseの間は常にnull。
+    private val _recordingStartedAt = MutableStateFlow<Long?>(null)
+    val recordingStartedAt: StateFlow<Long?> = _recordingStartedAt
+
     private var room: Room? = null
     private var tokenServerUrl: String = ""
     private var livekitUrl: String = ""
@@ -139,6 +149,8 @@ class PTTConnectionManager(
         this.idTokenProvider = idTokenProvider
         _status.value = ConnectionStatus.Connecting
         _currentTalkerUid.value = null
+        _isRecording.value = false
+        _recordingStartedAt.value = null
 
         scope.launch {
             try {
@@ -155,10 +167,11 @@ class PTTConnectionManager(
                 // (トラックは作られるが送信されない = ボタンを押すまで無音)
                 newRoom.localParticipant.setMicrophoneEnabled(false)
 
-                // 接続時点で既に誰かが発話ロックを保持していた場合に備え、room.metadataから
-                // 初期状態を読み込む(RoomMetadataChangedは「変化した瞬間」のイベントなので、
-                // 接続前からの既存状態は別途拾う必要がある。Web版/iOS版と同じ理由)。
-                _currentTalkerUid.value = parseCurrentTalker(newRoom.metadata)
+                // 接続時点で既に誰かが発話ロックを保持していた場合や、既に録音中だった場合に
+                // 備え、room.metadataから初期状態を読み込む(RoomMetadataChangedは
+                // 「変化した瞬間」のイベントなので、接続前からの既存状態は別途拾う必要がある。
+                // Web版/iOS版と同じ理由)。
+                applyMetadata(newRoom.metadata)
 
                 // 接続時点ですでに他の参加者がいる場合、参加後に発火するイベントだけでは
                 // 拾えないため remoteParticipants から初期状態を取り込む。
@@ -202,6 +215,8 @@ class PTTConnectionManager(
             _participants.value = emptyMap()
             _isSending.value = false
             _currentTalkerUid.value = null
+            _isRecording.value = false
+            _recordingStartedAt.value = null
             _status.value = ConnectionStatus.Disconnected
             appendLog(appContext.getString(R.string.log_disconnected_by_user))
         }
@@ -341,18 +356,43 @@ class PTTConnectionManager(
     }
 
     /**
-     * LiveKitのRoom Metadata(JSON文字列)から currentTalker(uid) を取り出す。
-     * token-server/lib/roomMetadata.js が書き込む `{ currentTalker, recording, updatedAt }`
-     * の形式を前提にしている。パース失敗時はnull(=誰も発話中でない)として扱う。
+     * LiveKitのRoom Metadata(JSON文字列)から現在の送話ロック保持者(currentTalker)と
+     * 録音状態(recording)を取り出して反映する。token-server/lib/roomMetadata.jsが書き込む
+     * `{ currentTalker, recording: { active, startedAt }, updatedAt }` の形式を前提にしている。
+     * パース失敗時は安全側(誰も発話中でない・録音していない)として扱う。
+     *
+     * [録音UI] startedAt はサーバーがUnix時刻(ms)として書き込む値。Web版のRecordingBar.vue・
+     * iOS版のPTTConnectionManager.swiftと同じく、「録音中かどうか」の確定判定自体は
+     * サーバー(Room Metadata)に委ねる(token-server/routes/recording.js冒頭のコメント参照。
+     * /recording/start・/recording/stop のレスポンス単体では確定状態と見なさない)。
      */
-    private fun parseCurrentTalker(metadata: String?): String? {
-        if (metadata.isNullOrEmpty()) return null
-        return try {
+    private fun applyMetadata(metadata: String?) {
+        if (metadata.isNullOrEmpty()) {
+            _currentTalkerUid.value = null
+            _isRecording.value = false
+            _recordingStartedAt.value = null
+            return
+        }
+        try {
             val json = JSONObject(metadata)
-            if (json.isNull("currentTalker")) return null
-            json.optString("currentTalker").takeIf { it.isNotEmpty() }
+            _currentTalkerUid.value = if (json.isNull("currentTalker")) {
+                null
+            } else {
+                json.optString("currentTalker").takeIf { it.isNotEmpty() }
+            }
+
+            val recording = json.optJSONObject("recording")
+            val active = recording?.optBoolean("active", false) ?: false
+            _isRecording.value = active
+            _recordingStartedAt.value = if (active && recording != null && !recording.isNull("startedAt")) {
+                recording.optLong("startedAt")
+            } else {
+                null
+            }
         } catch (e: Exception) {
-            null
+            _currentTalkerUid.value = null
+            _isRecording.value = false
+            _recordingStartedAt.value = null
         }
     }
 
@@ -402,6 +442,8 @@ class PTTConnectionManager(
                 _participants.value = emptyMap()
                 _isSending.value = false
                 _currentTalkerUid.value = null
+                _isRecording.value = false
+                _recordingStartedAt.value = null
                 room = null
                 if (_status.value !is ConnectionStatus.Error) {
                     _status.value = ConnectionStatus.Disconnected
@@ -420,9 +462,9 @@ class PTTConnectionManager(
                 if (_status.value !is ConnectionStatus.Error) {
                     _status.value = ConnectionStatus.Connected(roomName)
                 }
-                // 再接続の間に発話ロックの状態が変わっている可能性があるため、
+                // 再接続の間に発話ロックや録音の状態が変わっている可能性があるため、
                 // 最新のRoom Metadataから読み直しておく。
-                _currentTalkerUid.value = parseCurrentTalker(target.metadata)
+                applyMetadata(target.metadata)
             }
 
             is RoomEvent.FailedToConnect -> {
@@ -451,12 +493,19 @@ class PTTConnectionManager(
             }
 
             is RoomEvent.RoomMetadataChanged -> {
-                // routes/talk.js(→lib/roomMetadata.js)がRoomServiceClient.updateRoomMetadata()
-                // で書き込む { currentTalker, recording, updatedAt } の変化を受け取る。
+                // routes/talk.js・routes/recording.js(→lib/roomMetadata.js)が
+                // RoomServiceClient.updateRoomMetadata() で書き込む
+                // { currentTalker, recording, updatedAt } の変化を受け取る。
                 // イベント自体のペイロードのフィールド名はSDKバージョンで変わりうるため依存せず、
                 // 保持しているRoomオブジェクトの最新metadataを都度読み直す実装にしている。
-                _currentTalkerUid.value = parseCurrentTalker(target.metadata)
-                appendLog(appContext.getString(R.string.log_metadata_update, _currentTalkerUid.value ?: "null"))
+                applyMetadata(target.metadata)
+                appendLog(
+                    appContext.getString(
+                        R.string.log_metadata_update,
+                        _currentTalkerUid.value ?: "null",
+                        _isRecording.value.toString(),
+                    )
+                )
             }
 
             is RoomEvent.TrackMuted -> {

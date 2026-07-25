@@ -52,6 +52,24 @@
     <string name="room_ban_confirm_description">Ban %1$s from this room?\nThis action cannot be undone.</string>
     <string name="room_ban_confirm_label">Ban</string>
 
+    <!-- recording -->
+    <string name="recording_active_label">Recording</string>
+    <string name="recording_consent_notice">This room\'s audio is being recorded and can be reviewed by moderators.</string>
+    <string name="recording_start_button">Start Recording</string>
+    <string name="recording_starting">Starting...</string>
+    <string name="recording_stop_button">Stop Recording</string>
+    <string name="recording_stopping">Stopping...</string>
+    <string name="recording_start_confirm_title">Start recording?</string>
+    <string name="recording_start_confirm_description">All participants will be notified that the room is being recorded.</string>
+    <string name="recording_start_confirm_label">Start</string>
+
+    <!-- report -->
+    <string name="report_button">Report</string>
+    <string name="report_dialog_title">Report</string>
+    <string name="report_dialog_description">Reporting %1$s. Please enter a reason.</string>
+    <string name="report_reason_placeholder">Reason for report</string>
+    <string name="report_submit_label">Submit</string>
+
     <!-- status -->
     <string name="status_disconnected">Not connected to server</string>
     <string name="status_connecting">Connecting...</string>
@@ -92,6 +110,8 @@
     <string name="errors_chat_send_failed">Failed to send message (HTTP %1$d)</string>
     <string name="errors_talk_lock_failed">Talk lock operation failed (HTTP %1$d)</string>
     <string name="errors_token_fetch_failed">Token fetch failed (HTTP %1$d)</string>
+    <string name="errors_recording_operation_failed">Recording operation failed (HTTP %1$d)</string>
+    <string name="errors_report_submission_failed">Failed to submit report (HTTP %1$d)</string>
 
     <!-- log -->
     <string name="log_already_connecting">Already connected or connecting</string>
@@ -103,7 +123,7 @@
     <string name="log_reconnecting">Reconnecting...</string>
     <string name="log_reconnected">Reconnected successfully</string>
     <string name="log_connect_failed">Connection failed: %1$s</string>
-    <string name="log_metadata_update">[Diag] Metadata update received: currentTalker=%1$s</string>
+    <string name="log_metadata_update">[Diag] Metadata update received: currentTalker=%1$s recording=%2$s</string>
     <string name="log_participant_joined">Joined: %1$s</string>
     <string name="log_participant_left">Left: %1$s</string>
     <string name="log_talk_heartbeat_failed">Failed to extend the talk lock. Ending talk: %1$s</string>

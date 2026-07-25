@@ -80,6 +80,8 @@ import co.ubunifu.pttandroid.model.ConnectionStatus
 import co.ubunifu.pttandroid.model.ParticipantInfo
 import co.ubunifu.pttandroid.onboarding.PTTOnboardingScreen
 import co.ubunifu.pttandroid.onboarding.PTTOnboardingStore
+import co.ubunifu.pttandroid.recording.PTTRecordingStore
+import co.ubunifu.pttandroid.report.PTTReportStore
 import co.ubunifu.pttandroid.room.PTTRoomManager
 import co.ubunifu.pttandroid.room.PTTSavedRoomsStore
 import co.ubunifu.pttandroid.room.SavedRoom
@@ -96,6 +98,8 @@ fun PTTApp(
     connectionManager: PTTConnectionManager,
     chatStore: PTTChatStore,
     banStore: PTTBanStore,
+    recordingStore: PTTRecordingStore,
+    reportStore: PTTReportStore,
     onboardingStore: PTTOnboardingStore,
     onRequestGoogleSignIn: () -> Unit,
 ) {
@@ -130,6 +134,15 @@ fun PTTApp(
     val myRole by banStore.myRole.collectAsState()
     val isBanned by banStore.isBanned.collectAsState()
     val banError by banStore.errorMessage.collectAsState()
+    // [録音UI] Room Metadata経由でPTTConnectionManagerが保持している確定状態。
+    val isRecording by connectionManager.isRecording.collectAsState()
+    val recordingStartedAt by connectionManager.recordingStartedAt.collectAsState()
+    val recordingStarting by recordingStore.starting.collectAsState()
+    val recordingStopping by recordingStore.stopping.collectAsState()
+    val recordingError by recordingStore.errorMessage.collectAsState()
+    // [通報UI]
+    val reportSubmitting by reportStore.isSubmitting.collectAsState()
+    val reportError by reportStore.errorMessage.collectAsState()
     // [送話ロック連携] サーバー(routes/talk.js)がRoom Metadataに書き込むcurrentTalker(uid)。
     // 自分以外のuidが入っている間はPTTボタンを無効化する。
     val currentTalkerUid by connectionManager.currentTalkerUid.collectAsState()
@@ -145,6 +158,12 @@ fun PTTApp(
     var banTarget by remember { mutableStateOf<ParticipantInfo?>(null) }
     // [BAN対応] 自分がBANされてルームを追い出された直後に表示する通知文言
     var banNotice by remember { mutableStateOf<String?>(null) }
+    // [録音UI] 開始ボタン押下時の確認ダイアログ表示フラグ
+    var showRecordingStartConfirm by remember { mutableStateOf(false) }
+    // [通報UI] 通報対象の参加者。入力欄付きダイアログで理由を入力させる
+    // (Web版の`window.prompt`・iOS版のtextField付きalertに相当)。
+    var reportTarget by remember { mutableStateOf<ParticipantInfo?>(null) }
+    var reportReasonText by remember { mutableStateOf("") }
 
     // [送話ロック連携] 自分以外が発話ロックを保持しているか、および相手の表示名
     val someoneElseIsTalking = currentTalkerUid != null && currentTalkerUid != currentUser?.uid
@@ -200,6 +219,50 @@ fun PTTApp(
         }
     }
 
+    // [録音UI] 開始ボタンの確認ダイアログで「開始する」を選んだ際に呼ばれる。
+    fun startRecording() {
+        showRecordingStartConfirm = false
+        val roomId = activeRoomId ?: return
+        scope.launch {
+            try {
+                val idToken = authManager.fetchIdToken()
+                recordingStore.startRecording(tokenServerUrl, idToken, roomId)
+            } catch (e: Exception) {
+                // recordingStore.errorMessage に理由がセットされているのでUIには既に反映済み
+            }
+        }
+    }
+
+    fun stopRecording() {
+        val roomId = activeRoomId ?: return
+        scope.launch {
+            try {
+                val idToken = authManager.fetchIdToken()
+                recordingStore.stopRecording(tokenServerUrl, idToken, roomId)
+            } catch (e: Exception) {
+                // recordingStore.errorMessage に理由がセットされているのでUIには既に反映済み
+            }
+        }
+    }
+
+    // [通報UI] 理由入力ダイアログで「送信する」を選んだ際に呼ばれる。
+    // Web版のreportParticipant(window.promptの戻り値をtrimして空ならskip)と同じ挙動。
+    fun submitReport(target: ParticipantInfo) {
+        val reason = reportReasonText.trim()
+        reportTarget = null
+        reportReasonText = ""
+        if (reason.isEmpty()) return
+        val roomId = activeRoomId ?: return
+        scope.launch {
+            try {
+                val idToken = authManager.fetchIdToken()
+                reportStore.submitReport(tokenServerUrl, idToken, roomId, target.identity, reason)
+            } catch (e: Exception) {
+                // reportStore.errorMessage に理由がセットされているのでUIには既に反映済み
+            }
+        }
+    }
+
     Column(Modifier.fillMaxWidth().padding(16.dp)) {
         HeaderRow(
             currentUserName = authManager.displayName,
@@ -220,6 +283,16 @@ fun PTTApp(
 
             activeRoomId != null -> {
                 StatusRow(status)
+                RecordingSection(
+                    isRecording = isRecording,
+                    recordingStartedAt = recordingStartedAt,
+                    canControl = myRole == "owner" || myRole == "moderator",
+                    starting = recordingStarting,
+                    stopping = recordingStopping,
+                    errorMessage = recordingError,
+                    onRequestStart = { showRecordingStartConfirm = true },
+                    onStop = { stopRecording() },
+                )
                 InviteBox(currentInviteCode, activeRoomId)
                 OutlinedButton(onClick = { leaveRoom() }, modifier = Modifier.fillMaxWidth()) {
                     Text(stringResource(R.string.room_leave_room), fontFamily = Mono)
@@ -239,6 +312,8 @@ fun PTTApp(
                     myUid = currentUser?.uid,
                     canBan = myRole == "owner" || myRole == "moderator",
                     onRequestBan = { banTarget = it },
+                    onRequestReport = { reportTarget = it; reportReasonText = "" },
+                    reportError = reportError,
                 )
                 Spacer(Modifier.height(16.dp))
                 ChatSection(
@@ -344,6 +419,65 @@ fun PTTApp(
             },
         )
     }
+
+    // [録音UI] 開始ボタン押下時の確認ダイアログ。Web版RecordingBar.vueの
+    // ConfirmDialog(showStartConfirm)・iOS版のalertに相当。録音中であることは
+    // 全参加者に開示される旨をここで明示してから開始する。
+    if (showRecordingStartConfirm) {
+        AlertDialog(
+            onDismissRequest = { showRecordingStartConfirm = false },
+            title = { Text(stringResource(R.string.recording_start_confirm_title), fontFamily = Mono) },
+            text = { Text(stringResource(R.string.recording_start_confirm_description), fontFamily = Mono) },
+            confirmButton = {
+                Button(
+                    onClick = { startRecording() },
+                    colors = ButtonDefaults.buttonColors(containerColor = PTTColors.Accent),
+                ) {
+                    Text(stringResource(R.string.recording_start_confirm_label), fontFamily = Mono)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showRecordingStartConfirm = false }) {
+                    Text(stringResource(R.string.common_cancel), fontFamily = Mono)
+                }
+            },
+        )
+    }
+
+    // [通報UI] Web版の`window.prompt(...)`・iOS版のtextField付きalertに相当。
+    // 理由が空のまま送信した場合は何もしない(submitReport内でtrim済みの空文字を判定)。
+    reportTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { reportTarget = null; reportReasonText = "" },
+            title = { Text(stringResource(R.string.report_dialog_title), fontFamily = Mono) },
+            text = {
+                Column {
+                    Text(stringResource(R.string.report_dialog_description, target.name), fontFamily = Mono)
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = reportReasonText,
+                        onValueChange = { reportReasonText = it },
+                        placeholder = { Text(stringResource(R.string.report_reason_placeholder), fontFamily = Mono, fontSize = 12.sp) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { submitReport(target) },
+                    enabled = reportReasonText.isNotBlank() && !reportSubmitting,
+                    colors = ButtonDefaults.buttonColors(containerColor = PTTColors.Accent),
+                ) {
+                    Text(stringResource(R.string.report_submit_label), fontFamily = Mono)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { reportTarget = null; reportReasonText = "" }) {
+                    Text(stringResource(R.string.common_cancel), fontFamily = Mono)
+                }
+            },
+        )
+    }
 }
 
 @Composable
@@ -428,6 +562,96 @@ private fun InviteBox(inviteCode: String?, roomId: String?) {
             Text(stringResource(R.string.invite_label), fontFamily = Mono, fontSize = 12.sp)
             Text(inviteCode, fontFamily = Mono, fontSize = 18.sp, color = PTTColors.Accent)
             Text(stringResource(R.string.invite_room_id, roomId), fontFamily = Mono, fontSize = 12.sp, color = PTTColors.Muted)
+        }
+    }
+}
+
+/**
+ * [録音開始/停止UI]
+ * Web版(RecordingBar.vue)・iOS版(ContentView.swiftのrecordingSection)の移植。
+ * - 録音中であることの開示(赤バッジ + 経過時間 + 同意文言)はロールに関わらず
+ *   全参加者へ常時表示する(法的な同意の観点で必須。Web版・iOS版と同じ方針)。
+ * - 開始/停止ボタンはowner/moderatorのみ表示する(サーバー側でも権限を再チェックする)。
+ */
+@Composable
+private fun RecordingSection(
+    isRecording: Boolean,
+    recordingStartedAt: Long?,
+    canControl: Boolean,
+    starting: Boolean,
+    stopping: Boolean,
+    errorMessage: String?,
+    onRequestStart: () -> Unit,
+    onStop: () -> Unit,
+) {
+    if (!isRecording && !canControl) return
+
+    Column(Modifier.fillMaxWidth().padding(bottom = 10.dp)) {
+        if (isRecording) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(7.dp).clip(CircleShape)) {
+                    androidx.compose.foundation.Canvas(modifier = Modifier.size(7.dp)) {
+                        drawCircle(color = PTTColors.Danger)
+                    }
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    stringResource(R.string.recording_active_label),
+                    fontFamily = Mono,
+                    fontSize = 11.sp,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                    color = PTTColors.Danger,
+                )
+                if (recordingStartedAt != null) {
+                    Spacer(Modifier.width(8.dp))
+                    // 1秒毎に再計算する経過時間表示。実際の録音中判定には使わない
+                    // (Web版RecordingBar.vue・iOS版のelapsedLabelと同じ役割)。
+                    var nowMillis by remember { mutableStateOf(System.currentTimeMillis()) }
+                    LaunchedEffect(recordingStartedAt) {
+                        while (true) {
+                            nowMillis = System.currentTimeMillis()
+                            kotlinx.coroutines.delay(1000)
+                        }
+                    }
+                    val totalSeconds = ((nowMillis - recordingStartedAt) / 1000).coerceAtLeast(0)
+                    Text(
+                        "%02d:%02d".format(totalSeconds / 60, totalSeconds % 60),
+                        fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Muted,
+                    )
+                }
+            }
+            Text(
+                stringResource(R.string.recording_consent_notice),
+                fontFamily = Mono, fontSize = 10.sp, color = PTTColors.Muted,
+            )
+        }
+
+        if (canControl) {
+            Spacer(Modifier.height(6.dp))
+            if (isRecording) {
+                Text(
+                    if (stopping) stringResource(R.string.recording_stopping) else stringResource(R.string.recording_stop_button),
+                    fontFamily = Mono, fontSize = 11.sp,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                    color = PTTColors.Danger,
+                    modifier = Modifier.pointerInput(Unit) {
+                        detectTapGestures(onTap = { if (!stopping) onStop() })
+                    },
+                )
+            } else {
+                Text(
+                    if (starting) stringResource(R.string.recording_starting) else stringResource(R.string.recording_start_button),
+                    fontFamily = Mono, fontSize = 11.sp,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                    color = PTTColors.Accent,
+                    modifier = Modifier.pointerInput(Unit) {
+                        detectTapGestures(onTap = { if (!starting) onRequestStart() })
+                    },
+                )
+            }
+            errorMessage?.let {
+                Text(it, fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Danger)
+            }
         }
     }
 }
@@ -614,6 +838,8 @@ private fun ParticipantsSection(
     myUid: String?,
     canBan: Boolean,
     onRequestBan: (ParticipantInfo) -> Unit,
+    onRequestReport: (ParticipantInfo) -> Unit,
+    reportError: String?,
 ) {
     Column(Modifier.fillMaxWidth()) {
         Text(stringResource(R.string.participants_title), fontFamily = Mono, fontSize = 10.sp, color = PTTColors.Muted)
@@ -635,6 +861,21 @@ private fun ParticipantsSection(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f),
                         )
+                        // [通報UI] 自分自身は対象外。誰でも通報できる(BANと異なりownerや
+                        // moderator限定ではない)。
+                        if (info.identity != myUid) {
+                            Text(
+                                stringResource(R.string.report_button),
+                                fontFamily = Mono,
+                                fontSize = 10.sp,
+                                color = PTTColors.Muted,
+                                modifier = Modifier
+                                    .padding(start = 8.dp)
+                                    .pointerInput(info.identity) {
+                                        detectTapGestures(onTap = { onRequestReport(info) })
+                                    },
+                            )
+                        }
                         // [BAN対応] owner/moderatorのみBANボタンを表示する
                         // (サーバー側でも権限を再チェックする)。自分自身は対象外。
                         if (canBan && info.identity != myUid) {
@@ -654,6 +895,10 @@ private fun ParticipantsSection(
                     }
                 }
             }
+        }
+        reportError?.let {
+            Spacer(Modifier.height(6.dp))
+            Text(it, fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Danger)
         }
     }
 }
