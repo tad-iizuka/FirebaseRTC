@@ -66,6 +66,16 @@ async function remove(recordingId: string) {
     // errorMessageはstore側で設定済み
   }
 }
+
+/** room/:roomId/settings/autoRecording のON/OFFを切り替える。 */
+async function toggleAutoRecording() {
+  if (!rooms.detail) return
+  try {
+    await rooms.setAutoRecording(settings.tokenServerUrl, roomId.value, !rooms.detail.settings.autoRecording)
+  } catch {
+    // errorMessageはstore側で設定済み
+  }
+}
 </script>
 
 <template>
@@ -91,6 +101,29 @@ async function remove(recordingId: string) {
         <span>定員={{ rooms.detail.maxMembers ?? '—' }}</span>
         <Badge v-if="rooms.detail.recording.active" variant="destructive">録音中</Badge>
         <Badge v-if="rooms.detail.talkLock" variant="accent">発話中: {{ rooms.detail.talkLock.uid }}</Badge>
+      </div>
+
+      <h3 class="mb-2 text-[12px] font-medium">設定</h3>
+      <div class="mb-6 flex items-center gap-3 text-xs">
+        <span class="text-muted-foreground">自動録音</span>
+        <button
+          type="button"
+          role="switch"
+          :aria-checked="rooms.detail.settings.autoRecording"
+          :disabled="rooms.isUpdatingAutoRecording"
+          class="relative h-5 w-9 shrink-0 rounded-full border transition-colors disabled:pointer-events-none disabled:opacity-40"
+          :class="rooms.detail.settings.autoRecording ? 'border-primary bg-primary/30' : 'border-border bg-white/5'"
+          @click="toggleAutoRecording"
+        >
+          <span
+            class="absolute top-1/2 h-3.5 w-3.5 -translate-y-1/2 rounded-full bg-foreground transition-all"
+            :class="rooms.detail.settings.autoRecording ? 'left-[18px]' : 'left-[3px]'"
+          />
+        </button>
+        <Badge :variant="rooms.detail.settings.autoRecording ? 'accent' : 'default'">
+          {{ rooms.detail.settings.autoRecording ? 'ON' : 'OFF' }}
+        </Badge>
+        <span v-if="rooms.isUpdatingAutoRecording" class="text-muted-foreground">更新中...</span>
       </div>
 
       <h3 class="mb-2 text-[12px] font-medium">メンバー台帳(Firestore)</h3>

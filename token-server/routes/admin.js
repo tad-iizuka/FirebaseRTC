@@ -204,12 +204,72 @@ router.get('/rooms/:roomId', requireFirebaseAuth, requireAdminPermission('rooms:
             }
           : { active: false },
       liveParticipants,
+      // [Phase9] routes/rooms.js の PATCH /rooms/:roomId/settings と同じ
+      // rooms/{roomId}.settings.autoRecording を参照する。
+      settings: { autoRecording: !!room.settings?.autoRecording },
     });
   } catch (e) {
     console.error('[管理者ダッシュボード: ルーム詳細エラー]', e.message);
     res.status(500).json({ error: 'ルーム詳細の取得に失敗しました' });
   }
 });
+
+/**
+ * PATCH /admin/rooms/:roomId/settings/autoRecording
+ * body: { enabled: boolean }
+ *
+ * [Phase9で追加] 管理ダッシュボードのルーム詳細画面から自動録音設定を
+ * ON/OFFする。routes/rooms.js の PATCH /rooms/:roomId/settings は
+ * 「そのルームのowner/moderatorであること」を要求するが、管理者は
+ * 監視対象ルームのメンバーとは限らないため、ここでは代わりに
+ * rooms:manage 権限(adminUsers台帳)で許可する。書き込み先は同じ
+ * rooms/{roomId}.settings.autoRecording であり、routes/webhooks.js の
+ * handleAutoRecordingTrigger からの参照はどちらの経路で更新されても
+ * 変わらず機能する。
+ *
+ * [注意] falseにしても、その時点で既に進行中の録音は止まらない
+ * (routes/rooms.js側の同名エンドポイントと同じ設計)。
+ */
+router.patch(
+  '/rooms/:roomId/settings/autoRecording',
+  requireFirebaseAuth,
+  requireAdminPermission('rooms:manage'),
+  async (req, res) => {
+    const { roomId } = req.params;
+
+    if (!isValidRoomId(roomId)) {
+      return res.status(400).json({ error: 'roomId が不正です' });
+    }
+    if (typeof req.body?.enabled !== 'boolean') {
+      return res.status(400).json({ error: 'enabled はboolean型で指定してください' });
+    }
+
+    try {
+      const roomRef = db.collection('rooms').doc(roomId);
+      const roomSnap = await roomRef.get();
+      if (!roomSnap.exists) {
+        return res.status(404).json({ error: 'ルームが見つかりません' });
+      }
+
+      await roomRef.update({ 'settings.autoRecording': req.body.enabled });
+
+      await logAdminAction({
+        actorUid: req.firebaseUser.uid,
+        action: 'room:settings_update',
+        targetRoomId: roomId,
+        detail: { autoRecording: req.body.enabled, via: 'admin_dashboard' },
+      });
+
+      console.log(
+        `[管理者ダッシュボード: 設定更新] roomId=${roomId} autoRecording=${req.body.enabled} by=${req.firebaseUser.uid}`
+      );
+      res.json({ roomId, autoRecording: req.body.enabled });
+    } catch (e) {
+      console.error('[管理者ダッシュボード: 設定更新エラー]', e.message);
+      res.status(500).json({ error: '設定の更新に失敗しました' });
+    }
+  }
+);
 
 /**
  * GET /admin/audit-logs?roomId=&actorUid=&cursor=&limit=

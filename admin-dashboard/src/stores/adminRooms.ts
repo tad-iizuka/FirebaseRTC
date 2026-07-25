@@ -95,6 +95,33 @@ export const useAdminRoomsStore = defineStore('adminRooms', () => {
     detail.value = null
   }
 
+  // [設定] room/:roomId/settings/autoRecording (Firestore) のON/OFF切り替え。
+  // token-server側に PATCH /admin/rooms/:roomId/settings/autoRecording の実装が必要
+  // (body: { enabled: boolean })。楽観的にUIを更新し、失敗時は元の値へ戻す。
+  const isUpdatingAutoRecording = ref(false)
+
+  async function setAutoRecording(baseUrl: string, roomId: string, enabled: boolean) {
+    if (!detail.value || detail.value.roomId !== roomId) return
+    const before = detail.value.settings.autoRecording
+    detail.value.settings.autoRecording = enabled
+    isUpdatingAutoRecording.value = true
+    errorMessage.value = null
+    try {
+      await authedFetch<void>(baseUrl, `/admin/rooms/${encodeURIComponent(roomId)}/settings/autoRecording`, {
+        method: 'PATCH',
+        body: { enabled },
+      })
+    } catch (e) {
+      if (detail.value && detail.value.roomId === roomId) {
+        detail.value.settings.autoRecording = before
+      }
+      errorMessage.value = (e as Error).message
+      throw e
+    } finally {
+      isUpdatingAutoRecording.value = false
+    }
+  }
+
   return {
     rooms,
     nextCursor,
@@ -104,11 +131,13 @@ export const useAdminRoomsStore = defineStore('adminRooms', () => {
     isLoadingDetail,
     errorMessage,
     isForbidden,
+    isUpdatingAutoRecording,
     fetchRooms,
     goToNextPage,
     goToFirstPage,
     refreshCurrentPage,
     fetchRoomDetail,
     clearDetail,
+    setAutoRecording,
   }
 })

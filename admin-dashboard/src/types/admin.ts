@@ -43,6 +43,9 @@ export interface AdminRoomDetail {
   talkLock: { uid: string; acquiredAt: number | null; expiresAt: number } | null
   recording: { active: boolean; startedAt: number | null; startedByUid: string | null }
   liveParticipants: AdminLiveParticipant[]
+  // [設定] rooms/:roomId/settings/autoRecording (Firestore) を表す。
+  // 参加者が集まったら自動的に録音を開始するかどうかのルーム単位フラグ。
+  settings: { autoRecording: boolean }
 }
 
 // [Phase8] GET /admin/audit-logs
