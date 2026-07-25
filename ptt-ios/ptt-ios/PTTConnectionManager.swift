@@ -48,6 +48,12 @@ final class PTTConnectionManager: NSObject, ObservableObject {
     /// currentTalker(uid)。nilなら誰も発話ロックを保持していない。
     /// 自分以外のuidが入っている間、UI側はPTTボタンを無効化する。
     @Published private(set) var currentTalkerUid: String?
+    /// [録音UI] サーバー(routes/recording.js)がLiveKitのRoom Metadataに書き込む
+    /// recording.active。true の間は全参加者への開示バナーを表示する
+    /// (Web版RecordingBar.vueと同じ「同意表示」の考え方)。
+    @Published private(set) var isRecording = false
+    /// 録音開始時刻(経過時間表示にのみ使う)。isRecordingがfalseの間は常にnil。
+    @Published private(set) var recordingStartedAt: Date?
 
     // MARK: - Private
 
@@ -85,6 +91,8 @@ final class PTTConnectionManager: NSObject, ObservableObject {
         self.idTokenProvider = idTokenProvider
         status = .connecting
         currentTalkerUid = nil
+        isRecording = false
+        recordingStartedAt = nil
 
         Task {
             do {
@@ -100,10 +108,11 @@ final class PTTConnectionManager: NSObject, ObservableObject {
                 // (トラックは作られるが送信されない = ボタンを押すまで無音)
                 try await newRoom.localParticipant.setMicrophone(enabled: false)
 
-                // 接続時点で既に誰かが発話ロックを保持していた場合に備え、room.metadataから
-                // 初期状態を読み込む(メタデータ更新デリゲートは「変化した瞬間」しか
-                // 呼ばれないため、接続前からの既存状態は別途拾う必要がある。Web版と同じ理由)。
-                updateCurrentTalker(fromMetadataString: newRoom.metadata)
+                // 接続時点で既に誰かが発話ロックを保持していた場合や、既に録音中だった場合に
+                // 備え、room.metadataから初期状態を読み込む(メタデータ更新デリゲートは
+                // 「変化した瞬間」しか呼ばれないため、接続前からの既存状態は別途拾う必要がある。
+                // Web版と同じ理由)。
+                applyMetadata(fromMetadataString: newRoom.metadata)
 
                 // 接続時点ですでに他の参加者がいる場合、参加後に発火するイベントだけでは
                 // 拾えないため room.remoteParticipants から初期状態を取り込む。
@@ -147,6 +156,8 @@ final class PTTConnectionManager: NSObject, ObservableObject {
             participants.removeAll()
             isSending = false
             currentTalkerUid = nil
+            isRecording = false
+            recordingStartedAt = nil
             status = .disconnected
             appendLog(String(localized: "切断しました"))
         }
@@ -274,22 +285,37 @@ final class PTTConnectionManager: NSObject, ObservableObject {
         }
     }
 
-    /// LiveKitのRoom Metadata(JSON文字列)から currentTalker(uid) を取り出して反映する。
-    /// token-server/lib/roomMetadata.js が書き込む `{ currentTalker, recording, updatedAt }`
-    /// の形式を前提にしている。パース失敗時はnil(=誰も発話中でない)として扱う。
-    private func updateCurrentTalker(fromMetadataString metadata: String?) {
-        guard let metadata, let data = metadata.data(using: .utf8) else {
-            currentTalkerUid = nil
-            return
-        }
+    /// LiveKitのRoom Metadata(JSON文字列)から現在の送話ロック保持者(currentTalker)と
+    /// 録音状態(recording)を取り出して反映する。token-server/lib/roomMetadata.jsが書き込む
+    /// `{ currentTalker, recording: { active, startedAt }, updatedAt }` の形式を前提にしている。
+    /// パース失敗時は安全側(誰も発話中でない・録音していない)として扱う。
+    ///
+    /// [録音UI] startedAt はサーバーがUnix時刻(ms)として書き込む値。Web版の
+    /// RecordingBar.vueと同じく、ここではUI表示用のDateに変換するだけで、
+    /// 「録音中かどうか」の確定判定自体はサーバー(Room Metadata)に委ねる
+    /// (token-server/routes/recording.js冒頭のコメント参照。/recording/start・
+    /// /recording/stop のレスポンス単体では確定状態と見なさない)。
+    private func applyMetadata(fromMetadataString metadata: String?) {
         guard
-            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let talker = json["currentTalker"] as? String
+            let metadata,
+            let data = metadata.data(using: .utf8),
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else {
             currentTalkerUid = nil
+            isRecording = false
+            recordingStartedAt = nil
             return
         }
-        currentTalkerUid = talker
+
+        currentTalkerUid = json["currentTalker"] as? String
+
+        let recording = json["recording"] as? [String: Any]
+        isRecording = recording?["active"] as? Bool ?? false
+        if isRecording, let startedAtMs = recording?["startedAt"] as? Double {
+            recordingStartedAt = Date(timeIntervalSince1970: startedAtMs / 1000)
+        } else {
+            recordingStartedAt = nil
+        }
     }
 
     // MARK: - トークン取得
@@ -366,6 +392,8 @@ extension PTTConnectionManager: RoomDelegate {
                 self.participants.removeAll()
                 self.isSending = false
                 self.currentTalkerUid = nil
+                self.isRecording = false
+                self.recordingStartedAt = nil
                 self.room = nil
                 if case .error = self.status {
                     // エラーによる切断は表示を残す
@@ -399,9 +427,9 @@ extension PTTConnectionManager: RoomDelegate {
             } else {
                 self.status = .connected(room: self.roomName)
             }
-            // 再接続の間に発話ロックの状態が変わっている可能性があるため、
+            // 再接続の間に発話ロックや録音の状態が変わっている可能性があるため、
             // 最新のRoom Metadataから読み直しておく。
-            self.updateCurrentTalker(fromMetadataString: room.metadata)
+            self.applyMetadata(fromMetadataString: room.metadata)
         }
     }
 
@@ -436,8 +464,8 @@ extension PTTConnectionManager: RoomDelegate {
     /// (ptt-android側のRoom.eventsに関する既存の注意書きと同じ理由)。
     nonisolated func room(_ room: Room, didUpdateMetadata metadata: String?) {
         Task { @MainActor in
-            self.updateCurrentTalker(fromMetadataString: metadata)
-            self.appendLog(String(format: NSLocalizedString("[診断] メタデータ更新受信: currentTalker=%@", comment: "Metadata update diagnostic log"), self.currentTalkerUid ?? "null"))
+            self.applyMetadata(fromMetadataString: metadata)
+            self.appendLog(String(format: NSLocalizedString("[診断] メタデータ更新受信: currentTalker=%@ recording=%@", comment: "Metadata update diagnostic log"), self.currentTalkerUid ?? "null", self.isRecording ? "true" : "false"))
         }
     }
 

@@ -35,6 +35,8 @@ struct ContentView: View {
     @StateObject private var connection = PTTConnectionManager()
     @StateObject private var chat = PTTChatStore()
     @StateObject private var ban = PTTBanStore()
+    @StateObject private var recording = PTTRecordingStore()
+    @StateObject private var report = PTTReportStore()
     @StateObject private var onboarding = PTTOnboardingStore()
 
     @State private var tokenServerURL: String = "https://ptt-token-server-rnn4fqay3a-an.a.run.app"
@@ -51,6 +53,13 @@ struct ContentView: View {
     @State private var banTarget: PTTParticipantInfo?
     /// [BAN対応] 自分がBANされてルームを追い出された直後に表示する通知文言。
     @State private var banNotice: String?
+    /// [録音UI] 録音開始ボタン押下時の確認ダイアログ表示フラグ。
+    /// Web版ConfirmDialog(RecordingBar.vueのshowStartConfirm)に相当。
+    @State private var showRecordingStartConfirm = false
+    /// [通報UI] 通報対象の参加者。Web版の`window.prompt`に代わり、
+    /// テキスト入力欄付きのalertダイアログで理由を入力させる。
+    @State private var reportTarget: PTTParticipantInfo?
+    @State private var reportReasonText: String = ""
 
     var body: some View {
         Group {
@@ -65,6 +74,7 @@ struct ContentView: View {
                             authSection
                         } else if activeRoomId != nil {
                             statusRow
+                            recordingSection
                             inviteBox
                             voiceSection
                             talkArea
@@ -102,6 +112,34 @@ struct ContentView: View {
             Button("キャンセル", role: .cancel) { banTarget = nil }
         } message: { target in
             Text(String(format: NSLocalizedString("%@ をこのルームからBANしますか?\nこの操作は取り消せません。", comment: "Ban confirmation dialog message"), target.name))
+        }
+        // [録音UI] 開始ボタン押下時の確認ダイアログ。Web版RecordingBar.vueの
+        // ConfirmDialog(showStartConfirm)に相当。録音中であることは全参加者に
+        // 開示される旨をここで明示してから開始する。
+        .alert(
+            "録音を開始しますか?",
+            isPresented: $showRecordingStartConfirm
+        ) {
+            Button("開始する") { startRecording() }
+            Button("キャンセル", role: .cancel) { showRecordingStartConfirm = false }
+        } message: {
+            Text("録音中であることは全参加者に開示されます。")
+        }
+        // [通報UI] Web版の`window.prompt(t('room.reportPromptLabel', ...))`に相当。
+        // 空文字のまま送信した場合は何もしない(Web版と同じ挙動)。
+        .alert(
+            "通報する",
+            isPresented: Binding(
+                get: { reportTarget != nil },
+                set: { if !$0 { reportTarget = nil; reportReasonText = "" } }
+            ),
+            presenting: reportTarget
+        ) { target in
+            TextField("通報理由", text: $reportReasonText)
+            Button("送信する") { submitReport(target) }
+            Button("キャンセル", role: .cancel) { reportTarget = nil; reportReasonText = "" }
+        } message: { target in
+            Text(String(format: NSLocalizedString("%@ を通報します。理由を入力してください。", comment: "Report prompt message"), target.name))
         }
     }
 
@@ -303,6 +341,124 @@ struct ContentView: View {
             }
             .font(.system(size: 11, design: .monospaced))
             .foregroundColor(.pttMuted)
+        }
+    }
+
+    // MARK: - Recording (録音開始/停止UI)
+
+    /// Web版 RecordingBar.vue の移植。
+    /// - 録音中であることの開示(赤バッジ + 経過時間 + 同意文言)はロールに関わらず
+    ///   全参加者へ常時表示する(法的な同意の観点で必須。Web版と同じ方針)。
+    /// - 開始/停止ボタンはowner/moderatorのみ表示する(サーバー側でも権限を再チェックする)。
+    @ViewBuilder
+    private var recordingSection: some View {
+        if connection.isRecording || canControlRecording {
+            VStack(alignment: .leading, spacing: 8) {
+                if connection.isRecording {
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(.pttDanger)
+                            .frame(width: 7, height: 7)
+                        Text("録音中")
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundColor(.pttDanger)
+                        if let startedAt = connection.recordingStartedAt {
+                            TimelineView(.periodic(from: startedAt, by: 1)) { _ in
+                                Text(elapsedLabel(since: startedAt))
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundColor(.pttMuted)
+                            }
+                        }
+                    }
+                    Text("このルームの通話内容は録音され、モデレーターが確認できます。")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.pttMuted)
+                }
+
+                if canControlRecording {
+                    HStack(spacing: 10) {
+                        if connection.isRecording {
+                            Button(recording.stopping ? String(localized: "停止中...") : String(localized: "録音を停止")) {
+                                stopRecording()
+                            }
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundColor(.pttDanger)
+                            .disabled(recording.stopping)
+                        } else {
+                            Button(recording.starting ? String(localized: "開始中...") : String(localized: "録音を開始")) {
+                                showRecordingStartConfirm = true
+                            }
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundColor(.pttAccent)
+                            .disabled(recording.starting)
+                        }
+                    }
+
+                    if let message = recording.errorMessage {
+                        Text(message)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.pttDanger)
+                    }
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.bottom, 10)
+        }
+    }
+
+    /// owner/moderatorのみ録音の開始/停止を操作できる(サーバー側でも権限を再チェックする)。
+    private var canControlRecording: Bool {
+        ban.myRole == "owner" || ban.myRole == "moderator"
+    }
+
+    /// 録音開始からの経過時間を "mm:ss" 形式で表示する。Web版RecordingBar.vueの
+    /// elapsedLabel(1秒毎に再計算する経過時間表示。実際の録音中判定には使わない)と同じ役割。
+    private func elapsedLabel(since startedAt: Date) -> String {
+        let totalSeconds = max(0, Int(Date().timeIntervalSince(startedAt)))
+        return String(format: "%02d:%02d", totalSeconds / 60, totalSeconds % 60)
+    }
+
+    private func startRecording() {
+        showRecordingStartConfirm = false
+        guard let roomId = activeRoomId else { return }
+        Task {
+            do {
+                let idToken = try await auth.fetchIDToken()
+                try await recording.startRecording(tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId)
+            } catch {
+                // recording.errorMessage に理由がセットされているのでUIには既に反映済み
+            }
+        }
+    }
+
+    private func stopRecording() {
+        guard let roomId = activeRoomId else { return }
+        Task {
+            do {
+                let idToken = try await auth.fetchIDToken()
+                try await recording.stopRecording(tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId)
+            } catch {
+                // recording.errorMessage に理由がセットされているのでUIには既に反映済み
+            }
+        }
+    }
+
+    // MARK: - Report (通報UI)
+
+    /// Web版RoomView.vueの`reportParticipant`に相当。理由入力後、
+    /// token-server/routes/reports.js の POST /reports を呼ぶ。
+    private func submitReport(_ target: PTTParticipantInfo) {
+        let reason = reportReasonText.trimmingCharacters(in: .whitespacesAndNewlines)
+        reportTarget = nil
+        reportReasonText = ""
+        guard !reason.isEmpty, let roomId = activeRoomId else { return }
+        Task {
+            do {
+                let idToken = try await auth.fetchIDToken()
+                try await report.submitReport(tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId, reportedUid: target.uid, reason: reason)
+            } catch {
+                // report.errorMessage に理由がセットされているのでUIには既に反映済み
+            }
         }
     }
 
@@ -520,6 +676,12 @@ struct ContentView: View {
                     }
                 }
             }
+
+            if let reportError = report.errorMessage {
+                Text(reportError)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.pttDanger)
+            }
         }
         .padding(14)
     }
@@ -541,6 +703,13 @@ struct ContentView: View {
                 .lineLimit(1)
 
             Spacer()
+
+            Button("通報") {
+                reportTarget = info
+                reportReasonText = ""
+            }
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundColor(.pttMuted)
 
             if canBan {
                 Button("BAN") {

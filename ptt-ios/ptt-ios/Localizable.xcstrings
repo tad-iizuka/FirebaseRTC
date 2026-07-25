@@ -52,6 +52,17 @@
         }
       }
     },
+    "[診断] メタデータ更新受信: currentTalker=%@ recording=%@" : {
+      "comment" : "Metadata update diagnostic log",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "[診断] メタデータ更新受信: currentTalker=%1$@ recording=%2$@"
+          }
+        }
+      }
+    },
     "%@ が送話中" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -70,6 +81,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ban %@ from this room?\nThis action cannot be undone."
+          }
+        }
+      }
+    },
+    "%@ を通報します。理由を入力してください。" : {
+      "comment" : "Report prompt message shown before entering a reason.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reporting %@. Please enter a reason."
           }
         }
       }
@@ -226,6 +249,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Invite code for this room (share with participants):"
+          }
+        }
+      }
+    },
+    "このルームの通話内容は録音され、モデレーターが確認できます。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This room's audio is being recorded and can be reviewed by moderators."
           }
         }
       }
@@ -626,6 +660,17 @@
         }
       }
     },
+    "停止中..." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stopping..."
+          }
+        }
+      }
+    },
     "再接続に成功しました (mode=%@)" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -945,6 +990,17 @@
         }
       }
     },
+    "送信する" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Submit"
+          }
+        }
+      }
+    },
     "送話中" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -952,6 +1008,140 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Talking"
+          }
+        }
+      }
+    },
+    "通報" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Report"
+          }
+        }
+      }
+    },
+    "通報する" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Report"
+          }
+        }
+      }
+    },
+    "通報の送信に失敗しました (HTTP %d)" : {
+      "comment" : "Report submission failure",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Failed to submit report (HTTP %d)"
+          }
+        }
+      }
+    },
+    "通報理由" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reason for report"
+          }
+        }
+      }
+    },
+    "録音の操作に失敗しました (HTTP %d)" : {
+      "comment" : "Recording operation failure",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recording operation failed (HTTP %d)"
+          }
+        }
+      }
+    },
+    "録音を停止" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stop Recording"
+          }
+        }
+      }
+    },
+    "録音を開始" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Start Recording"
+          }
+        }
+      }
+    },
+    "録音を開始しますか?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Start recording?"
+          }
+        }
+      }
+    },
+    "録音中" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recording"
+          }
+        }
+      }
+    },
+    "録音中であることは全参加者に開示されます。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All participants will be notified that the room is being recorded."
+          }
+        }
+      }
+    },
+    "開始する" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Start"
+          }
+        }
+      }
+    },
+    "開始中..." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Starting..."
           }
         }
       }

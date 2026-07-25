@@ -26,12 +26,25 @@ LiveKit経由のPTT音声・送話ロック・BAN・テキストチャットま�
   生成・接続し、PTTボタンのオン/オフに合わせて
   `localParticipant.setMicrophone(enabled:)`を呼ぶ橋渡し役。送話ロックAPI
   (`/talk/start` `/talk/heartbeat` `/talk/stop`)の呼び出しと、LiveKitの
-  Room Metadata(`currentTalker`)の購読もここで行う
+  Room Metadata(`currentTalker`・`recording`)の購読もここで行う。
+  録音中かどうか(`isRecording`)・録音開始時刻(`recordingStartedAt`)も
+  このRoom Metadataから取り出して公開しており、`PTTRecordingStore`の
+  API呼び出し結果ではなくこちらが確定状態である
 - `PTTModels.swift` — UI表示用の接続状態・参加者情報の型定義のみ
   （シグナリングメッセージの型はLiveKit移行により不要になった）
 - `PTTBanStore.swift` — 自分のroleの取得とBAN状態のFirestoreリアルタイム監視
 - `PTTChatStore.swift` — テキストチャット(Phase5)。送信はtoken-server経由、
   配信・履歴はFirestoreリアルタイムリスナー
+- `PTTRecordingStore.swift` — 録音開始/停止UI(Phase9)。owner/moderatorが
+  叩く`/rooms/:roomId/recording/start`・`/recording/stop`の呼び出しと、
+  そのローディング状態・エラー表示を担当する薄いストア（Web版
+  `ptt-client/src/stores/recording.ts`の移植）。実際に録音中かどうかの
+  確定状態(active/startedAt)はこのストアではなく
+  `PTTConnectionManager.isRecording`/`recordingStartedAt`
+  (LiveKitのRoom Metadata経由)を見る
+- `PTTReportStore.swift` — 通報UI。`POST /reports`
+  (token-server/routes/reports.js)の呼び出しのみを担当する薄いストア
+  （Web版`ptt-client/src/views/RoomView.vue`の`reportParticipant`の移植）
 - `PTTOnboardingStore.swift` / `PTTOnboardingView.swift` — 初回起動時の
   スワイプ形式チュートリアル(Web版`OnboardingFlow.vue`と同じ構成)
 - `PTTSavedRoomsStore.swift` — 直近作成/参加したルームをUserDefaultsに
@@ -91,6 +104,17 @@ LiveKit移行に伴い**廃止済み**です。
    リアルタイム購読する。送信は必ずtoken-server経由(LiveKitのData
    Channelは使わない。理由: モデレーション・途中参加者への履歴配信・
    BAN時の読み取り遮断ができないため)
+7. **録音・通報**（本改訂で追加）: owner/moderatorは`PTTRecordingStore`
+   経由で`/recording/start`・`/recording/stop`を呼べる。ただしこのAPIの
+   レスポンスは「開始/停止を試みた/依頼した」ことしか意味せず、実際に
+   録音中かどうかの確定状態(active/startedAt)は送話ロックと同じく
+   Room Metadataの`recording`フィールド経由で`PTTConnectionManager`に
+   非同期反映される（`PTTConnectionManager.isRecording`/
+   `recordingStartedAt`）。録音中であることはロールに関わらず全参加者に
+   常時開示する(同意表示として必須。Web版`RecordingBar.vue`と同じ方針)。
+   通報は`PTTReportStore`が`POST /reports`
+   (token-server/routes/reports.js)を呼ぶのみで、実際の対応(内容確認・
+   BAN実行)はモデレーターが手動で行う運用
 
 ## 動作確認方法
 
@@ -101,15 +125,24 @@ LiveKit移行に伴い**廃止済み**です。
 4. ルームを新規作成するか、招待コードを入力して参加する
 5. PTTボタンを押下している間だけ発話でき、別クライアント（Web版など）を
    同じルームに参加させて実際に声が届くか確認する
+6. owner/moderatorとして入室した場合、参加者一覧の「録音を開始」ボタンで
+   録音を開始できる。開始後、録音バッジと経過時間表示が別クライアント
+   （Web版など）を含む全参加者に表示されることを確認する
+7. 参加者一覧の「通報」ボタンから理由を入力して送信し、
+   token-server側のログ(`[通報受付] reportId=...`)またはFirestoreの
+   `reports`コレクションに反映されることを確認する
 
 ## 既知の制約・次の改善ポイント
 
 - **バックグラウンド動作**: `Info.plist`の`UIBackgroundModes`に`audio`は
   設定済みだが、実機でのバックグラウンド送受話継続は未検証（詳細は
   `brushup-plan.md` Phase9参照）
-- **通報UI・録音操作UI**: 未実装（Web版のみ）。Phase9でWeb版の実装を
-  移植予定
 - **音質・低遅延**: LiveKit(WebRTC/NetEQ)に委譲済みのため、アプリ側での
   追加実装は基本的に不要。品質チューニングが必要になった場合は、自前の
   バッファ実装ではなくLiveKit SDKの接続オプション(adaptiveStream・
   dynacast等)を見直すこと
+- **自動録音設定(Phase9のautoRecordingトグル)**: Web版
+  `RoomView.vue`/`RecordingBar.vue`が持つ「入室時に自動的に録音を開始する」
+  設定のon/off切り替えと、その事前開示バナーはiOS版では未移植（本改訂で
+  移植したのは手動の録音開始/停止と通報のみ）。既に自動録音が有効な
+  ルームであっても、iOS版は手動の開始/停止ボタンを使う運用になる
