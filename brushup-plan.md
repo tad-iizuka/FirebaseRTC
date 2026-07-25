@@ -35,6 +35,28 @@ Firestoreデータモデル）を転記し、`token-server/README.md`側の該�
 転記済みである旨を明記した参照文へ置き換えた。ドキュメント棚卸しで唯一
 残っていた未完了項目が解消されたため、次アクションの該当項目を完了扱いに
 更新する）
+十訂: 2026-07-25（iOS/Android版に通報UI・録音開始/停止UIを実装した。
+Web版(`ptt-client`)の設計を移植する形で、`PTTRecordingStore`/
+`PTTReportStore`相当の薄いストアを両OSに新設し、Room Metadata経由の
+録音状態(`recording.active`/`startedAt`)購読を`PTTConnectionManager`
+(iOS/Android双方)に追加した。これにより「1. 実コード確認済みの現状」の
+機能差表、および「2-E. 3クライアント間の機能差」で挙げていた最後の項目が
+解消された。一方、Web版のみが持つ「自動録音: ON」トグル
+(`RecordingBar.vue`のautoRecording設定)はユーザーへ確認のうえ今回の
+スコープ外として明示的に除外している。また、今回の変更はアップロードされた
+ZIPアーカイブ（`ptt-ios.zip`・`ptt-android.zip`）に対して行い更新版ZIPとして
+返却したものであり、`tad-iizuka/FirebaseRTC`リポジトリへの実際のコミット・
+反映は本ドキュメント作成時点では未確認のため、六訂・八訂で
+`ptt-ios/ptt-ios/README.md`について踏んだのと同じ確認プロセスを次アクション
+として残す）
+十一訂: 2026-07-25（十訂で実装したiOS/Android版の通報UI・録音開始/停止UIに
+ついて、ユーザーから「リポジトリへ反映して動作確認は済んでいます」との
+報告を受けた。**（重要な留保）** 六訂→八訂の確認プロセスとは異なり、今回は
+リポジトリ本体（`.git`履歴）を再取得して`git show`等で直接検証したわけでは
+なく、ユーザー本人からの申告のみに基づく。実コミットハッシュ・実機での
+動作確認結果そのものは本ドキュメント側では確認できていない点に留意し、
+「次アクションの提案」item 7はユーザー申告に基づく完了として扱うが、
+過去の項目のような「確認済み」表現とは区別して記録する）
 
 > 本改定では、アップロードされた `README.md`（"Connect to a place, not to a person."）に
 > 明記されたビジョン・原則・ターゲットロードマップを"あるべき姿"の物差しとして採用し、
@@ -110,8 +132,9 @@ Message）はコード上どこにも見当たらず、依然として未着手�
 | BAN機能UI | ✅ | ✅ | ✅ | |
 | 多言語化(i18n) | ✅ ja/en | ✅ xcstrings | ✅ strings.xml | |
 | デザイントークン統一 | ✅ | ✅ | ✅ | `shared/design-tokens.css`等で一元管理 |
-| 通報機能UI | ✅ | ❌ | ❌ | |
-| 録音の開始/停止UI | ✅ | ❌ | ❌ | |
+| 通報機能UI | ✅ | ✅ | ✅ | 2026-07-25、Web版を移植する形でiOS/Androidに実装完了（十訂） |
+| 録音の開始/停止UI | ✅ | ✅ | ✅ | 同上。録音中判定はRoom Metadata経由で`PTTConnectionManager`が確定状態を保持 |
+| **自動録音トグル(auto-recording ON設定)** | ✅ | ❌ | ❌ | Web版`RecordingBar.vue`のみの機能。iOS/Androidは今回意図的にスコープ外（ユーザー確認済み、2026-07-25） |
 | **テキストチャット(Text Event)** | ✅ | ✅ | ✅ | `token-server/routes/messages.js`(Phase5)＋3クライアント。2026-07-08実装、本計画では今回初めて記載 |
 | バックグラウンド動作 | - | ⚠️設定のみ・未検証 | ❌未実装 | |
 | **Guestロール** | ❌ | ❌ | ❌ | サーバー側もowner/moderator/memberの3種のみ |
@@ -187,11 +210,44 @@ README.mdのPhase1の目的は「安定性・音質・低遅延・権限管理�
   ForegroundService自体が未実装。警備現場で「アプリを閉じたら送受話が
   切れる」のはPhase1の要件と矛盾する
 
-### E. 3クライアント間の機能差（引き続き残る課題）
+### E. 3クライアント間の機能差 → 解消（2026-07-25、十訂で完了）
 
-- 通報UI: Web版のみ。iOS/Androidは未実装
-- 録音の開始/停止UI: Web版のみ。iOS/Androidは録音中フラグの受信のみで
-  操作ボタンがない
+~~通報UI: Web版のみ。iOS/Androidは未実装~~
+~~録音の開始/停止UI: Web版のみ。iOS/Androidは録音中フラグの受信のみで
+操作ボタンがない~~
+
+**（2026-07-25 十訂）** iOS/Android双方に、Web版(`ptt-client`)の設計を
+移植する形で通報UI・録音開始/停止UIを実装した。
+
+- **通報**: `PTTReportStore`(iOS: Swift / Android: Kotlin)を新設し、
+  `POST /reports`(token-server/routes/reports.js)を呼ぶだけの薄いストアと
+  した(Web版`RoomView.vue`の`reportParticipant`の移植)。実際の対応
+  (内容確認・BAN実行)はモデレーターがFirestoreの`reports`コレクションを
+  見て手動で行う運用は変えていない
+- **録音**: `PTTRecordingStore`を新設し、`/rooms/:roomId/recording/start`・
+  `/recording/stop`を呼ぶ。ただしこのAPIのレスポンスは「開始/停止を
+  試みた/依頼した」ことしか意味せず、実際に録音中かどうかの確定状態
+  (active/startedAt)は送話ロックと同じくRoom Metadata経由で
+  `PTTConnectionManager`に非同期反映される設計とし、Web版
+  `RecordingBar.vue`と同じ「同意表示」の考え方(録音中は全参加者へ
+  常時開示)を踏襲した
+
+ただし以下は今回のスコープ外として明示的に除外している(ユーザーへ確認済み)：
+
+- **自動録音トグル(auto-recording ON設定)**: Web版にのみ存在する「入室時に
+  自動的に録音を開始する」設定と、その事前開示バナー。iOS/Androidは
+  対応していない。将来対応する場合は、設定の永続化先(Firestoreの
+  `rooms/{roomId}`ドキュメント等)・事前開示バナーの文言・開始トリガーの
+  実装場所(クライアント側かtoken-serverのwebhook側か)を先に洗い出す必要が
+  ある
+
+**成果物の反映状況について**: 今回の実装はアップロードされたZIPアーカイブ
+（`ptt-ios.zip`・`ptt-android.zip`）に対して行い、更新版ZIPとして返却した。
+**（2026-07-25 十一訂）** ユーザーから「リポジトリへ反映して動作確認は
+済んでいます」との報告を受けた。ただし六訂・八訂で
+`ptt-ios/ptt-ios/README.md`について踏んだような、リポジトリ本体を
+再取得し`git show`等で直接検証するプロセスは今回実施していない。
+ユーザー申告に基づく完了として扱う。
 
 ### F. Future Featuresとの距離（優先度は低いが記録のため）
 
@@ -236,7 +292,17 @@ Phase8で到達済み。音質・低遅延はLiveKit（WebRTC/NetEQ）への移�
   `git show e85dc28 -- ptt-ios/ptt-ios/README.md`で確認済み
 - iOS: バックグラウンド動作の実機検証・本実装
 - Android: ForegroundServiceの実装
-- iOS/Androidへの通報UI・録音開始/停止UIの実装（Web版を移植）
+- ~~iOS/Androidへの通報UI・録音開始/停止UIの実装（Web版を移植）~~
+  ✅ **完了（2026-07-25、十訂）**: Web版(`ptt-client`)の設計を移植する形で、
+  iOS(`PTTRecordingStore.swift`/`PTTReportStore.swift`)・
+  Android(`PTTRecordingStore.kt`/`PTTReportStore.kt`)双方に実装した。
+  Room Metadata経由の録音状態(`isRecording`/`recordingStartedAt`)購読も
+  `PTTConnectionManager`に追加している。Web版の自動録音トグルはスコープ外
+  として意図的に除外(ユーザー確認済み)。
+  ✅ **リポジトリへの反映・動作確認も完了（2026-07-25、十一訂）**:
+  ユーザーからリポジトリ反映・動作確認済みとの報告を受けた
+  （`git show`等による本ドキュメント側での直接検証は未実施。ユーザー
+  申告に基づく完了として扱う）
 
 ### Phase 10: Permission ModelにGuestロールを追加
 2026-07-25の検討により、要件レベルでは以下の通り確定。詳細は
@@ -362,10 +428,12 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
 README.mdのビジョンと現状の差分のうち、影響範囲が限定的かつ着手しやすい
 ものから始めることを推奨します。
 
-1. **iOS/Androidへの通報UI・録音開始/停止UIの実装**（Web版の実装を移植する
-   形で対応可能。3クライアントの機能差を埋める最後のピース。**（2026-07-25
-   訂正）** 対象は「iOS/Android両方」で変わらないが、Web版はREADME上「未
-   実装」と書かれていた時期の記述が古いだけで実際は実装済み。詳細は項目3参照）
+1. ✅ **完了（2026-07-25、十訂）**: iOS/Androidへの通報UI・録音開始/停止UIを
+   実装した。Web版(`ptt-client`)の設計(`recording.ts`・`reportParticipant`)
+   を移植する形で、`PTTRecordingStore`/`PTTReportStore`相当の薄いストアを
+   両OSに新設し、Room Metadata経由の録音状態購読を`PTTConnectionManager`
+   に追加した。Web版のみが持つ「自動録音: ON」トグルはユーザーへ確認の上
+   スコープ外とすることで合意済み(対応不要)。詳細は「2-E」参照
 2. ✅ **完了（2026-07-25、コミット`e85dc28`でリポジトリ反映済みを確認）**:
    `ptt-ios/ptt-ios/README.md`をLiveKit移行後の実装に合わせて書き直した
    （旧AVAudioEngine実装時代の記述が残っており、ジッターバッファ誤判断の
@@ -408,3 +476,9 @@ README.mdのビジョンと現状の差分のうち、影響範囲が限定的�
    `UI_UX.md`・`SECURITY.md`・`AI.md`は転記元となる詳細記述が
    `token-server/README.md`側に存在しないため、依然として未着手のまま
    残っている
+7. ✅ **完了（2026-07-25、十一訂）**: iOS/Android通報UI・録音開始/停止UI
+   実装のリポジトリ反映確認。ユーザーから「リポジトリへ反映して動作確認は
+   済んでいます」との報告を受けた。**（留保）** 六訂・八訂で
+   `ptt-ios/ptt-ios/README.md`について踏んだような、リポジトリ本体を
+   再取得し`git show`等でコミット内容を直接検証するプロセスは今回実施して
+   いない。ユーザー申告に基づく完了として扱う
