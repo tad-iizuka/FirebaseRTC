@@ -406,4 +406,55 @@ router.patch('/:roomId/nickname', requireFirebaseAuth, requireRoomMembership, as
   }
 });
 
+/**
+ * GET /:roomId/org-context
+ *
+ * [Phase11] このRoomが組織階層(organizations/nodes)のどこに所属するかを
+ * 返す。クライアント(Web/iOS/Android)がパンくず表示等に使う想定。
+ *
+ * organizations/nodesはfirestore.rulesでクライアントへの直接読み取りを
+ * 全面拒否しているため、この参照APIが唯一の取得経路になる。
+ *
+ * 無所属Roomはエラーではなく正式な状態として扱う(5.4参照)。
+ * その場合は404ではなく200 + null群を返す。
+ */
+router.get('/:roomId/org-context', requireFirebaseAuth, requireRoomMembership, async (req, res) => {
+  const { roomId } = req.params;
+
+  try {
+    const roomSnap = await db.collection('rooms').doc(roomId).get();
+    const room = roomSnap.data() || {};
+
+    if (!room.orgId) {
+      return res.json({ orgId: null, orgName: null, breadcrumb: [] });
+    }
+
+    const orgRef = db.collection('organizations').doc(room.orgId);
+    const orgSnap = await orgRef.get();
+    if (!orgSnap.exists) {
+      // orgIdが指しているはずの団体が見つからない(削除された等)。
+      // クライアント側は無所属と同様に扱わせるため、ここでもエラーにはしない。
+      console.warn(`[org-context] roomId=${roomId} の orgId=${room.orgId} に対応する団体が存在しません`);
+      return res.json({ orgId: null, orgName: null, breadcrumb: [] });
+    }
+
+    // nodeAncestorIds(自分を含まない祖先) + nodeId(自分自身)の順で、
+    // ルートに近い順のnodeドキュメントをまとめて取得する。
+    const nodeIdsInOrder = [...(room.nodeAncestorIds || []), ...(room.nodeId ? [room.nodeId] : [])];
+    let breadcrumb = [];
+    if (nodeIdsInOrder.length > 0) {
+      const nodeRefs = nodeIdsInOrder.map((id) => orgRef.collection('nodes').doc(id));
+      const nodeSnaps = await db.getAll(...nodeRefs);
+      breadcrumb = nodeSnaps
+        .filter((s) => s.exists)
+        .map((s) => ({ nodeId: s.id, name: s.data().name, depth: s.data().depth }));
+    }
+
+    res.json({ orgId: room.orgId, orgName: orgSnap.data().name, breadcrumb });
+  } catch (e) {
+    console.error('[org-context取得エラー]', e.message);
+    res.status(500).json({ error: '組織階層情報の取得に失敗しました' });
+  }
+});
+
 module.exports = router;

@@ -11,6 +11,8 @@
  *   7. 管理者向けの複数ルーム横断監視API (routes/admin.js) [Phase 5で追加]
  *   8. 録音(Egress)の開始/停止/状態取得・履歴・ダウンロードURL発行を管理する
  *      (routes/recording.js) [Phase 5/8で追加]
+ *   9. 組織階層(Company/Branch/Site、あるいはCommunity/Group)の管理・
+ *      Roomへの割り当て・Roomからの参照 (routes/organizations.js) [Phase 11で追加]
  *
  * [経緯]
  * 旧 ptt-server/server.js (WS制御 + Opusミキシング) はLiveKitサーバー本体に
@@ -35,6 +37,7 @@ const webhooksRouter = require('./routes/webhooks');
 const messagesRouter = require('./routes/messages');
 const adminRouter = require('./routes/admin');
 const recordingRouter = require('./routes/recording');
+const organizationsRouter = require('./routes/organizations'); // [Phase11] GET .../org-context, /admin/organizations*, PATCH /admin/rooms/:roomId/org-assignment
 
 const PORT = process.env.PORT || 8080;
 
@@ -96,6 +99,7 @@ app.use('/rooms', recordingRouter); // POST/GET /rooms/:roomId/recording/*, /rec
 app.use('/token', tokenRouter);
 app.use('/reports', reportsRouter);
 app.use('/admin', adminRouter); // GET /admin/rooms, GET /admin/rooms/:roomId [Phase 5]
+app.use('/admin', organizationsRouter); // [Phase11] /admin/organizations*, PATCH /admin/rooms/:roomId/org-assignment
 
 app.listen(PORT, () => {
   console.log(`ptt-token-server listening on :${PORT}`);

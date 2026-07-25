@@ -19,6 +19,15 @@ rules_version = '2';
 //   - [Phase8] 監査ログ(auditLogs)・録音履歴(recordings)もクライアントへの
 //     直接公開は行わない。閲覧はそれぞれ GET /admin/audit-logs
 //     (audit:read権限)・GET /rooms/:roomId/recordings(メンバーのみ)経由に限定する。
+//   - [Phase11] 組織階層(organizations/nodes)もクライアントへの直接公開は
+//     行わない。rooms本体と同様、参照は必ずtoken-server経由のAPI
+//     (GET /rooms/:roomId/org-context, GET /admin/organizations 等)を通す。
+//     rooms/members が持つ「自分自身のドキュメントだけ即時UI反映のため読める」
+//     という例外パターンはここでは採用しない。「自分がこのorgId配下の
+//     いずれかのroomのメンバーであるか」をrules内で安全に判定する手段が
+//     ないため(member一覧をorganizationsドキュメントへ同期する設計は、
+//     Guestの一時参加ライフサイクル(招待コード生存中のみ有効)と
+//     同期タイミングが噛み合わず不採用)。
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -53,6 +62,26 @@ service cloud.firestore {
         // 直接開示はせず、必ずtoken-server経由(GET /rooms/:roomId/recordings,
         // .../download-url)で取得させる(ダウンロードURL発行権限を
         // owner/moderatorに限定するため)。
+        allow read, write: if false;
+      }
+    }
+
+    match /organizations/{orgId} {
+      // [Phase11] 組織階層(Company/Branch/Site、あるいはCommunity/Group)。
+      // rooms/members と同じ理由でクライアントへの直接公開は行わない。
+      // 加えて、rooms特有の「自分自身のmembersドキュメントだけ即時UI反映のため
+      // 読める」という例外パターンもここでは採用しない: 「自分がこのorgId配下の
+      // 何らかのroomのメンバーであるか」をrules内で判定する手段がない
+      // (member配列をorganizationsドキュメントへ同期する設計は、Guestの
+      // 一時参加ライフサイクル(招待コード生存中のみ有効)と同期タイミングが
+      // 噛み合わないため不採用)。
+      // 団体名・拠点名の表示は token-server 経由の参照API
+      // (GET /rooms/:roomId/org-context, GET /admin/organizations 等)に一本化する。
+      allow read, write: if false;
+
+      match /nodes/{nodeId} {
+        // orgId直下の階層ノード(Branch/Site、あるいはGroup)。
+        // 理由は親(organizations)と同じ。
         allow read, write: if false;
       }
     }
