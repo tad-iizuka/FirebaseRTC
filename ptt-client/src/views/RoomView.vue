@@ -11,6 +11,7 @@ import { useConnectionStore, type ParticipantInfo } from '@/stores/connection'
 import { useRecordingStore } from '@/stores/recording'
 import Button from '@/components/ui/Button.vue'
 import StatusRow from '@/components/StatusRow.vue'
+import GuestStatusBar from '@/components/GuestStatusBar.vue'
 import InviteBox from '@/components/InviteBox.vue'
 import PttButton from '@/components/PttButton.vue'
 import RecordingBar from '@/components/RecordingBar.vue'
@@ -135,6 +136,14 @@ async function sendChat(text: string) {
   }
 }
 
+async function updateNickname(displayName: string) {
+  try {
+    await ban.updateNickname(settings.tokenServerUrl, roomId.value, displayName)
+  } catch {
+    // ban.nicknameErrorMessage に理由がセットされているのでUIには既に反映済み
+  }
+}
+
 onMounted(enter)
 onUnmounted(() => {
   connection.disconnect()
@@ -148,6 +157,13 @@ onUnmounted(() => {
     <p v-if="banNotice" class="px-5 py-2 text-xs text-destructive">{{ banNotice }}</p>
 
     <StatusRow :kind="connection.statusKind" :message="connection.statusMessage" :room-id="roomId" />
+    <GuestStatusBar
+      :is-guest="ban.myRole === 'guest'"
+      :display-name="ban.myDisplayName"
+      :updating="ban.nicknameUpdating"
+      :error-message="ban.nicknameErrorMessage"
+      @update-nickname="updateNickname"
+    />
     <RecordingBar
       :is-recording="connection.isRecording"
       :started-at="connection.recordingStartedAt"

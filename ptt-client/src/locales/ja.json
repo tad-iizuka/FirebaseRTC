@@ -19,7 +19,9 @@
     "livekitUrl": "LiveKit URL (wss://)",
     "signInWithGoogle": "Googleでサインイン",
     "signingIn": "サインイン中...",
-    "signInWithApple": "Appleでサインイン"
+    "signInWithApple": "Appleでサインイン",
+    "signInAsGuest": "ゲストとして参加",
+    "guestHint": "ゲストは登録不要ですが、送信内容や参加履歴は削除されず保持されます。"
   },
   "onboarding": {
     "skip": "スキップ",
@@ -49,6 +51,7 @@
   "roomSelect": {
     "createRoom": "新しいルームを作成する",
     "creating": "作成中...",
+    "guestCannotCreate": "ゲストはルームを作成できません。招待コードで既存のルームに参加してください。",
     "roomIdLabel": "ルームID",
     "roomIdPlaceholder": "招待された側が入力",
     "inviteCodeLabel": "招待コード",
@@ -67,7 +70,13 @@
     "banConfirmDescription": "{name} をこのルームからBANしますか?\nこの操作は取り消せません。",
     "banConfirmLabel": "BANする",
     "reportPromptLabel": "{name} を通報する理由を入力してください",
-    "reportError": "通報エラー: {message}"
+    "reportError": "通報エラー: {message}",
+    "guestBadge": "ゲスト",
+    "nicknameUnset": "ニックネーム未設定",
+    "nicknameEdit": "ニックネームを変更",
+    "nicknamePlaceholder": "ニックネーム",
+    "nicknameSave": "保存",
+    "nicknameSaving": "保存中..."
   },
   "recording": {
     "badge": "録音中",
@@ -115,6 +124,7 @@
     "notSignedIn": "サインインしていません",
     "googleSignIn": "Googleサインインエラー: {message}",
     "appleSignIn": "Appleサインインエラー: {message}",
+    "guestSignIn": "ゲストサインインエラー: {message}",
     "chatFetch": "チャット取得エラー: {message}",
     "roleFetch": "ロール取得エラー: {message}",
     "banWatch": "BAN監視エラー: {message}"

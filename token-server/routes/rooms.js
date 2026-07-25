@@ -17,7 +17,7 @@ const crypto = require('crypto');
 const { RoomServiceClient } = require('livekit-server-sdk');
 const { db } = require('../lib/firebaseAdmin');
 const { logAdminAction } = require('../lib/auditLog');
-const { requireFirebaseAuth, isValidRoomId } = require('../middleware/requireAuth');
+const { requireFirebaseAuth, isValidRoomId, requireRoomMembership } = require('../middleware/requireAuth');
 
 const router = express.Router();
 
@@ -134,13 +134,26 @@ router.post('/:roomId/join', requireFirebaseAuth, async (req, res) => {
       if (activeMembers.size >= room.maxMembers) {
         return res.status(403).json({ error: 'ルームの定員に達しています' });
       }
+
+      // [Phase10: Guestロール]
+      // 「Firebase匿名認証で入ってきたかどうか」はIDトークンの検証結果
+      // (firebase.sign_in_provider)であり、クライアントが自己申告できる値
+      // ではない。これを正としてrole判定を行うことで、
+      // 「本当は匿名認証なのにroleだけmemberと偽装する」余地を無くしている。
+      // 参加後にMemberへ昇格する導線は設けない(5.1参照)。GuestのIDは
+      // 生成されたまま保持し、Member系の識別子体系とは一切紐付けない。
+      const isGuest = req.firebaseUser.firebase?.sign_in_provider === 'anonymous';
+
       await memberRef.set({
-        role: 'member',
+        role: isGuest ? 'guest' : 'member',
+        // 匿名認証ではname/emailを持たないため、5.1の「表示名ルール」通り
+        // 未設定ならID(uid)がそのまま表示名になる。ニックネームは別途
+        // PATCH /:roomId/nickname で本人が設定する。
         displayName: req.firebaseUser.name || req.firebaseUser.email || uid,
         status: 'active',
         joinedAt: new Date(),
       });
-      console.log(`[ルーム参加] roomId=${roomId} uid=${uid}`);
+      console.log(`[ルーム参加] roomId=${roomId} uid=${uid} role=${isGuest ? 'guest' : 'member'}`);
     }
 
     // [同意/開示] 自動録音が有効なルームであることを、実際に接続する前の
@@ -148,7 +161,13 @@ router.post('/:roomId/join', requireFirebaseAuth, async (req, res) => {
     // Metadata経由で開示する既存方針(recording.js冒頭コメント参照)を、
     // 「まだ誰も録音開始ボタンを押していないのに録音が始まる」自動録音の
     // ケースでも入室前から満たすため。
-    res.json({ roomId, joined: true, autoRecording: !!room.settings?.autoRecording });
+    const finalMemberSnap = memberSnap.exists ? memberSnap : await memberRef.get();
+    res.json({
+      roomId,
+      joined: true,
+      role: finalMemberSnap.data().role,
+      autoRecording: !!room.settings?.autoRecording,
+    });
   } catch (e) {
     console.error('[ルーム参加エラー]', e.message);
     res.status(500).json({ error: 'ルームへの参加に失敗しました' });
@@ -267,6 +286,12 @@ router.post('/:roomId/members/:targetUid/role', requireFirebaseAuth, async (req,
     if (targetData.status === 'banned') {
       return res.status(400).json({ error: 'BAN済みのメンバーのroleは変更できません' });
     }
+    // [Phase10: Guestロール] Guestは本人確認のない匿名認証由来のため、
+    // このAPI経由でmoderatorへ任命できてしまう抜け道を塞ぐ。
+    // Member昇格の導線自体を設けない方針(5.1参照)とも整合させている。
+    if (targetData.role === 'guest') {
+      return res.status(403).json({ error: 'Guestのroleは変更できません' });
+    }
 
     await targetRef.update({ role });
 
@@ -337,6 +362,47 @@ router.patch('/:roomId/settings', requireFirebaseAuth, async (req, res) => {
   } catch (e) {
     console.error('[設定更新エラー]', e.message);
     res.status(500).json({ error: '設定の更新に失敗しました' });
+  }
+});
+
+const MAX_NICKNAME_LENGTH = 30;
+
+/**
+ * PATCH /rooms/:roomId/nickname
+ * body: { displayName: string }
+ *
+ * [Phase10: Guestロール 5.1]
+ * 自分自身の表示名(ニックネーム)を変更する。roleを問わず本人のみ実行可能
+ * (owner/moderator/member/guestいずれも対象。5.1はGuestの文脈で定義した
+ * 仕様だが、他roleにも一貫して適用してよい性質のものなので分けていない)。
+ *
+ * 監査ログには残さない(5.1「変更履歴自体は追わなくてよい」)。
+ * 監査ログ・録音の話者記録は内部UID(identity)に追従する設計であり、
+ * displayNameの変更はそれらに影響しない(routes/token.jsでLiveKitの
+ * identityには常にuidを使っているため)。
+ *
+ * リアルタイム反映は既存のFirestoreクライアントリスナー(BAN即時反映等と
+ * 同じ仕組み)に乗るため、このAPI側で追加の通知処理は行わない。
+ */
+router.patch('/:roomId/nickname', requireFirebaseAuth, requireRoomMembership, async (req, res) => {
+  const uid = req.firebaseUser.uid;
+  const { roomId } = req.params;
+  const displayName = typeof req.body?.displayName === 'string' ? req.body.displayName.trim() : '';
+
+  if (!displayName) {
+    return res.status(400).json({ error: 'displayName は必須です' });
+  }
+  if (displayName.length > MAX_NICKNAME_LENGTH) {
+    return res.status(400).json({ error: `displayName は${MAX_NICKNAME_LENGTH}文字以内で指定してください` });
+  }
+
+  try {
+    await db.doc(`rooms/${roomId}/members/${uid}`).update({ displayName });
+    console.log(`[ニックネーム変更] roomId=${roomId} uid=${uid}`);
+    res.json({ roomId, displayName });
+  } catch (e) {
+    console.error('[ニックネーム変更エラー]', e.message);
+    res.status(500).json({ error: 'ニックネームの変更に失敗しました' });
   }
 });
 

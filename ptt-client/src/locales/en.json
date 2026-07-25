@@ -19,7 +19,9 @@
     "livekitUrl": "LiveKit URL (wss://)",
     "signInWithGoogle": "Sign in with Google",
     "signingIn": "Signing in...",
-    "signInWithApple": "Sign in with Apple"
+    "signInWithApple": "Sign in with Apple",
+    "signInAsGuest": "Join as guest",
+    "guestHint": "No registration required as a guest, but your messages and participation history are not deleted."
   },
   "onboarding": {
     "skip": "Skip",
@@ -49,6 +51,7 @@
   "roomSelect": {
     "createRoom": "Create a new room",
     "creating": "Creating...",
+    "guestCannotCreate": "Guests cannot create rooms. Join an existing room with an invite code instead.",
     "roomIdLabel": "Room ID",
     "roomIdPlaceholder": "Entered by the invited person",
     "inviteCodeLabel": "Invite code",
@@ -67,7 +70,13 @@
     "banConfirmDescription": "Ban {name} from this room?\nThis action cannot be undone.",
     "banConfirmLabel": "Ban",
     "reportPromptLabel": "Enter the reason for reporting {name}",
-    "reportError": "Report error: {message}"
+    "reportError": "Report error: {message}",
+    "guestBadge": "Guest",
+    "nicknameUnset": "No nickname set",
+    "nicknameEdit": "Edit nickname",
+    "nicknamePlaceholder": "Nickname",
+    "nicknameSave": "Save",
+    "nicknameSaving": "Saving..."
   },
   "recording": {
     "badge": "Recording",
@@ -115,6 +124,7 @@
     "notSignedIn": "Not signed in",
     "googleSignIn": "Google sign-in error: {message}",
     "appleSignIn": "Apple sign-in error: {message}",
+    "guestSignIn": "Guest sign-in error: {message}",
     "chatFetch": "Chat fetch error: {message}",
     "roleFetch": "Role fetch error: {message}",
     "banWatch": "Ban monitoring error: {message}"

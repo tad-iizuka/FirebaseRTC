@@ -31,6 +31,10 @@ const settings = useSettingsStore()
     <Button variant="secondary" :disabled="auth.isSigningIn" @click="auth.signInWithApple">
       {{ t('auth.signInWithApple') }}
     </Button>
+    <Button variant="secondary" :disabled="auth.isSigningIn" @click="auth.signInAsGuest">
+      {{ t('auth.signInAsGuest') }}
+    </Button>
+    <p class="text-[11px] text-muted-foreground">{{ t('auth.guestHint') }}</p>
 
     <p v-if="auth.errorMessage" class="text-[11px] text-destructive">{{ auth.errorMessage }}</p>
   </div>

@@ -14,6 +14,7 @@ export interface CreateRoomResponse {
 export interface JoinRoomResponse {
   roomId: string
   joined: true
+  role: 'owner' | 'moderator' | 'member' | 'guest'
   autoRecording: boolean
 }
 
@@ -57,6 +58,12 @@ export interface RoomSettingsResponse {
   autoRecording: boolean
 }
 
+/** PATCH /rooms/:roomId/nickname のレスポンス */
+export interface NicknameResponse {
+  roomId: string
+  displayName: string
+}
+
 export interface BanResponse {
   roomId: string
   targetUid: string
@@ -69,7 +76,7 @@ export interface ReportResponse {
 
 /** rooms/{roomId}/members/{uid} のFirestoreドキュメント形状 */
 export interface RoomMember {
-  role: 'owner' | 'moderator' | 'member'
+  role: 'owner' | 'moderator' | 'member' | 'guest'
   displayName: string
   status: 'active' | 'banned'
 }

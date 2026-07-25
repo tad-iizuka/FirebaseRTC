@@ -21,7 +21,7 @@ export interface AdminRoomListResponse {
 
 export interface AdminMember {
   uid: string
-  role: 'owner' | 'moderator' | 'member'
+  role: 'owner' | 'moderator' | 'member' | 'guest'
   displayName: string
   status: 'active' | 'banned'
   joinedAt: number | null

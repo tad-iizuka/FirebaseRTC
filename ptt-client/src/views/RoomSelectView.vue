@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/stores/settings'
+import { useAuthStore } from '@/stores/auth'
 import { useRoomStore } from '@/stores/room'
 import { useSavedRoomsStore, type SavedRoom } from '@/stores/savedRooms'
 import Button from '@/components/ui/Button.vue'
@@ -13,6 +14,7 @@ import SavedRoomsList from '@/components/SavedRoomsList.vue'
 const { t } = useI18n()
 const router = useRouter()
 const settings = useSettingsStore()
+const auth = useAuthStore()
 const roomStore = useRoomStore()
 const savedRooms = useSavedRoomsStore()
 
@@ -52,13 +54,16 @@ function openSavedRoom(saved: SavedRoom) {
 
 <template>
   <div class="grid gap-3.5 p-3.5">
-    <Button :disabled="roomStore.isWorking" @click="handleCreateRoom">
-      {{ roomStore.isWorking ? t('roomSelect.creating') : t('roomSelect.createRoom') }}
-    </Button>
+    <template v-if="!auth.currentUser?.isAnonymous">
+      <Button :disabled="roomStore.isWorking" @click="handleCreateRoom">
+        {{ roomStore.isWorking ? t('roomSelect.creating') : t('roomSelect.createRoom') }}
+      </Button>
 
-    <div class="text-center text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
-      {{ t('common.orDivider') }}
-    </div>
+      <div class="text-center text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
+        {{ t('common.orDivider') }}
+      </div>
+    </template>
+    <p v-else class="text-[11px] text-muted-foreground">{{ t('roomSelect.guestCannotCreate') }}</p>
 
     <div class="grid grid-cols-2 gap-2.5">
       <div class="grid gap-1">

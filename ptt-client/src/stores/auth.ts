@@ -5,6 +5,7 @@ import {
   OAuthProvider,
   type User,
   onAuthStateChanged,
+  signInAnonymously,
   signInWithPopup,
   signOut as firebaseSignOut,
 } from 'firebase/auth'
@@ -53,6 +54,22 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  async function signInAsGuest() {
+    errorMessage.value = null
+    isSigningIn.value = true
+    try {
+      // [Phase10: Guestロール]
+      // Firebase匿名認証でサインインする。token-server側(POST /rooms/:roomId/join)は
+      // IDトークンのfirebase.sign_in_providerを見て自動的にrole:'guest'を割り当てるため、
+      // クライアントからは「匿名でサインインする」以外に特別なパラメータを送る必要はない。
+      await signInAnonymously(firebaseAuth)
+    } catch (e) {
+      errorMessage.value = t('errors.guestSignIn', { message: (e as Error).message })
+    } finally {
+      isSigningIn.value = false
+    }
+  }
+
   async function signOut() {
     await firebaseSignOut(firebaseAuth)
   }
@@ -68,6 +85,7 @@ export const useAuthStore = defineStore('auth', () => {
     init,
     signInWithGoogle,
     signInWithApple,
+    signInAsGuest,
     signOut,
     clearError,
   }
