@@ -73,11 +73,11 @@ node dev-tools/grant-admin-permission.js grant <uid> rooms:monitor "運用チー
   }
 ```
 
-`.github/workflows/admin-deploy.yml` に、`web-deploy.yml`(更新版)と同じ形で
-Node.jsセットアップ + `npm ci` + `npm run lint` + `npm run test` + `npm run build` を追加し、
+`.github/workflows/admin-deploy.yml` は、`web-deploy.yml`(更新版)と同じ形で
+Node.jsセットアップ + `npm ci` + `npm run lint` + `npm run test` + `npm run build` を追加済みで、
 `ptt-client-dist` と同様に `admin-dashboard-dist` をartifactとして
-`deploy-preview` / `deploy-production` の両ジョブへ渡すよう変更してください
-(現行の `html-validate` チェックは廃止します)。
+`deploy-preview` / `deploy-production` の両ジョブへ渡すよう変更済み
+(旧`html-validate` チェックは廃止済み)。
 
 ## 意図的に省略した箇所
 
