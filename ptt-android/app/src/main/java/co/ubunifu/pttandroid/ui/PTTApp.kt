@@ -134,6 +134,10 @@ fun PTTApp(
     val myRole by banStore.myRole.collectAsState()
     val isBanned by banStore.isBanned.collectAsState()
     val banError by banStore.errorMessage.collectAsState()
+    // [Phase10: Guestロール 5.1] 自分自身のニックネーム(displayName)とその更新状態。
+    val myDisplayName by banStore.myDisplayName.collectAsState()
+    val nicknameUpdating by banStore.nicknameUpdating.collectAsState()
+    val nicknameError by banStore.nicknameErrorMessage.collectAsState()
     // [録音UI] Room Metadata経由でPTTConnectionManagerが保持している確定状態。
     val isRecording by connectionManager.isRecording.collectAsState()
     val recordingStartedAt by connectionManager.recordingStartedAt.collectAsState()
@@ -279,10 +283,28 @@ fun PTTApp(
             currentUser == null -> AuthSection(
                 errorMessage = authError,
                 onSignIn = onRequestGoogleSignIn,
+                onSignInAsGuest = { scope.launch { authManager.signInAsGuest() } },
             )
 
             activeRoomId != null -> {
                 StatusRow(status)
+                GuestStatusBar(
+                    isGuest = myRole == "guest",
+                    displayName = myDisplayName,
+                    updating = nicknameUpdating,
+                    errorMessage = nicknameError,
+                    onUpdateNickname = { name ->
+                        val roomId = activeRoomId ?: return@GuestStatusBar
+                        scope.launch {
+                            try {
+                                val idToken = authManager.fetchIdToken()
+                                banStore.updateNickname(tokenServerUrl, idToken, roomId, name)
+                            } catch (e: Exception) {
+                                // banStore.nicknameErrorMessage に理由がセットされているのでUIには既に反映済み
+                            }
+                        }
+                    },
+                )
                 RecordingSection(
                     isRecording = isRecording,
                     recordingStartedAt = recordingStartedAt,
@@ -346,6 +368,7 @@ fun PTTApp(
                 onTokenServerUrlChange = { tokenServerUrl = it },
                 livekitUrl = livekitUrl,
                 onLivekitUrlChange = { livekitUrl = it },
+                isGuest = currentUser?.isAnonymous == true,
                 isWorking = roomWorking,
                 errorMessage = roomError,
                 savedRooms = savedRooms,
@@ -516,7 +539,7 @@ private fun HeaderRow(currentUserName: String?, channelLabel: String, onSignOut:
 }
 
 @Composable
-private fun AuthSection(errorMessage: String?, onSignIn: () -> Unit) {
+private fun AuthSection(errorMessage: String?, onSignIn: () -> Unit, onSignInAsGuest: () -> Unit) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Button(
             onClick = onSignIn,
@@ -525,6 +548,12 @@ private fun AuthSection(errorMessage: String?, onSignIn: () -> Unit) {
         ) {
             Text(stringResource(R.string.auth_sign_in_with_google), fontFamily = Mono)
         }
+        // [Phase10: Guestロール] 登録不要で入室できる導線。サーバー側(routes/rooms.js)が
+        // Firebase匿名認証由来かどうかを見てrole:'guest'を割り当てる(Web版AuthView.vueと同じ)。
+        OutlinedButton(onClick = onSignInAsGuest, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.auth_sign_in_as_guest), fontFamily = Mono)
+        }
+        Text(stringResource(R.string.auth_guest_hint), fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Muted)
         errorMessage?.let { Text(it, color = PTTColors.Danger, fontFamily = Mono, fontSize = 11.sp) }
     }
 }
@@ -552,6 +581,98 @@ private fun StatusRow(status: ConnectionStatus) {
         Text(text, fontFamily = Mono, fontSize = 12.sp, color = PTTColors.Muted)
     }
     Spacer(Modifier.height(10.dp))
+}
+
+/**
+ * [Phase10: Guestロール 5.1]
+ * Web版(GuestStatusBar.vue)の移植。「自分自身がGuestとして参加していること」の表示と、
+ * ニックネーム変更を担う。他の参加者がGuestかどうかはクライアントからは判定できない
+ * (firestore.rulesにより自分自身のmembersドキュメントしか読めないため)。
+ * そのため、ここでは自分自身の状態のみを扱う。
+ */
+@Composable
+private fun GuestStatusBar(
+    isGuest: Boolean,
+    displayName: String?,
+    updating: Boolean,
+    errorMessage: String?,
+    onUpdateNickname: (String) -> Unit,
+) {
+    if (!isGuest) return
+
+    var editing by remember { mutableStateOf(false) }
+    var draft by remember { mutableStateOf(displayName ?: "") }
+    LaunchedEffect(displayName) {
+        if (!editing) draft = displayName ?: ""
+    }
+
+    Column(Modifier.fillMaxWidth().padding(bottom = 10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                stringResource(R.string.room_guest_badge),
+                fontFamily = Mono, fontSize = 10.sp,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                color = PTTColors.Accent,
+            )
+            Spacer(Modifier.width(8.dp))
+            if (!editing) {
+                Text(
+                    displayName?.takeIf { it.isNotBlank() } ?: stringResource(R.string.room_nickname_unset),
+                    fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Muted,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    stringResource(R.string.room_nickname_edit),
+                    fontFamily = Mono, fontSize = 10.sp, color = PTTColors.Muted,
+                    modifier = Modifier.pointerInput(Unit) {
+                        detectTapGestures(onTap = { draft = displayName ?: ""; editing = true })
+                    },
+                )
+            }
+        }
+        if (editing) {
+            Spacer(Modifier.height(6.dp))
+            OutlinedTextField(
+                value = draft,
+                onValueChange = { if (it.length <= 30) draft = it },
+                placeholder = { Text(stringResource(R.string.room_nickname_placeholder), fontFamily = Mono, fontSize = 11.sp) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = {
+                    val trimmed = draft.trim()
+                    if (trimmed.isNotEmpty()) { onUpdateNickname(trimmed); editing = false }
+                }),
+            )
+            Spacer(Modifier.height(4.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    if (updating) stringResource(R.string.room_nickname_saving) else stringResource(R.string.room_nickname_save),
+                    fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Accent,
+                    modifier = Modifier.pointerInput(Unit) {
+                        detectTapGestures(onTap = {
+                            if (updating) return@detectTapGestures
+                            val trimmed = draft.trim()
+                            if (trimmed.isEmpty()) return@detectTapGestures
+                            onUpdateNickname(trimmed)
+                            editing = false
+                        })
+                    },
+                )
+                Text(
+                    stringResource(R.string.common_cancel),
+                    fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Muted,
+                    modifier = Modifier.pointerInput(Unit) {
+                        detectTapGestures(onTap = { editing = false })
+                    },
+                )
+            }
+        }
+        errorMessage?.let {
+            Spacer(Modifier.height(4.dp))
+            Text(it, fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Danger)
+        }
+    }
 }
 
 @Composable
@@ -662,6 +783,7 @@ private fun RoomSelectionSection(
     onTokenServerUrlChange: (String) -> Unit,
     livekitUrl: String,
     onLivekitUrlChange: (String) -> Unit,
+    isGuest: Boolean,
     isWorking: Boolean,
     errorMessage: String?,
     savedRooms: List<SavedRoom>,
@@ -690,14 +812,23 @@ private fun RoomSelectionSection(
             singleLine = true,
         )
 
-        Button(
-            onClick = onCreateRoom,
-            enabled = !isWorking,
-            modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = PTTColors.Accent),
-        ) {
-            if (isWorking) CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White)
-            else Text(stringResource(R.string.room_select_create_room), fontFamily = Mono)
+        // [Phase10: Guestロール] Guestはルームを作成できない(token-server側では検証していないが、
+        // Web版RoomSelectView.vueと同じくクライアントUIとしてボタン自体を隠す)。
+        if (!isGuest) {
+            Button(
+                onClick = onCreateRoom,
+                enabled = !isWorking,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = PTTColors.Accent),
+            ) {
+                if (isWorking) CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White)
+                else Text(stringResource(R.string.room_select_create_room), fontFamily = Mono)
+            }
+        } else {
+            Text(
+                stringResource(R.string.room_select_guest_cannot_create),
+                fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Muted,
+            )
         }
 
         Text(stringResource(R.string.common_or_divider), fontFamily = Mono, fontSize = 10.sp, color = PTTColors.Muted, modifier = Modifier.fillMaxWidth())

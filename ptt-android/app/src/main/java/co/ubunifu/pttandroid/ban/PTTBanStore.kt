@@ -27,6 +27,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -46,9 +47,19 @@ class PTTBanStore(
     private val appContext = context.applicationContext
     private val db = FirebaseFirestore.getInstance()
 
-    /** 現在入室中のルームでの自分のロール。"owner" | "moderator" | "member" | null(未取得/不明) */
+    /** 現在入室中のルームでの自分のロール。"owner" | "moderator" | "member" | "guest" | null(未取得/不明) */
     private val _myRole = MutableStateFlow<String?>(null)
     val myRole: StateFlow<String?> = _myRole
+
+    /**
+     * [Phase10: Guestロール 5.1]
+     * 自分自身の表示名(ニックネーム)。members/{uid}ドキュメントの一部なので、
+     * BAN監視と同じonSnapshotリスナーに相乗りする形で追跡する。他人が変更した
+     * 場合は関係ないため、「自分のニックネームが他端末等から変更された場合の
+     * リアルタイム反映」用途(Web版stores/ban.tsのmyDisplayNameと同じ設計)。
+     */
+    private val _myDisplayName = MutableStateFlow<String?>(null)
+    val myDisplayName: StateFlow<String?> = _myDisplayName
 
     /** 自分がこのルームからBANされたことを検知した場合にtrueになる */
     private val _isBanned = MutableStateFlow(false)
@@ -56,6 +67,12 @@ class PTTBanStore(
 
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage
+
+    private val _nicknameUpdating = MutableStateFlow(false)
+    val nicknameUpdating: StateFlow<Boolean> = _nicknameUpdating
+
+    private val _nicknameErrorMessage = MutableStateFlow<String?>(null)
+    val nicknameErrorMessage: StateFlow<String?> = _nicknameErrorMessage
 
     private var listener: ListenerRegistration? = null
 
@@ -69,6 +86,7 @@ class PTTBanStore(
         ref.get()
             .addOnSuccessListener { snap ->
                 _myRole.value = if (snap.exists()) (snap.getString("role") ?: "member") else null
+                _myDisplayName.value = if (snap.exists()) snap.getString("displayName") else null
             }
             .addOnFailureListener { e ->
                 _errorMessage.value = appContext.getString(R.string.errors_role_fetch, e.message)
@@ -80,8 +98,11 @@ class PTTBanStore(
                 _errorMessage.value = appContext.getString(R.string.errors_ban_watch, error.message)
                 return@addSnapshotListener
             }
-            if (snapshot != null && snapshot.exists() && snapshot.getString("status") == "banned") {
-                _isBanned.value = true
+            if (snapshot != null && snapshot.exists()) {
+                if (snapshot.getString("status") == "banned") {
+                    _isBanned.value = true
+                }
+                _myDisplayName.value = snapshot.getString("displayName")
             }
         }
     }
@@ -91,7 +112,9 @@ class PTTBanStore(
         listener?.remove()
         listener = null
         _myRole.value = null
+        _myDisplayName.value = null
         _isBanned.value = false
+        _nicknameErrorMessage.value = null
     }
 
     /**
@@ -121,6 +144,46 @@ class PTTBanStore(
                     _errorMessage.value = message
                     throw BanApiException(response.code, message)
                 }
+            }
+        }
+
+    /**
+     * [Phase10: Guestロール 5.1]
+     * 自分自身のニックネームを変更する(token-server/routes/rooms.js の
+     * PATCH /:roomId/nickname)。roleを問わず本人のみ実行可能
+     * (owner/moderator/member/guestいずれも対象)。反映自体はaddSnapshotListener
+     * 経由で自動的に届くが、リクエスト成功時点でも楽観的にmyDisplayNameを更新しておく
+     * (Web版stores/ban.tsのupdateNicknameと同じ設計)。
+     */
+    suspend fun updateNickname(tokenServerUrl: String, idToken: String, roomId: String, displayName: String) =
+        withContext(Dispatchers.IO) {
+            _nicknameErrorMessage.value = null
+            _nicknameUpdating.value = true
+            try {
+                val encodedRoomId = java.net.URLEncoder.encode(roomId, "UTF-8")
+                val body = JSONObject().apply { put("displayName", displayName) }
+                val request = Request.Builder()
+                    .url("${tokenServerUrl.trimEnd('/')}/rooms/$encodedRoomId/nickname")
+                    .addHeader("Authorization", "Bearer $idToken")
+                    .patch(body.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+                    .build()
+
+                httpClient.newCall(request).execute().use { response ->
+                    val text = response.body?.string()
+                    if (response.code != 200) {
+                        val message = try {
+                            text?.let { JSONObject(it).optString("error").takeIf { s -> s.isNotEmpty() } }
+                        } catch (e: Exception) {
+                            null
+                        } ?: appContext.getString(R.string.errors_ban_action_failed, response.code)
+                        _nicknameErrorMessage.value = message
+                        throw BanApiException(response.code, message)
+                    }
+                    val json = JSONObject(text ?: "{}")
+                    _myDisplayName.value = json.optString("displayName").takeIf { it.isNotEmpty() }
+                }
+            } finally {
+                _nicknameUpdating.value = false
             }
         }
 }

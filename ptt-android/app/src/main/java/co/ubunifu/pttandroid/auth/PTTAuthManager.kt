@@ -86,6 +86,21 @@ class PTTAuthManager(context: Context, webClientId: String) {
         }
     }
 
+    /**
+     * [Phase10: Guestロール]
+     * Firebase匿名認証でサインインする。token-server側(POST /rooms/:roomId/join)は
+     * IDトークンのfirebase.sign_in_providerを見て自動的にrole:'guest'を割り当てるため、
+     * クライアントからは「匿名でサインインする」以外に特別なパラメータを送る必要はない
+     * (Web版 stores/auth.ts の signInAsGuest と同じ設計)。
+     */
+    suspend fun signInAsGuest() {
+        try {
+            auth.signInAnonymously().await()
+        } catch (e: Exception) {
+            _lastErrorMessage.value = appContext.getString(R.string.errors_guest_sign_in, e.message)
+        }
+    }
+
     fun signOut() {
         auth.signOut()
         googleSignInClient.signOut()

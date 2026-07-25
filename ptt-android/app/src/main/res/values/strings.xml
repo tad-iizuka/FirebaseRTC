@@ -31,6 +31,8 @@
     <string name="auth_token_server_url">トークンサーバーURL</string>
     <string name="auth_livekit_url">LiveKit URL (wss://)</string>
     <string name="auth_sign_in_with_google">Googleでサインイン</string>
+    <string name="auth_sign_in_as_guest">ゲストとして参加</string>
+    <string name="auth_guest_hint">ゲストは登録不要ですが、送信内容や参加履歴は削除されず保持されます。</string>
 
     <!-- onboarding -->
     <string name="onboarding_skip">スキップ</string>
@@ -54,6 +56,7 @@
     <string name="room_select_recent_rooms">— 最近使ったルーム —</string>
     <string name="room_select_created_room_label">自分が作成したルーム</string>
     <string name="room_select_joined_room_label">招待コードで参加したルーム</string>
+    <string name="room_select_guest_cannot_create">ゲストはルームを作成できません。招待コードで既存のルームに参加してください。</string>
 
     <!-- room -->
     <string name="room_leave_room">ルームを退出する</string>
@@ -62,6 +65,12 @@
     <string name="room_ban_confirm_title">BANしますか?</string>
     <string name="room_ban_confirm_description">%1$s をこのルームからBANしますか?\nこの操作は取り消せません。</string>
     <string name="room_ban_confirm_label">BANする</string>
+    <string name="room_guest_badge">ゲスト</string>
+    <string name="room_nickname_unset">ニックネーム未設定</string>
+    <string name="room_nickname_edit">ニックネームを変更</string>
+    <string name="room_nickname_placeholder">ニックネーム</string>
+    <string name="room_nickname_save">保存</string>
+    <string name="room_nickname_saving">保存中...</string>
 
     <!-- recording (録音開始/停止UI) -->
     <string name="recording_active_label">録音中</string>
@@ -110,6 +119,7 @@
     <string name="errors_not_signed_in">サインインしていません</string>
     <string name="errors_google_sign_in">Googleサインインエラー: %1$s</string>
     <string name="errors_google_token_missing">Googleサインインからトークンを取得できませんでした</string>
+    <string name="errors_guest_sign_in">ゲストサインインエラー: %1$s</string>
     <string name="errors_id_token_fetch_failed">ID Tokenの取得に失敗しました</string>
     <string name="errors_role_fetch">ロール取得エラー: %1$s</string>
     <string name="errors_ban_watch">BAN監視エラー: %1$s</string>

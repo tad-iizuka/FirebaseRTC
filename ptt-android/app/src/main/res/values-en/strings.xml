@@ -20,6 +20,8 @@
     <string name="auth_token_server_url">Token Server URL</string>
     <string name="auth_livekit_url">LiveKit URL (wss://)</string>
     <string name="auth_sign_in_with_google">Sign in with Google</string>
+    <string name="auth_sign_in_as_guest">Join as guest</string>
+    <string name="auth_guest_hint">No registration required as a guest, but your messages and participation history are not deleted.</string>
 
     <!-- onboarding -->
     <string name="onboarding_skip">Skip</string>
@@ -43,6 +45,7 @@
     <string name="room_select_recent_rooms">— Recently used rooms —</string>
     <string name="room_select_created_room_label">Room you created</string>
     <string name="room_select_joined_room_label">Room joined with an invite code</string>
+    <string name="room_select_guest_cannot_create">Guests cannot create rooms. Join an existing room with an invite code instead.</string>
 
     <!-- room -->
     <string name="room_leave_room">Leave room</string>
@@ -51,6 +54,12 @@
     <string name="room_ban_confirm_title">Ban this participant?</string>
     <string name="room_ban_confirm_description">Ban %1$s from this room?\nThis action cannot be undone.</string>
     <string name="room_ban_confirm_label">Ban</string>
+    <string name="room_guest_badge">Guest</string>
+    <string name="room_nickname_unset">No nickname set</string>
+    <string name="room_nickname_edit">Edit nickname</string>
+    <string name="room_nickname_placeholder">Nickname</string>
+    <string name="room_nickname_save">Save</string>
+    <string name="room_nickname_saving">Saving...</string>
 
     <!-- recording -->
     <string name="recording_active_label">Recording</string>
@@ -99,6 +108,7 @@
     <string name="errors_not_signed_in">Not signed in</string>
     <string name="errors_google_sign_in">Google sign-in error: %1$s</string>
     <string name="errors_google_token_missing">Could not get a token from Google sign-in</string>
+    <string name="errors_guest_sign_in">Guest sign-in error: %1$s</string>
     <string name="errors_id_token_fetch_failed">Failed to obtain an ID token</string>
     <string name="errors_role_fetch">Role fetch error: %1$s</string>
     <string name="errors_ban_watch">Ban monitoring error: %1$s</string>
