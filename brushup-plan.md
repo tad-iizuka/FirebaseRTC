@@ -29,6 +29,12 @@ iOS READMEがLiveKit移行前の記述のまま更新されていなかったた
 `admin-dashboard/README.md`の表現ズレ修正は、いずれも同一コミット
 （`e85dc28 change README.md`）で**実際にリポジトリへ反映済み**であることを
 `git show`で確認した。次アクションの該当項目を完了扱いに更新する）
+九訂: 2026-07-25（「6. 残る空テンプレート文書の整備」を実施。`API.md`・
+`DATA_MODEL.md`へ`token-server/README.md`の該当内容（API一覧テーブル・
+Firestoreデータモデル）を転記し、`token-server/README.md`側の該当箇所は
+転記済みである旨を明記した参照文へ置き換えた。ドキュメント棚卸しで唯一
+残っていた未完了項目が解消されたため、次アクションの該当項目を完了扱いに
+更新する）
 
 > 本改定では、アップロードされた `README.md`（"Connect to a place, not to a person."）に
 > 明記されたビジョン・原則・ターゲットロードマップを"あるべき姿"の物差しとして採用し、
@@ -394,6 +400,11 @@ README.mdのビジョンと現状の差分のうち、影響範囲が限定的�
    GuestIDとMember昇格時のID整合性（同一IDのまま昇格するか、新規ID発行に
    なるか）は監査ログの設計に直結するため、実装着手前に確定させておく
    必要がある）
-6. **残る空テンプレート文書の整備**（`API.md`・`DATA_MODEL.md`を優先し、
-   `token-server/README.md`の該当内容を転記する形で最小コストで着手可能。
-   優先度は低いが、ドキュメント棚卸しで唯一残った未完了項目）
+6. ✅ **完了（2026-07-25）**: 残る空テンプレート文書の整備を実施。
+   `API.md`・`DATA_MODEL.md`へ`token-server/README.md`の該当内容
+   （API一覧テーブル・Firestoreデータモデル）を転記し、
+   `token-server/README.md`側は該当箇所を「転記済み・詳細は`API.md`/
+   `DATA_MODEL.md`を参照」という参照文へ置き換えて重複を解消した。
+   `UI_UX.md`・`SECURITY.md`・`AI.md`は転記元となる詳細記述が
+   `token-server/README.md`側に存在しないため、依然として未着手のまま
+   残っている

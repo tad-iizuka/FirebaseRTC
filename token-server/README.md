@@ -58,45 +58,8 @@ Firebase ID Tokenを持たないため、代わりに `WebhookReceiver` によ�
 
 **データモデル (Firestore)**
 
-```
-rooms/{roomId}
-  - ownerUid: string
-  - createdAt: timestamp
-  - visibility: "invite_only"
-  - inviteCode: string (8文字の英数字)
-  - maxMembers: number
-  - talkLock: { uid, acquiredAt, expiresAt } | null                  [Phase 2で追加]
-  - recording: { active, egressId, startedAt, startedByUid } | null  [Phase5で追加]
-
-rooms/{roomId}/members/{uid}
-  - role: "owner" | "moderator" | "member"
-  - displayName: string
-  - status: "active" | "banned"
-  - joinedAt: timestamp
-
-rooms/{roomId}/messages/{messageId}                                  [Phase5で追加]
-  - uid, displayName, text, createdAt
-
-rooms/{roomId}/recordings/{egressId}                                 [Phase8で追加]
-
-  - egressId, filepath, startedAt, endedAt, status, startedByUid
-  - routes/webhooks.js の handleEgressEnded() が egress_ended 受信時に書き込む、録音の「確定した履歴」。rooms/{roomId}.recording が「現在進行中の録音1件」しか保持しないのに対し、こちらは過去分を含めて蓄積される。
-
-reports/{reportId}
-  - reporterUid, reportedUid, roomId, reason, status, createdAt
-  - expireAt: timestamp                                              [Phase8で追加、TTL用]
-
-adminUsers/{uid}                                                     [Phase5で追加]
-
-  - permissions: string[]  (例: ["rooms:monitor", "audit:read", "admins:manage"])
-  - grantedAt, note
-
-auditLogs/{logId}                                                    [Phase8で追加]
-
-  - actorUid, action, targetRoomId, targetUid, detail, createdAt
-  - expireAt: timestamp (TTL用)
-  - lib/auditLog.js の logAdminAction() が管理系操作のたびに書き込む
-```
+各コレクション・フィールドの一覧は `DATA_MODEL.md` に転記済み（2026-07-25）。
+詳細はそちらを参照。
 
 **クライアントからFirestoreへの直接書き込みは一切許可しない**（`firestore.rules`参照）。
 ルーム作成・参加・BAN・送話ロック・録音の開始/停止は全てこのサーバーのAPI
@@ -107,30 +70,8 @@ auditLogs/{logId}                                                    [Phase8で�
 
 ## API一覧
 
-| Method | Path | 認証 | 説明 |
-|---|---|---|---|
-| GET | `/` | 不要 | ヘルスチェック |
-| POST | `/rooms` | 必須 | ルーム作成。呼び出しユーザーがownerになる。招待コードを返す |
-| POST | `/rooms/:roomId/join` | 必須 | 招待コードを検証しmembersに追加 |
-| GET | `/token?room=roomId` | 必須 | メンバーシップ確認後、LiveKit接続用JWTを発行 |
-| POST | `/rooms/:roomId/members/:targetUid/ban` | 必須(owner/moderatorのみ) | BAN化 + LiveKitから即時キック |
-| POST | `/rooms/:roomId/members/:targetUid/role` | 必須(ownerのみ) | moderator/memberへのrole変更 **[Phase8]** |
-| POST | `/rooms/:roomId/talk/start` | 必須(メンバーのみ) | 発話ロックの取得 |
-| POST | `/rooms/:roomId/talk/heartbeat` | 必須(メンバーのみ) | 発話ロックの延長 |
-| POST | `/rooms/:roomId/talk/stop` | 必須(メンバーのみ) | 発話ロックの解放 |
-| POST | `/rooms/:roomId/recording/start` | 必須(owner/moderatorのみ) | 録音(Egress)を開始。保存先はGCS |
-| POST | `/rooms/:roomId/recording/stop` | 必須(owner/moderatorのみ) | 録音の停止を依頼(確定はWebhook側) |
-| GET | `/rooms/:roomId/recording/status` | 必須(メンバーのみ) | 現在の録音状態を取得 |
-| GET | `/rooms/:roomId/recordings` | 必須(メンバーのみ) | 録音履歴の一覧 **[Phase8]** |
-| GET | `/rooms/:roomId/recordings/:recordingId/download-url` | 必須(owner/moderatorのみ) | GCS署名付きダウンロードURL発行(5分間有効) **[Phase8]** |
-| POST | `/webhooks/livekit` | LiveKit署名検証 | LiveKitからのWebhook受信(Egress終了等) |
-| POST | `/reports` | 必須 | 通報の受付(対応は人力運用) |
-| POST | `/rooms/:roomId/messages` | 必須(メンバーのみ) | テキストチャット送信 |
-| GET | `/admin/rooms` | 必須(`rooms:monitor`) | 複数ルーム横断の一覧監視 |
-| GET | `/admin/rooms/:roomId` | 必須(`rooms:monitor`) | ルーム詳細監視 |
-| GET | `/admin/audit-logs` | 必須(`audit:read`) | 監査ログ一覧(roomId/actorUidで絞込可) **[Phase8]** |
-| GET | `/admin/admins` | 必須(`admins:manage`) | 管理者権限台帳の一覧 **[Phase8]** |
-| POST | `/admin/admins/:uid/permissions` | 必須(`admins:manage`) | 他ユーザーへの権限付与/剥奪(`admins:manage`自体は対象外) **[Phase8]** |
+全エンドポイントの一覧は `API.md` に転記済み（2026-07-25）。詳細はそちらを
+参照。
 
 ### なぜBANはFirestore書き換えだけで済まないのか
 
