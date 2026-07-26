@@ -37,6 +37,8 @@ struct ContentView: View {
     @StateObject private var ban = PTTBanStore()
     @StateObject private var recording = PTTRecordingStore()
     @StateObject private var report = PTTReportStore()
+    /// [Phase13 バッジ表示UI] Web版ParticipantList.vueの移植。GET /:roomId/badges をポーリングする。
+    @StateObject private var badges = PTTBadgeStore()
     @StateObject private var onboarding = PTTOnboardingStore()
 
     @State private var tokenServerURL: String = "https://ptt-token-server-rnn4fqay3a-an.a.run.app"
@@ -709,6 +711,11 @@ struct ContentView: View {
         activeRoomId = roomId
         chat.start(roomId: roomId)
         ban.start(roomId: roomId, uid: auth.currentUser?.uid ?? "")
+        badges.start(
+            tokenServerURL: tokenServerURL,
+            roomId: roomId,
+            idTokenProvider: { try await auth.fetchIDToken() }
+        )
         connection.connect(
             tokenServerURL: tokenServerURL,
             livekitURL: livekitURL,
@@ -721,6 +728,7 @@ struct ContentView: View {
         if connection.status != .disconnected { connection.disconnect() }
         chat.stop()
         ban.stop()
+        badges.stop()
         activeRoomId = nil
         currentInviteCode = nil
         joinRoomId = ""
@@ -812,6 +820,14 @@ struct ContentView: View {
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.pttDanger)
             }
+
+            // [Phase13] バッジ取得エラーは表示専用の補助情報の失敗にすぎないため、
+            // Web版と同じく致命的エラー扱いにはせず、控えめに表示するのみに留める。
+            if let badgeError = badges.errorMessage {
+                Text(badgeError)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.pttMuted)
+            }
         }
         .padding(14)
     }
@@ -828,6 +844,15 @@ struct ContentView: View {
 
     private func participantRow(_ info: PTTParticipantInfo) -> some View {
         HStack(spacing: 8) {
+            // [Phase13 バッジ表示] Web版ParticipantList.vueの
+            // `<span :title="topBadges[p.identity]!.name">{{ icon }}</span>` に相当。
+            // 最優先1件のみ表示(Room内・参加者一覧での表示仕様、5.3参照)。
+            if let topBadge = badges.topBadge(for: info.uid) {
+                Text(topBadge.icon)
+                    .font(.system(size: 12))
+                    .accessibilityLabel(topBadge.name)
+            }
+
             Text(info.name)
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundColor(info.isMuted ? .pttMuted : .pttLive)

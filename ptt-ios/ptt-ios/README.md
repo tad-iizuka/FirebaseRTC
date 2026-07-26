@@ -45,6 +45,14 @@ LiveKit経由のPTT音声・送話ロック・BAN・テキストチャットま�
 - `PTTReportStore.swift` — 通報UI。`POST /reports`
   (token-server/routes/reports.js)の呼び出しのみを担当する薄いストア
   （Web版`ptt-client/src/views/RoomView.vue`の`reportParticipant`の移植）
+- `PTTBadgeStore.swift` — バッジ表示UI(Phase13)。`GET /rooms/:roomId/badges`
+  を20秒間隔でポーリングし、uidごとの最優先1件のバッジを保持する薄い
+  ストア（Web版`ptt-client/src/stores/badges.ts`の移植）。badges/
+  badgeGrantsはfirestore.rulesでクライアントへの直接読み取りを禁止して
+  いるため、このAPI経由の取得が唯一の手段。付与/剥奪UI自体は未実装
+  （token-server側のRoom内owner専用API(`routes/roomBadges.js`)は実装済み
+  で、現状はadmin-dashboard経由でのみ操作可能。詳細は`brushup-plan.md`
+  次アクションitem4参照）
 - `PTTOnboardingStore.swift` / `PTTOnboardingView.swift` — 初回起動時の
   スワイプ形式チュートリアル(Web版`OnboardingFlow.vue`と同じ構成)
 - `PTTSavedRoomsStore.swift` — 直近作成/参加したルームをUserDefaultsに
@@ -115,6 +123,13 @@ LiveKit移行に伴い**廃止済み**です。
    通報は`PTTReportStore`が`POST /reports`
    (token-server/routes/reports.js)を呼ぶのみで、実際の対応(内容確認・
    BAN実行)はモデレーターが手動で行う運用
+8. **バッジ表示**（本改訂で追加）: `PTTBadgeStore`が`GET /rooms/:roomId/
+   badges`を20秒間隔でポーリングし、参加者一覧の各行に最優先1件のバッジ
+   アイコンを表示する(Web版`ParticipantList.vue`と同じ「最優先1個のみ」
+   方針)。Guestの役割バッジ(仮想バッジ・`badgeGrants`へは永続化されない)
+   もこのAPI経由で他参加者から見えるため、副次的に「他参加者のGuest判定
+   手段の欠如」もiOS版で解消される。付与・剥奪の実行UIはRoom内では未実装
+   (token-server側APIは実装済みだが、現状はadmin-dashboard経由のみ)
 
 ## 動作確認方法
 
@@ -131,9 +146,18 @@ LiveKit移行に伴い**廃止済み**です。
 7. 参加者一覧の「通報」ボタンから理由を入力して送信し、
    token-server側のログ(`[通報受付] reportId=...`)またはFirestoreの
    `reports`コレクションに反映されることを確認する
+8. admin-dashboardからいずれかの参加者にバッジを付与し、最大20秒以内に
+   iOS側の参加者一覧にそのアイコンが表示されることを確認する。Guestとして
+   参加した場合は、付与操作なしでも自動的にGuestの役割バッジが他参加者の
+   一覧に表示されることを確認する
 
 ## 既知の制約・次の改善ポイント
 
+- **バッジのRoom内owner向け付与/剥奪UI未実装**: token-server側の
+  Room内owner専用API(`POST/DELETE /rooms/:roomId/members/:targetUid/
+  badges*`)は実装済みだが、iOS版からこれを呼ぶUIはまだない。現状
+  バッジの付与/剥奪はadmin-dashboard経由(サイト管理者権限`badges:manage`)
+  のみで行える（詳細は`brushup-plan.md`次アクションitem4参照）
 - **バックグラウンド動作**: `Info.plist`の`UIBackgroundModes`に`audio`は
   設定済みだが、実機でのバックグラウンド送受話継続は未検証（詳細は
   `brushup-plan.md` Phase9参照）
