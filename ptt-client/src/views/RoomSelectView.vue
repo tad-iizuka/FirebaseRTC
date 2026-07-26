@@ -54,6 +54,13 @@ function openSavedRoom(saved: SavedRoom) {
 
 <template>
   <div class="grid gap-3.5 p-3.5">
+<!--
+    [Phase12・十五訂] ここは isAnonymous(Firebase Auth) で判定する。
+    未入室(=どのRoomのmembersドキュメントも持たない)画面のため、
+    role(Room内の役割)という概念自体がまだ存在しない。role による
+    Guest判定はRoomView.vue側(入室後)で行っており、この2つは統一すべき
+    同一軸ではなく意図的に異なるスコープ(brushup-plan.md Phase12参照)。
+    -->
     <template v-if="!auth.currentUser?.isAnonymous">
       <Button :disabled="roomStore.isWorking" @click="handleCreateRoom">
         {{ roomStore.isWorking ? t('roomSelect.creating') : t('roomSelect.createRoom') }}

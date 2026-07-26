@@ -1,0 +1,42 @@
+name: Role Sync Check
+
+# [Phase12・十五訂]
+# token-server/lib/permissions.js (SSOT) と、3クライアントが手動で複製している
+# role定数(roomPermissions.ts / PTTRoomPermissions.swift / PTTRoomPermissions.kt)
+# が一致しているかをCIで機械的に検証する。scripts/check-role-sync.js参照。
+#
+# 4つのディレクトリ(token-server/ptt-client/ptt-ios/ptt-android)にまたがる
+# チェックのため、他ワークフロー(token-server.yml等)とは別の
+# 独立したワークフローとして切り出し、関連ファイルのいずれかが変更された
+# 場合にのみ動くようpathsで絞る。
+on:
+  push:
+    branches: [main]
+    paths:
+      - "token-server/lib/permissions.js"
+      - "ptt-client/src/lib/roomPermissions.ts"
+      - "ptt-ios/ptt-ios/PTTRoomPermissions.swift"
+      - "ptt-android/app/src/main/java/co/ubunifu/pttandroid/ban/PTTRoomPermissions.kt"
+      - "scripts/check-role-sync.js"
+      - ".github/workflows/role-sync-check.yml"
+  pull_request:
+    paths:
+      - "token-server/lib/permissions.js"
+      - "ptt-client/src/lib/roomPermissions.ts"
+      - "ptt-ios/ptt-ios/PTTRoomPermissions.swift"
+      - "ptt-android/app/src/main/java/co/ubunifu/pttandroid/ban/PTTRoomPermissions.kt"
+      - "scripts/check-role-sync.js"
+
+jobs:
+  check:
+    name: Verify role definitions are in sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Run check-role-sync
+        run: node scripts/check-role-sync.js

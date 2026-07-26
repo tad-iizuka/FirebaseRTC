@@ -108,6 +108,26 @@ PTTアプリの性質上、権限判定に起動時ネットワーク依存を�
 存在するRoom内での役割）であることを3クライアントのコードで確認し、
 統一ではなく使い分けの明文化で決着した。詳細は「6.1」item 11・
 Phase12参照）
+十六訂: 2026-07-26（十五訂で確定した方針を実装した。(1) `token-server/lib/
+permissions.js`をSSOTとし、3クライアントの管理者ロール定数
+(`ptt-client/src/lib/roomPermissions.ts`・`ptt-ios/ptt-ios/
+PTTRoomPermissions.swift`・`ptt-android/.../ban/PTTRoomPermissions.kt`)を
+新設して`RoomView.vue`/`ContentView.swift`/`PTTApp.kt`の該当箇所を
+置き換えた。(2) 4ファイルの値の一致をビルド時に機械的検証する
+`scripts/check-role-sync.js`を新設し、実際に「値をわざと崩す→検知される
+→戻す→成功する」ことを動作確認した。CIへの組み込みとして
+`.github/workflows/role-sync-check.yml`も追加した。(3) `isAnonymous`/`role`
+の使い分けを`RoomSelectView.vue`・`ContentView.swift`・`PTTApp.kt`の
+該当箇所にコメントとして明文化した。(4) 実装中に、`ContentView.swift`の
+Room作成ボタン非表示箇所にあったコメント「token-server側(POST /rooms)は
+role判定をしないため」が、十四訂でのサーバー側Guest拒否実装後に更新
+されていなかった陳腐化コメントであることを発見し、あわせて訂正した
+（iOS READMEの件と同種の"実コード追随漏れ"の再発）。
+**（重要な留保）** 今回の変更はアップロードされたリポジトリ一式に対して
+行ったものであり、`tad-iizuka/FirebaseRTC`リポジトリ本体への実際の
+コミット・CI実行結果そのものは本ドキュメント側では未確認。六訂・八訂で
+踏んだのと同じ確認プロセス（`git show`等によるリポジトリ反映の直接検証）
+を次アクションとして残す）
 
 > 本改定では、アップロードされた `README.md`（"Connect to a place, not to a person."）に
 > 明記されたビジョン・原則・ターゲットロードマップを"あるべき姿"の物差しとして採用し、
@@ -601,7 +621,7 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
 
 ---
 
-## 6. 次アクションの提案（2026-07-26 十五訂で更新）
+## 6. 次アクションの提案（2026-07-26 十六訂で更新）
 
 旧版の提案（項目1〜9）は全て完了済みのため「6.1 完了済みアクション
 （アーカイブ）」へ集約した。現行ロードマップ（Phase11〜13の土台整備を
@@ -610,32 +630,26 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
 本改定(十四訂)時点でサーバー側の一元化まで完了しており、
 「6.1 完了済みアクション（アーカイブ）」item 10へ移動した。
 また、旧item1として残っていた「3クライアント側のrole判定の統一方針」は
-十五訂で方針を確定し実装待ちの状態になったため、「6.1」item 11へ移動した。
+十五訂で方針を確定し、十六訂で実装まで完了したため、「6.1」item 12へ
+移動した。
 
-1. **Phase12 3クライアント側のrole判定同期のCIチェックを実装する**：
-   十五訂で確定した方針（`lib/permissions.js`をSSOTとし、値の一致を
-   ビルド時/CIで機械的に保証する）に沿って、`ROOM_OPERATIONS`のうち
-   クライアントが実際に参照している値（`owner||moderator`の対象操作、
-   `guest`判定）をパースし、Web(`ban.ts`)/iOS(`PTTBanStore.swift`)/
-   Android(`PTTApp.kt`)側の対応する定数と突き合わせるCIスクリプトを
-   1本追加する。差分があればCIを落とすだけでよく、生成は不要
-2. **`isAnonymous`/`role`の使い分けの明文化**：十五訂で「統一ではなく
-   意図的なスコープの違い」と結論づけた内容を、Phase12の棚卸し表・
-   もしくは各クライアントのコードコメントに反映する。あわせて、
-   将来の混同を防ぐため変数名の見直し（例: 入室前の文脈は
-   `isAnonymousAccount`、入室後の文脈は`isRoomGuest`のように区別する等）
-   を検討する
-3. **Phase13 バッジ基本機能のデータモデル設計**：「5.3 バッジシステム」の
+1. **十六訂の実装内容のリポジトリ反映確認**：`scripts/check-role-sync.js`・
+   `.github/workflows/role-sync-check.yml`・3クライアントの
+   `PTTRoomPermissions`系ファイルおよび呼び出し箇所の変更が、
+   `tad-iizuka/FirebaseRTC`リポジトリ本体へ実際にコミットされ、
+   CIが green であることを確認する。六訂・八訂で踏んだのと同じ
+   `git show`等による直接検証プロセスを踏む
+2. **Phase13 バッジ基本機能のデータモデル設計**：「5.3 バッジシステム」の
    仕様を土台に、バッジマスタ・付与記録のFirestoreスキーマ案を検討する。
    Phase11の組織階層と異なり団体単位の切り替えはPhase15まで持ち越すため、
    Phase13時点では団体IDを持たないシンプルな1マスタ構成でよい
-4. **（低優先度・継続）** `UI_UX.md`・`SECURITY.md`・`AI.md`の空テンプレート
+3. **（低優先度・継続）** `UI_UX.md`・`SECURITY.md`・`AI.md`の空テンプレート
    整備：旧6.項目3で洗い出したまま未着手。転記元となる詳細記述が
    `token-server/README.md`側に存在しないため、内容そのものをこのタイミングで
    新規に書き起こす必要がある。優先度は引き続き低いが、Phase11〜13で
    ドキュメント化すべき内容（組織階層のスキーマ・role対応表・バッジ
    スキーマ）が増える見込みのため、それらと合わせて着手すると効率的
-5. **admin-dashboardの事前権限チェックの要否を検討する**：Phase12棚卸しで
+4. **admin-dashboardの事前権限チェックの要否を検討する**：Phase12棚卸しで
    判明した論点。現状、`admin-dashboard`には「自分の権限を見てメニューを
    隠す」事前チェックが無く、各画面はAPIを呼んで403が返ってから
    エラー表示する作りになっている。Room内roleの3クライアントとは
@@ -644,7 +658,7 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
 ### 6.1 完了済みアクション（アーカイブ）
 
 <details>
-<summary>2026-07-25〜2026-07-26に完了した旧提案1〜11（クリックで展開）</summary>
+<summary>2026-07-25〜2026-07-26に完了した旧提案1〜12（クリックで展開）</summary>
 
 1. ✅ **完了（2026-07-25、十訂）**: iOS/Androidへの通報UI・録音開始/停止UIを
    実装した。Web版(`ptt-client`)の設計(`recording.ts`・`reportParticipant`)
@@ -783,5 +797,36 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
       どのRoomにも入っていない画面ではそもそも判定不能という構造的な
       理由によるもの。したがって「統一」ではなく「使い分けの明文化」を
       対応方針として確定した（次アクション2参照）
+12. ✅ **完了（2026-07-26、十六訂）**: 十五訂で確定した方針を実装した。
+    - `token-server/lib/permissions.js`をSSOTとし、3クライアントの
+      管理者ロール定数を新設: `ptt-client/src/lib/roomPermissions.ts`
+      (`ROOM_MANAGE_ROLES`/`canManageRoom()`)・`ptt-ios/ptt-ios/
+      PTTRoomPermissions.swift`(`manageRoles`/`canManageRoom(role:)`)・
+      `ptt-android/.../ban/PTTRoomPermissions.kt`(`MANAGE_ROLES`/
+      `canManageRoom()`)。`RoomView.vue`の`canBan`/`canControlRecording`、
+      `ContentView.swift`の同名computed property、`PTTApp.kt`の
+      `canControl`/`canBan`引数を、いずれもこの共有定数経由の呼び出しに
+      置き換えた
+    - `scripts/check-role-sync.js`を新設。`token-server/lib/permissions.js`
+      の`members:ban`/`recording:start`/`recording:stop`の許可role集合を
+      正とし、上記3クライアントの定数ファイルを正規表現でパースして
+      一致を検証する。値を意図的に崩す→検知される(exit 1)→戻す→成功する
+      (exit 0)ことを実際に動作確認済み。`.github/workflows/
+      role-sync-check.yml`でCIにも組み込んだ(関連4ファイルのいずれかが
+      変更された場合のみ動作)
+    - `isAnonymous`/`role`の使い分けを、`RoomSelectView.vue`・
+      `ContentView.swift`(Room作成ボタン非表示箇所)・`PTTApp.kt`
+      (`RoomSelectionSection`呼び出し箇所)のコメントとして明文化した
+    - **副次的に発見・訂正した項目**: `ContentView.swift`のRoom作成ボタン
+      非表示箇所にあった「token-server側(POST /rooms)はrole判定をしない
+      ため」というコメントが、十四訂でのサーバー側Guest拒否実装
+      （`routes/rooms.js`への403ガード追加）後に更新されていなかった
+      陳腐化コメントだったため、あわせて訂正した（六訂で発見した
+      iOS READMEの陳腐化と同種の、実コード追随漏れの再発）
+    - **（重要な留保）** 上記はアップロードされたリポジトリ一式に対して
+      行った変更であり、`tad-iizuka/FirebaseRTC`リポジトリ本体への
+      実際のコミット・CI実行結果そのものは本ドキュメント側では未確認。
+      六訂・八訂で踏んだのと同じ`git show`等による直接検証プロセスを
+      次アクション1として残す
 
 </details>

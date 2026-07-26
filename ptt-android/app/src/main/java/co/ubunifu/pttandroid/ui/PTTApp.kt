@@ -74,6 +74,7 @@ import androidx.compose.ui.unit.sp
 import co.ubunifu.pttandroid.R
 import co.ubunifu.pttandroid.auth.PTTAuthManager
 import co.ubunifu.pttandroid.ban.PTTBanStore
+import co.ubunifu.pttandroid.ban.PTTRoomPermissions
 import co.ubunifu.pttandroid.chat.PTTChatStore
 import co.ubunifu.pttandroid.connection.PTTConnectionManager
 import co.ubunifu.pttandroid.model.ConnectionStatus
@@ -308,7 +309,8 @@ fun PTTApp(
                 RecordingSection(
                     isRecording = isRecording,
                     recordingStartedAt = recordingStartedAt,
-                    canControl = myRole == "owner" || myRole == "moderator",
+                    // [Phase12・十五訂] role分岐はPTTRoomPermissions.ktに集約(token-server/lib/permissions.jsとCI同期)。
+                    canControl = PTTRoomPermissions.canManageRoom(myRole),
                     starting = recordingStarting,
                     stopping = recordingStopping,
                     errorMessage = recordingError,
@@ -332,7 +334,8 @@ fun PTTApp(
                 ParticipantsSection(
                     participants = participants,
                     myUid = currentUser?.uid,
-                    canBan = myRole == "owner" || myRole == "moderator",
+                    // [Phase12・十五訂] role分岐はPTTRoomPermissions.ktに集約(token-server/lib/permissions.jsとCI同期)。
+                    canBan = PTTRoomPermissions.canManageRoom(myRole),
                     onRequestBan = { banTarget = it },
                     onRequestReport = { reportTarget = it; reportReasonText = "" },
                     reportError = reportError,
@@ -368,6 +371,13 @@ fun PTTApp(
                 onTokenServerUrlChange = { tokenServerUrl = it },
                 livekitUrl = livekitUrl,
                 onLivekitUrlChange = { livekitUrl = it },
+                // [Phase12・十五訂] ここは role ではなく isAnonymous(Firebase Auth)で判定する。
+                // 未入室(=どのRoomのmembersドキュメントも持たない)画面のため、role(Room内の
+                // 役割)という概念自体がまだ存在しない。role によるGuest判定(上のGuestStatusBar
+                // 側、myRole == "guest")とは統一すべき同一軸ではなく、意図的に異なるスコープ
+                // (brushup-plan.md Phase12参照)。なお token-server側(POST /rooms)もGuestを
+                // 403で拒否するため、ここでのUI非表示はAPI側の強制とは別に、Guestが操作を
+                // 試みる前に選択肢自体を見せないためのもの。
                 isGuest = currentUser?.isAnonymous == true,
                 isWorking = roomWorking,
                 errorMessage = roomError,

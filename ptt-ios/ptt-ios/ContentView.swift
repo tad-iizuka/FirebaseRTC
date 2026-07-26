@@ -298,7 +298,15 @@ struct ContentView: View {
             // [Phase10: Guestロール] 匿名認証ユーザーがルームを作成すると、
             // 本人確認のできないownerが永続的に残ってしまう(Guestの「一時参加」という
             // 設計思想と矛盾する)ため、Guestには「ルームを作成」自体を見せない。
-            // token-server側(POST /rooms)はrole判定をしないため、この制御はクライアント側のみ。
+            // [十四訂で訂正] token-server側(POST /rooms)も現在はGuestを403で拒否する
+            // (routes/rooms.js)。ここでのUI非表示はAPI側の強制とは別に、
+            // Guestが操作を試みる前に選択肢自体を見せないためのもの。
+            //
+            // [Phase12・十五訂] ここは role ではなく isAnonymous(Firebase Auth)で判定する。
+            // 未入室(=どのRoomのmembersドキュメントも持たない)画面のため、role(Room内の
+            // 役割)という概念自体がまだ存在しない。role によるGuest判定は入室後の
+            // guestStatusSection側で行っており、この2つは統一すべき同一軸ではなく
+            // 意図的に異なるスコープ(brushup-plan.md Phase12参照)。
             if auth.currentUser?.isAnonymous != true {
                 Button(action: handleCreateRoom) {
                     Text(roomManager.isWorking ? String(localized: "作成中...") : String(localized: "新しいルームを作成する"))
@@ -528,8 +536,9 @@ struct ContentView: View {
     }
 
     /// owner/moderatorのみ録音の開始/停止を操作できる(サーバー側でも権限を再チェックする)。
+    /// [Phase12・十五訂] role分岐はPTTRoomPermissions.swiftに集約(token-server/lib/permissions.jsとCI同期)。
     private var canControlRecording: Bool {
-        ban.myRole == "owner" || ban.myRole == "moderator"
+        PTTRoomPermissions.canManageRoom(role: ban.myRole)
     }
 
     /// 録音開始からの経過時間を "mm:ss" 形式で表示する。Web版RecordingBar.vueの
@@ -812,8 +821,9 @@ struct ContentView: View {
     }
 
     /// owner/moderatorのみBANボタンを表示する(サーバー側でも権限を再チェックする)。
+    /// [Phase12・十五訂] role分岐はPTTRoomPermissions.swiftに集約(token-server/lib/permissions.jsとCI同期)。
     private var canBan: Bool {
-        ban.myRole == "owner" || ban.myRole == "moderator"
+        PTTRoomPermissions.canManageRoom(role: ban.myRole)
     }
 
     private func participantRow(_ info: PTTParticipantInfo) -> some View {

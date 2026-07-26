@@ -20,6 +20,7 @@ import ChatPanel from '@/components/ChatPanel.vue'
 import LogPanel from '@/components/LogPanel.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import { authedFetch } from '@/lib/api'
+import { canManageRoom } from '@/lib/roomPermissions'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -36,8 +37,11 @@ const roomId = computed(() => String(route.params.roomId))
 const banTarget = ref<ParticipantInfo | null>(null)
 const banNotice = ref<string | null>(null)
 
-const canBan = computed(() => ban.myRole === 'owner' || ban.myRole === 'moderator')
-const canControlRecording = computed(() => ban.myRole === 'owner' || ban.myRole === 'moderator')
+// [Phase12・十五訂] owner/moderatorの判定は lib/roomPermissions.ts の
+// canManageRoom() に集約している。この定数はtoken-server/lib/permissions.js と
+// CIで一致を検証しているため、直接 'owner' || 'moderator' と書かない。
+const canBan = computed(() => canManageRoom(ban.myRole))
+const canControlRecording = computed(() => canManageRoom(ban.myRole))
 const pttDisabled = computed(() => connection.pttDisabledFor(auth.currentUser?.uid))
 const lockedByName = computed(() => {
   const uid = connection.currentTalkerUid
