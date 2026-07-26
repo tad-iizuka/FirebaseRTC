@@ -5,6 +5,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { useAdminRoomsStore } from '@/stores/adminRooms'
 import { useAdminRecordingsStore } from '@/stores/adminRecordings'
 import { useAdminOrganizationsStore } from '@/stores/adminOrganizations'
+import { useAdminBadgesStore } from '@/stores/adminBadges'
 import { usePolling } from '@/composables/usePolling'
 import { formatTime } from '@/lib/format'
 import Button from '@/components/ui/Button.vue'
@@ -16,6 +17,7 @@ const settings = useSettingsStore()
 const rooms = useAdminRoomsStore()
 const recordings = useAdminRecordingsStore()
 const orgs = useAdminOrganizationsStore()
+const badges = useAdminBadgesStore()
 
 const roomId = computed(() => String(route.params.roomId))
 
@@ -24,6 +26,9 @@ function load() {
   // [Phase8] 録音履歴。GET /rooms/:roomId/recordings はメンバーであれば
   // 誰でも閲覧可(admin権限とは別モデル)。
   recordings.fetchRecordings(settings.tokenServerUrl, roomId.value).catch(() => {})
+  // [Phase13] バッジ。badges:monitor権限がない場合は403のままテーブル側の
+  // バッジ列が空表示になる(組織割り当てフォームと同じ扱い)。
+  badges.fetchRoomBadges(settings.tokenServerUrl, roomId.value).catch(() => {})
 }
 
 onMounted(() => {
@@ -31,6 +36,8 @@ onMounted(() => {
   // [Phase11] 割り当て変更フォームのセレクトボックス用。organizations:monitor
   // 権限がない場合は403のままリストが空になり、フォーム自体が非表示になる。
   orgs.fetchOrganizations(settings.tokenServerUrl).catch(() => {})
+  // [Phase13] バッジ付与フォームのセレクトボックス用。
+  badges.fetchBadges(settings.tokenServerUrl).catch(() => {})
 })
 watch(roomId, load)
 // [Phase8] 詳細・録音履歴とも10秒ごとに再取得する。
@@ -38,6 +45,7 @@ usePolling(load)
 
 onUnmounted(() => {
   recordings.clear()
+  badges.clearRoomBadges()
 })
 
 function back() {
@@ -149,6 +157,52 @@ async function changeRole(targetUid: string) {
     // rooms.roleErrorMessage に反映済み
   }
 }
+
+// --- [Phase13] バッジの付与/剥奪 ---
+// Guest・BAN済みは付与対象外(サーバー側でも同じガードをかけているが、
+// UI側でも選択肢自体を出さないことで「押せるのに403/400になる」体験を避ける。
+// canChangeRoleと同じ考え方)。
+function canGrantBadges(member: { role: string; status: string }) {
+  return member.role !== 'guest' && member.status !== 'banned'
+}
+
+// 手動付与可能(active かつ grantMethod が manual/both)なバッジのみを選択肢にする。
+const grantableBadges = computed(() =>
+  badges.badges.filter((b) => b.active && (b.grantMethod === 'manual' || b.grantMethod === 'both')),
+)
+
+// 各行の「付与するバッジ」の選択状態。
+const badgeDrafts = ref<Record<string, string>>({})
+
+function badgesFor(uid: string) {
+  return badges.roomBadges[uid]?.badges ?? []
+}
+
+// 既に付与済みのバッジは選択肢から外す(grantBadge側の一意性チェックで
+// 409になる前に、UI側でも防ぐ)。
+function grantableBadgesFor(uid: string) {
+  const grantedIds = new Set(badgesFor(uid).map((b) => b.badgeId))
+  return grantableBadges.value.filter((b) => !grantedIds.has(b.badgeId))
+}
+
+async function grantBadge(targetUid: string) {
+  const badgeId = badgeDrafts.value[targetUid]
+  if (!badgeId) return
+  try {
+    await badges.grantBadge(settings.tokenServerUrl, roomId.value, targetUid, badgeId)
+    badgeDrafts.value[targetUid] = ''
+  } catch {
+    // badges.grantErrorMessage に反映済み
+  }
+}
+
+async function revokeBadge(targetUid: string, badgeId: string) {
+  try {
+    await badges.revokeBadge(settings.tokenServerUrl, roomId.value, targetUid, badgeId)
+  } catch {
+    // badges.grantErrorMessage に反映済み
+  }
+}
 </script>
 
 <template>
@@ -249,6 +303,12 @@ async function changeRole(targetUid: string) {
       <p v-if="rooms.roleErrorMessage" class="mb-2 text-[11px] text-destructive">
         {{ rooms.roleErrorMessage }}
       </p>
+      <p v-if="badges.grantErrorMessage" class="mb-2 text-[11px] text-destructive">
+        {{ badges.grantErrorMessage }}
+      </p>
+      <p v-if="badges.isRoomBadgesForbidden" class="mb-2 text-[11px] text-muted-foreground">
+        バッジ情報を見るには badges:monitor 権限が必要です。
+      </p>
       <table class="mb-6 w-full border-collapse text-xs">
         <thead>
           <tr class="border-b border-border text-[10px] uppercase tracking-[0.06em] text-muted-foreground">
@@ -258,6 +318,7 @@ async function changeRole(targetUid: string) {
             <th class="p-2 text-left">status</th>
             <th class="p-2 text-left">参加日時</th>
             <th class="p-2 text-left"></th>
+            <th class="p-2 text-left">バッジ</th>
           </tr>
         </thead>
         <tbody>
@@ -291,6 +352,53 @@ async function changeRole(targetUid: string) {
                   @click="changeRole(m.uid)"
                 >
                   {{ rooms.updatingRoleUids.has(m.uid) ? '変更中...' : '変更' }}
+                </Button>
+              </div>
+            </td>
+            <td class="p-2">
+              <!-- [Phase13] Guest(役割バッジのみ対象)・BAN済みは手動付与対象外
+                   (canGrantBadges参照)。Guest自身の役割バッジは仮想バッジ
+                   (badgeGrantsに実体を持たない)のため、剥奪ボタンも出さない。 -->
+              <div class="mb-1 flex flex-wrap items-center gap-1">
+                <span
+                  v-for="assigned in badgesFor(m.uid)"
+                  :key="assigned.badgeId"
+                  class="inline-flex items-center gap-1 rounded-sm border border-border px-1.5 py-0.5 text-[11px]"
+                  :title="assigned.name"
+                >
+                  <span>{{ assigned.icon }}</span>
+                  <span>{{ assigned.name }}</span>
+                  <button
+                    v-if="assigned.source === 'grant'"
+                    type="button"
+                    class="text-destructive opacity-70 hover:opacity-100"
+                    :disabled="badges.grantingUids.has(m.uid)"
+                    @click="revokeBadge(m.uid, assigned.badgeId)"
+                  >
+                    ×
+                  </button>
+                </span>
+                <span v-if="badgesFor(m.uid).length === 0" class="text-[11px] text-muted-foreground">—</span>
+              </div>
+              <div v-if="canGrantBadges(m)" class="flex items-center gap-1.5">
+                <select
+                  v-model="badgeDrafts[m.uid]"
+                  class="h-7 rounded-sm border border-input bg-background px-1.5 text-[11px] text-foreground outline-none focus:border-primary"
+                  :disabled="badges.grantingUids.has(m.uid)"
+                >
+                  <option value="">(バッジを選択)</option>
+                  <option v-for="b in grantableBadgesFor(m.uid)" :key="b.badgeId" :value="b.badgeId">
+                    {{ b.icon }} {{ b.name }}
+                  </option>
+                </select>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  class="h-7 w-auto px-2 text-[11px]"
+                  :disabled="badges.grantingUids.has(m.uid) || !badgeDrafts[m.uid]"
+                  @click="grantBadge(m.uid)"
+                >
+                  {{ badges.grantingUids.has(m.uid) ? '処理中...' : '付与' }}
                 </Button>
               </div>
             </td>

@@ -9,6 +9,7 @@ import { useBanStore } from '@/stores/ban'
 import { useChatStore } from '@/stores/chat'
 import { useConnectionStore, type ParticipantInfo } from '@/stores/connection'
 import { useRecordingStore } from '@/stores/recording'
+import { useBadgesStore } from '@/stores/badges'
 import Button from '@/components/ui/Button.vue'
 import StatusRow from '@/components/StatusRow.vue'
 import GuestStatusBar from '@/components/GuestStatusBar.vue'
@@ -32,6 +33,7 @@ const ban = useBanStore()
 const chat = useChatStore()
 const connection = useConnectionStore()
 const recording = useRecordingStore()
+const badges = useBadgesStore()
 
 const roomId = computed(() => String(route.params.roomId))
 const banTarget = ref<ParticipantInfo | null>(null)
@@ -49,6 +51,11 @@ const lockedByName = computed(() => {
   return connection.participants.get(uid)?.name ?? uid
 })
 const participantList = computed(() => Array.from(connection.participants.values()))
+// [Phase13] badges.byUidは{badges, topBadge}を保持するが、ParticipantList.vue
+// はtopBadgeだけを表示に使うため、ここでuid -> topBadgeの形へ変換する。
+const topBadges = computed(() =>
+  Object.fromEntries(Object.entries(badges.byUid).map(([uid, entry]) => [uid, entry.topBadge])),
+)
 
 async function enter() {
   banNotice.value = null
@@ -57,6 +64,8 @@ async function enter() {
   // [Phase9] /join を経由しない再入室や、入室後に他のowner/moderatorが
   // 設定を変更した場合にも対応できるよう、入室のたびに最新値を取り直す。
   roomStore.fetchAutoRecording(settings.tokenServerUrl, roomId.value)
+  // [Phase13] 参加者一覧のバッジ表示(ポーリング)。
+  badges.start(settings.tokenServerUrl, roomId.value)
   await connection.connect({
     tokenServerUrlValue: settings.tokenServerUrl,
     livekitUrlValue: settings.livekitUrl,
@@ -68,6 +77,7 @@ async function leaveRoom() {
   await connection.disconnect()
   chat.stop()
   ban.stop()
+  badges.stop()
   roomStore.leave()
   router.push({ name: 'room-select' })
 }
@@ -153,6 +163,7 @@ onUnmounted(() => {
   connection.disconnect()
   chat.stop()
   ban.stop()
+  badges.stop()
 })
 </script>
 
@@ -202,6 +213,7 @@ onUnmounted(() => {
     <ParticipantList
       :participants="participantList"
       :can-ban="canBan"
+      :top-badges="topBadges"
       @ban="requestBan"
       @report="reportParticipant"
     />

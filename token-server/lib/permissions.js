@@ -63,6 +63,15 @@ const ROOM_OPERATIONS = {
   'recording:history:read': ROOM_ROLES, // 「全参加者への開示」方針(recording.js参照)
   'recording:download_url': ['owner', 'moderator'],
   'recording:delete': ['owner', 'moderator'],
+
+  // routes/roomBadges.js [Phase13]
+  // 5.3「付与経路: Owner手動」の通り、moderatorには広げずownerのみに限定する
+  // (members:assign_roleと同じ考え方。badges:grant/revokeはRoom内で完結する
+  // Owner専用APIのためのエントリであり、admin-dashboard側の badges:manage
+  // (サイト管理者権限)とは別軸)。
+  'badges:grant': ['owner'],
+  'badges:revoke': ['owner'],
+  'badges:read': ROOM_ROLES,
 };
 
 /**

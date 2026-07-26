@@ -155,3 +155,64 @@ export interface RoomOrgAssignment {
   nodeId: string | null
   nodeAncestorIds: string[]
 }
+
+// [Phase13] GET/POST/PATCH /admin/badges*, GET/PATCH /admin/config/badge-display,
+// GET/POST/DELETE /admin/rooms/:roomId/badges* (badges:monitor / badges:manage)
+// 団体スコープを持たない全体共通マスタ(brushup-plan.md 6.1 item14で確定)。
+
+export type BadgeCategory = 'role' | 'skill' | 'unit' | 'rank' | 'other'
+export type BadgeGrantMethod = 'manual' | 'auto' | 'both'
+
+export interface AdminBadge {
+  badgeId: string
+  name: string
+  icon: string
+  description: string | null
+  category: BadgeCategory
+  grantMethod: BadgeGrantMethod
+  // Phase13で先行実装するのは業種非依存の最小条件のみ(phase13-badge-schema.md「2.1」)。
+  // 中身の型はバッジごとに異なりうるため、管理画面では生JSONとして扱う。
+  autoGrantCondition: Record<string, unknown> | null
+  priority: number
+  active: boolean
+  createdAt: number | null
+  updatedAt: number | null
+  createdBy: string
+}
+
+export interface AdminBadgeListResponse {
+  badges: AdminBadge[]
+}
+
+export interface BadgeDisplayConfig {
+  maxDisplayCount: number
+  updatedAt: number | null
+  updatedBy: string | null
+}
+
+// [Guestの役割バッジ] badgeGrantsへ永続化されない仮想バッジも同じ形で返る
+// (source: 'guest-role')。'grant' は通常のbadgeGrantsに基づく付与。
+export interface AssignedBadge {
+  badgeId: string
+  name: string
+  icon: string
+  category: BadgeCategory
+  priority: number
+  source: 'grant' | 'guest-role'
+}
+
+export interface RoomMemberBadges {
+  badges: AssignedBadge[]
+  topBadge: AssignedBadge | null
+}
+
+export interface RoomBadgesResponse {
+  roomId: string
+  members: Record<string, RoomMemberBadges>
+}
+
+export interface BadgeGrantResult {
+  grantId: string
+  uid: string
+  badgeId: string
+}

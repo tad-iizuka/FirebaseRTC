@@ -4,6 +4,13 @@
 対象: `brushup-plan.md` Phase13（バッジシステムの基本機能）
 参照元仕様: `brushup-plan.md` 「5.3 バッジシステム」「6. 次アクションの提案」item 2
 
+**実装状況（2026-07-26、二十訂）**: 本スキーマ案に基づき、token-server・
+admin-dashboard・ptt-client(Web)への実装が完了した。「8.」の
+firestore.rules方針は実装時に一部変更しており（badgesも含めクライアント
+直接読み取り不可へ統一）、該当箇所に取消線で反映している。iOS/Androidの
+バッジ表示UIと、3クライアント共通のRoom内owner向け付与/剥奪UIは未実装
+（`brushup-plan.md`「6. 次アクションの提案」item3・4参照）。
+
 ## 0. 前提・スコープ
 
 - 本案はPhase13時点のスコープに限定する。**団体（Company/Branch等）単位での
@@ -218,25 +225,49 @@ Phase15で「団体単位でのマスタ切り替え」「業種プロファイ�
 
 ## 8. firestore.rules方針
 
-- `badges`: 全クライアント読み取り可（プロフィール画面・参加者一覧での
+**（2026-07-26 実装時に変更）** 当初案は以下の通り「badges/config/badge
+Displayは全クライアント読み取り可」としていたが、実装時に撤回し、
+**badges/badgeGrants/configのいずれもクライアント直接読み取り不可
+（Admin SDK経由のAPIのみ）に統一した**。理由は、参加者一覧の「最優先1個
+のみ表示」判定（badgeGrantsとbadgesの突き合わせ・Guest仮想バッジの合成）
+をWeb/iOS/Android 3クライアントそれぞれで再実装させると、Phase12で
+問題視した「同じロジックの分散実装」を再発させてしまうため。判定済みの
+結果（topBadge等）を返すAPI（`GET /rooms/:roomId/badges`,
+`GET /admin/rooms/:roomId/badges`）に一本化し、Phase15で団体・業種
+プロファイル単位のマスタ切り替えが入った際も変更箇所をサーバー側だけに
+閉じ込められるようにした（`brushup-plan.md`二十訂、
+`token-server/lib/badges.js`冒頭コメント参照）。
+
+~~- `badges`: 全クライアント読み取り可（プロフィール画面・参加者一覧での
   アイコン/優先度参照のため）。書き込みは不可（Admin SDK経由、
-  Owner操作もtoken-server経由でのみ許可）
+  Owner操作もtoken-server経由でのみ許可）~~
+- `badges`: **（訂正）** クライアントからの直接読み取りは不可。
+  書き込みも不可（Admin SDK経由、`/admin/badges*`のみ）
 - `badgeGrants`: クライアントからの直接読み取りは**不可**とし、
   token-server側でuidごとにフィルタしたレスポンスを返すAPI経由とする
   （5.4「他参加者の情報公開範囲」の議論とも関連するため、Phase12の
   role×操作整理と合わせて公開範囲を最終決定する）
-- `config/badgeDisplay`: 全クライアント読み取り可、書き込み不可
-  （Admin SDK経由）
+  → **実装確定**: 公開する情報はバッジ(役割表示のみ)に限定し、
+  displayName等の追加情報は含めない設計とした（`brushup-plan.md`
+  「5.4」参照。Web版はこれによりGuestバッジの他参加者への表示が
+  副次的に解消された）
+- ~~`config/badgeDisplay`: 全クライアント読み取り可、書き込み不可
+  （Admin SDK経由）~~
+- `config/badgeDisplay`: **（訂正）** クライアントからの直接読み取りは
+  不可。閲覧は`GET /admin/config/badge-display`(badges:monitor権限)経由
 
-## 9. 未確定事項（実装着手前に確認したい点）
+## 9. 未確定事項（実装着手前に確認したい点） → 2026-07-26 二十訂で解消
 
-1. **Guestの役割バッジを本バッジシステムへ統合するか**：3節の仮想バッジ案は
-   設計上の提案であり、Phase10で実装済みの既存UI（自分自身のみのGuest
-   表示）をこの案に置き換えるかどうかは別途判断が必要
-2. **`badgeGrants`の他人からの可視範囲**：Room参加者一覧で他人のバッジを
-   表示する以上、5.4で保留中の「他参加者情報の公開範囲」と不可分。
-   Phase12のrole×操作整理を待ってから最終的な公開範囲・API設計を確定する
-   方が手戻りが少ない
+1. ~~**Guestの役割バッジを本バッジシステムへ統合するか**~~ → **解消**:
+   Phase10実装済みの既存UI（自分自身のみのGuest表示。`GuestStatusBar.vue`
+   等）はそのまま残し、置き換えは行わなかった。本バッジシステムの
+   仮想バッジは参加者一覧（他者から見える表示）に新規追加する形とし、
+   両者は並行して存在する
+2. ~~**`badgeGrants`の他人からの可視範囲**~~ → **解消**: 上記「8.」の通り、
+   badges/badgeGrants双方を直接非公開とし、topBadge等の判定済み結果のみ
+   APIで返す方針に統一した。Phase12のrole×操作整理を待たずに確定した
+   （公開情報をバッジ表示に限定することで、他ユーザー情報の追加公開を
+   避けられたため）
 3. **バッチ処理の実行主体・頻度**：「1日以内に付与」という要件（5.3）を
    満たす具体的なジョブ実行基盤（Cloud Functions scheduled function等）は
    本スキーマ案の範囲外。別途インフラ側の設計が必要

@@ -37,6 +37,13 @@ const router = createRouter({
       component: () => import('@/views/OrganizationsView.vue'),
       meta: { requiresAuth: true },
     },
+    {
+      // [Phase13] バッジマスタの管理(badges:monitor / badges:manage権限が必要)
+      path: '/badges',
+      name: 'badges',
+      component: () => import('@/views/BadgesView.vue'),
+      meta: { requiresAuth: true },
+    },
   ],
 })
 

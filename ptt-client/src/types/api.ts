@@ -103,3 +103,25 @@ export interface RoomMetadataPayload {
   recording: { active: boolean; startedAt: number | null }
   updatedAt: number
 }
+
+// [Phase13] GET /rooms/:roomId/badges のレスポンス。
+// badges/badgeGrantsはfirestore.rulesで直接読み取りを禁止しているため、
+// このAPIが唯一の取得経路(lib/badges.js参照)。
+export interface AssignedBadge {
+  badgeId: string
+  name: string
+  icon: string
+  category: 'role' | 'skill' | 'unit' | 'rank' | 'other'
+  priority: number
+  source: 'grant' | 'guest-role'
+}
+
+export interface RoomMemberBadges {
+  badges: AssignedBadge[]
+  topBadge: AssignedBadge | null
+}
+
+export interface RoomBadgesResponse {
+  roomId: string
+  members: Record<string, RoomMemberBadges>
+}

@@ -172,6 +172,69 @@ Phase15の「バッジシステムを業種プロファイル単位・団体単�
 - 「5.4 洗い出された矛盾点・懸念点」に本件を解決済み事項として追記した
 - 「6. 次アクションの提案」item 1（矛盾解消タスク）を完了扱いとし、
   「6.1」item 14へ移動した）
+二十訂: 2026-07-26（アップロードされたリポジトリ一式(`FirebaseRTC.zip`)に対し、
+Phase13バッジ基本機能を実装した。`phase13-badge-schema.md`のスキーマ案
+(`badges`/`badgeGrants`/`config/badgeDisplay`)を土台に、token-server・
+admin-dashboard・ptt-client(Web)へ反映した。
+
+**実装内容:**
+- `token-server`: `lib/badges.js`(新設。マスタCRUD・Guest仮想バッジの合成・
+  grant/revokeの一意性制御をトランザクションで担保・Room参加者向けtopBadge
+  計算)、`lib/permissions.js`(`badges:grant`/`badges:revoke`をownerのみに
+  追加)、`routes/roomBadges.js`(新設。Room内owner専用のgrant/revoke・
+  参加者向け閲覧)、`routes/badges.js`(新設。マスタ管理APIと、
+  admin-dashboard向けのgrant/revoke並行パス。moderator任命APIが
+  Room内owner専用パスとadmin-dashboard経由パスの2経路を持つ十四訂の設計を
+  踏襲)、`firestore.rules`(badges/badgeGrants/configへの明示的な拒否
+  ブロックを追加)
+- `admin-dashboard`: `BadgesView.vue`(新設。バッジマスタのPoC管理画面。
+  「5.3」が言う「バッジ管理画面のPoCをここで実施する」に対応)、
+  `stores/adminBadges.ts`(新設)、`RoomDetailView.vue`のメンバー台帳に
+  バッジ列を追加(付与/剥奪操作)、router/NavTabsに「バッジ」タブを追加
+- `ptt-client`(Web): `stores/badges.ts`(新設。GET /rooms/:roomId/badges を
+  20秒間隔でポーリング)、`ParticipantList.vue`に最優先1件のバッジアイコン
+  表示を追加、`RoomView.vue`に配線
+
+**実装時に確定した設計判断:**
+1. Guestの役割バッジは設計通り、`badgeGrants`へ永続化しない仮想バッジ
+   として実装した(role==='guest'から都度合成)。5.4「GuestIDとMember昇格の
+   整合性」の対象外(そもそも永続化しないため矛盾の余地がない)。
+2. **（`phase13-badge-schema.md`からの変更点）** 同スキーマ案「8.」は
+   「badgesは全クライアント読み取り可」としていたが、実装時に撤回し、
+   badges/badgeGrants/configいずれもクライアント直接読み取り不可
+   (Admin SDK経由のAPIのみ)に統一した。参加者一覧の「最優先1個のみ表示」
+   判定(badgeGrantsとbadgesの突き合わせ・Guest仮想バッジの合成)を
+   Web/iOS/Androidそれぞれで再実装させると、Phase12で問題視した
+   「同じロジックの分散実装」を再発させるため。判定済みの結果(topBadge等)
+   を返すAPIに一本化し、Phase15で団体・業種プロファイル単位のマスタ
+   切り替えが入った際も変更箇所をサーバー側だけに閉じ込められるようにした
+   (詳細は`lib/badges.js`冒頭コメント・`phase13-badge-schema.md`該当箇所)。
+3. Room内でのgrant/revokeは、Room内owner専用API(`routes/roomBadges.js`)と
+   admin-dashboard経由のサイト管理者権限(`badges:manage`)の2経路を用意した。
+   十四訂でmoderator任命APIに同じ構成(「room内のownerが不在・連絡が取れない
+   場合にサイト管理者が代行できる手段」)を採用した前例に倣った。
+4. **（5.4「他参加者のGuest判定手段の欠如」の副次的な解決、Webのみ）**
+   `GET /rooms/:roomId/badges`はrole不問(room memberなら誰でも)閲覧可能
+   なAPIとして実装したため、Guestの役割バッジも他の参加者から見える形に
+   なった。これにより、5.4で「Phase10のスコープ外」としていた「他参加者の
+   Guest判定手段の欠如」が、Web版に関しては副次的に解消された(Phase12で
+   「他のユーザー情報も含めてどう取得するか」を検討してからという条件付き
+   だったが、公開する情報がバッジ(役割表示のみ)に限定されるため、
+   displayName以外の追加情報漏洩は無い)。iOS/Androidは未実装のため、
+   両OSでは引き続き5.4の制約下にある。
+
+**未実装のまま残した部分(次アクションへ):**
+- iOS/Androidの参加者一覧へのバッジアイコン表示
+- ptt-client(Web含む3クライアントいずれも)のRoom画面内でのOwnerによる
+  付与/剥奪UI。現状、Room内ownerがバッジを付与/剥奪する手段は
+  admin-dashboard経由(サイト管理者権限`badges:manage`が必要)のみであり、
+  「5.3: 付与経路 Owner手動」が本来意図するRoom内完結の体験にはなっていない
+  (token-server側のRoom内owner専用API自体は実装済みのため、UIを追加すれば
+  すぐ使える状態)
+- 自動付与バッチ処理(Phase13のスコープ外。「2.1」の条件型定義のみで判定
+  ロジック・スケジュール実行基盤は未着手)
+- Phase13ロードマップ本文の「バッジマスタは団体単位で保持する」との矛盾は
+  十九訂で解消済みだが、本実装は解消後の方針(団体IDなし)に基づいている
 
 > 本改定では、アップロードされた `README.md`（"Connect to a place, not to a person."）に
 > 明記されたビジョン・原則・ターゲットロードマップを"あるべき姿"の物差しとして採用し、
@@ -512,15 +575,20 @@ Guestロール追加（Phase10）で顕在化した課題。現状、role別の�
   閲覧自体を監査ログ(`logAdminAction`)に残すか、role×操作の対応表
   整理の一環としてここで方針を決める
 
-### Phase 13: バッジシステムの基本機能 → **旧Phase11から分離（2026-07-26）**
+### Phase 13: バッジシステムの基本機能 → **旧Phase11から分離（2026-07-26）→ 大部分実装完了（2026-07-26、二十訂）**
 業種プロファイルに依存しない部分のみ先行実装する。業種プロファイル単位の
 自動付与条件・団体単位でのマスタ書き換えはPhase15（業界ラベリング層）側に
 分離し、Phase2の具体的な需要が見えてから着手する。
 
 - バッジの基本機能（詳細は「5.3 バッジシステム」参照）
-  - アイコン表示、Owner手動付与・剥奪
-  - 優先順位に基づく表示、Room内・参加者一覧では最優先1個のみ表示
-  - Guestの役割バッジ（Guestである表示）付与
+  - ✅ **完了（2026-07-26、二十訂）**: アイコン表示、Owner手動付与・剥奪
+    （token-server + admin-dashboard。3クライアントのRoom内owner向けUIは
+    未実装、次アクション item4参照）
+  - ✅ **完了（Webのみ、2026-07-26、二十訂）**: 優先順位に基づく表示、
+    Room内・参加者一覧では最優先1個のみ表示。iOS/Androidは次アクション
+    item3参照
+  - ✅ **完了（2026-07-26、二十訂）**: Guestの役割バッジ（Guestである表示）
+    付与。`badgeGrants`へ永続化しない仮想バッジとして実装
 - バッジマスタは、Phase13時点では団体IDを持たないシンプルな1マスタ構成と
   する。**（2026-07-26 十九訂で訂正）** 従来「Phase11で導入する組織階層の
   うち最上位の団体単位で保持する」としていたが、(1)団体単位でマスタを
@@ -530,11 +598,20 @@ Guestロール追加（Phase10）で顕在化した課題。現状、role別の�
   二階層構造であり、団体単位の上書きは業種プロファイル単位の基盤
   （Phase15）があって初めて成立することの2点から、Phase13単体では
   団体単位保持は成立しないと判断した。団体・業種プロファイル単位への
-  拡張はPhase15でまとめて行う（下記参照）
+  拡張はPhase15でまとめて行う（下記参照）。
+  ✅ **実装完了（2026-07-26、二十訂）**: `token-server/lib/badges.js`の
+  `badges`コレクションとして、団体IDを持たない構成で実装済み
 - 自動付与条件（技能章・部隊章・階級章等）のうち、業種に依存しない
   最小限の条件だけをバッチ処理で先行実装し、業種プロファイル単位の
-  条件出し分けはPhase15に持ち越す
-- バッジ管理画面のPoCをここで実施する
+  条件出し分けはPhase15に持ち越す。**未着手（Phase13のスコープ外として
+  次アクションへは残さず、Phase15検討時に合わせて着手する）**
+- バッジ管理画面のPoCをここで実施する →
+  ✅ **完了（2026-07-26、二十訂）**: `admin-dashboard/src/views/
+  BadgesView.vue`として実装
+
+**残作業（次アクションitem3・4参照）**: iOS/Androidのバッジ表示UI、
+3クライアント共通のRoom内owner向け付与/剥奪UI(token-server側API自体は
+実装済み)。
 
 ### Phase 14: Phase2(ビジネスチーム)展開に向けた仕上げ → **旧Phase13を繰り下げ**
 - Firebase App Check導入
@@ -629,7 +706,8 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
   「招待コードを先に入力させてから匿名認証させる」順序への変更を
   検討する余地がある。優先度は低いが、匿名アカウントの量産余地を
   塞ぎたい場合は着手を検討する
-- **他参加者のGuest判定手段の欠如（2026-07-25 課題化、未着手）**：
+- **他参加者のGuest判定手段の欠如（2026-07-25 課題化 → Webのみ副次的に
+  解消、2026-07-26 二十訂）**：
   現行の`firestore.rules`はクライアントが自分自身の`members/{uid}`
   ドキュメントしか読めない設計であり、かつroomメンバー向けに他メンバーの
   role等を返すAPIも存在しない（`admin-dashboard`が使う`GET /admin/rooms/:id`
@@ -638,9 +716,14 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
   他人のGuestバッジ表示はPhase10のスコープ外とした。着手する場合、
   「Guestか否かだけを返す」のではなく、他のユーザー情報（表示名以外に
   何を一般メンバーへ公開してよいか）を含めて要件から検討する方針
-  （ユーザー確認済み、2026-07-25）。**Phase12（役割と機能の整理）で
-  role別に何を一般メンバーへ公開してよいかを棚卸しする際、合わせて
-  検討する**
+  （ユーザー確認済み、2026-07-25）としていた。
+  **（2026-07-26 二十訂）** Phase13でRoom参加者向けバッジ閲覧API
+  (`GET /rooms/:roomId/badges`、role不問で誰でも呼べる)を実装した際、
+  Guestの役割バッジも他参加者から見える形で返す設計にしたため、Web版に
+  限り本課題が副次的に解消された。公開される情報はバッジ(役割表示のみ)に
+  限定され、displayName以外の追加情報漏洩は無いため、「他のユーザー情報を
+  含めて要件から検討する」という当初の懸念には抵触しない。iOS/Androidは
+  バッジ表示UI自体が未実装のため、両OSでは引き続き本課題が残る
 - **Room作成と組織階層への紐付けの分離（2026-07-26、確定）**：Phase11
   実装時の検討により、Room作成時に組織階層(orgId/nodeId)へ自動で紐付ける
   機能は実装しないことを確定した。Room作成は従来通りPTTクライアントから
@@ -682,7 +765,7 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
 
 ---
 
-## 6. 次アクションの提案（2026-07-26 十九訂で更新）
+## 6. 次アクションの提案（2026-07-26 二十訂で更新）
 
 旧版の提案（項目1〜9）は全て完了済みのため「6.1 完了済みアクション
 （アーカイブ）」へ集約した。現行ロードマップ（Phase11〜13の土台整備を
@@ -697,6 +780,11 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
 schema.md`)を作成し完了したため「6.1」item 13へ移動した。十八訂で発見した
 「バッジマスタの団体スコープに関するドキュメント内矛盾」は十九訂で解消
 （団体IDなしのシンプルな1マスタ構成に統一）したため「6.1」item 14へ移動した。
+「Phase13 バッジ基本機能のFirestoreスキーマの実装着手」は二十訂で
+token-server・admin-dashboard・ptt-client(Web)へ実装したため「6.1」
+item 15へ移動した。ただし実装過程で判明した2つの未実装部分(iOS/Androidの
+バッジ表示、3クライアント共通のRoom内owner向け付与/剥奪UI)を新たな次
+アクションとして以下に追加する。
 
 1. **（低優先度・継続）** `UI_UX.md`・`SECURITY.md`・`AI.md`の空テンプレート
    整備：旧6.項目3で洗い出したまま未着手。転記元となる詳細記述が
@@ -709,16 +797,24 @@ schema.md`)を作成し完了したため「6.1」item 13へ移動した。十�
    隠す」事前チェックが無く、各画面はAPIを呼んで403が返ってから
    エラー表示する作りになっている。Room内roleの3クライアントとは
    設計思想が異なるため、揃えるかどうかを検討する（優先度は低い）
-3. **Phase13 バッジ基本機能のFirestoreスキーマの実装着手**：
-   `phase13-badge-schema.md`のスキーマ案（`badges`/`badgeGrants`/
-   `config/badgeDisplay`、団体IDなしの1マスタ構成で確定済み）を土台に、
-   Phase10で実装済みのGuestバッジ表示（自分自身のみ）を本バッジシステムの
-   仮想バッジ案へ統合するかどうかも合わせて判断した上で実装に入る
+3. **iOS/Androidにバッジ表示UIを実装する**：Web版(`ptt-client`)の
+   `ParticipantList.vue`(topBadgeアイコン表示、`GET /rooms/:roomId/badges`
+   をポーリング)を移植する形で、iOS/Android双方に参加者一覧のバッジ表示を
+   追加する。通報UI・録音UIをWeb版から移植した十訂と同じ進め方。
+   これが完了すると5.4「他参加者のGuest判定手段の欠如」が両OSでも解消される
+4. **3クライアントにRoom内owner向けバッジ付与/剥奪UIを実装する**：
+   token-server側のRoom内owner専用API(`POST/DELETE /rooms/:roomId/
+   members/:targetUid/badges*`)は実装済みで未使用のまま残っている。
+   現状Room内ownerがバッジを付与/剥奪する手段はadmin-dashboard経由
+   (サイト管理者権限`badges:manage`が必要)のみであり、「5.3: 付与経路
+   Owner手動」が本来意図するRoom内完結の体験になっていない。moderator
+   任命API(Room内owner専用パスが実装済みだがどのクライアントからも
+   呼ばれていない、とPhase12棚卸しで判明した前例)と同様の状態にある
 
 ### 6.1 完了済みアクション（アーカイブ）
 
 <details>
-<summary>2026-07-25〜2026-07-26に完了した旧提案1〜14（クリックで展開）</summary>
+<summary>2026-07-25〜2026-07-26に完了した旧提案1〜15（クリックで展開）</summary>
 
 1. ✅ **完了（2026-07-25、十訂）**: iOS/Androidへの通報UI・録音開始/停止UIを
    実装した。Web版(`ptt-client`)の設計(`recording.ts`・`reportParticipant`)
@@ -940,5 +1036,28 @@ schema.md`)を作成し完了したため「6.1」item 13へ移動した。十�
       （バッジと組織階層が一体だった頃）の記述が更新されずに残っていた
       ものと判断し、Phase13ロードマップ本文を「団体IDを持たないシンプルな
       1マスタ構成」に訂正した。あわせて「5.4」に解決済み事項として記録した
+15. ✅ **完了（2026-07-26、二十訂）**: Phase13バッジ基本機能を実装した。
+    `phase13-badge-schema.md`のスキーマ案を土台に、`token-server`
+    (`lib/badges.js`新設・`lib/permissions.js`変更・`routes/badges.js`
+    新設・`routes/roomBadges.js`新設・`server.js`変更・`firestore.rules`
+    変更)、`admin-dashboard`(`BadgesView.vue`新設・`stores/adminBadges.ts`
+    新設・`RoomDetailView.vue`変更・router/NavTabs変更・`types/admin.ts`
+    変更)、`ptt-client`(`stores/badges.ts`新設・`ParticipantList.vue`変更・
+    `RoomView.vue`変更・`types/api.ts`変更)に反映した。
+    - Guestの役割バッジは設計通り`badgeGrants`へ永続化しない仮想バッジと
+      して実装した
+    - `phase13-badge-schema.md`「8.」からの変更点として、badges/
+      badgeGrants/configをクライアントへ直接公開せず、判定済みの結果
+      (topBadge等)を返すAPIに一本化する方針へ変更した(3クライアントでの
+      ロジック分散実装を避けるため)
+    - Room内でのgrant/revokeは、Room内owner専用API(`routes/roomBadges.js`)
+      とadmin-dashboard経由(`badges:manage`)の2経路を用意し、十四訂の
+      moderator任命APIと同じ構成を踏襲した
+    - 副次的な成果として、Web版に限り5.4「他参加者のGuest判定手段の欠如」
+      が解消された(`GET /rooms/:roomId/badges`がrole不問で閲覧可能なため)
+    - **未実装のまま次アクションへ**: iOS/Androidのバッジ表示UI(次アクション
+      item3)、3クライアント共通のRoom内owner向け付与/剥奪UI(次アクション
+      item4。token-server側のAPI自体は実装済みで未使用)。自動付与バッチ
+      処理はPhase13のスコープ外のため対象外
 
 </details>

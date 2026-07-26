@@ -13,6 +13,8 @@
  *      (routes/recording.js) [Phase 5/8で追加]
  *   9. 組織階層(Company/Branch/Site、あるいはCommunity/Group)の管理・
  *      Roomへの割り当て・Roomからの参照 (routes/organizations.js) [Phase 11で追加]
+ *  10. バッジ基本機能: マスタ管理(/admin配下)・Room内での付与/剥奪/閲覧
+ *      (routes/badges.js, routes/roomBadges.js) [Phase 13で追加]
  *
  * [経緯]
  * 旧 ptt-server/server.js (WS制御 + Opusミキシング) はLiveKitサーバー本体に
@@ -38,6 +40,8 @@ const messagesRouter = require('./routes/messages');
 const adminRouter = require('./routes/admin');
 const recordingRouter = require('./routes/recording');
 const organizationsRouter = require('./routes/organizations'); // [Phase11] GET .../org-context, /admin/organizations*, PATCH /admin/rooms/:roomId/org-assignment
+const badgesRouter = require('./routes/badges'); // [Phase13] /admin/badges*, /admin/config/badge-display, /admin/rooms/:roomId/badges*
+const roomBadgesRouter = require('./routes/roomBadges'); // [Phase13] GET/POST/DELETE /rooms/:roomId/(members/:uid/)badges*
 
 const PORT = process.env.PORT || 8080;
 
@@ -96,10 +100,12 @@ app.use('/rooms', roomsRouter);
 app.use('/rooms', talkRouter); // POST /rooms/:roomId/talk/{start,heartbeat,stop}
 app.use('/rooms', messagesRouter); // POST /rooms/:roomId/messages
 app.use('/rooms', recordingRouter); // POST/GET /rooms/:roomId/recording/*, /recordings*
+app.use('/rooms', roomBadgesRouter); // [Phase13] GET/POST/DELETE /rooms/:roomId/(members/:uid/)badges*
 app.use('/token', tokenRouter);
 app.use('/reports', reportsRouter);
 app.use('/admin', adminRouter); // GET /admin/rooms, GET /admin/rooms/:roomId [Phase 5]
 app.use('/admin', organizationsRouter); // [Phase11] /admin/organizations*, PATCH /admin/rooms/:roomId/org-assignment
+app.use('/admin', badgesRouter); // [Phase13] /admin/badges*, /admin/config/badge-display, /admin/rooms/:roomId/badges*
 
 app.listen(PORT, () => {
   console.log(`ptt-token-server listening on :${PORT}`);

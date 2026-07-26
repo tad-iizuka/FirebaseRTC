@@ -104,6 +104,31 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /badges/{badgeId} {
+      // [Phase13] バッジマスタ。団体スコープを持たない全体共通マスタ
+      // (brushup-plan.md 6.1 item14で確定)。
+      // [実装時の変更点] phase13-badge-schema.md「8.」は当初「全クライアント
+      // 読み取り可」としていたが、参加者一覧の「最優先1個のみ表示」判定
+      // (badgeGrantsとの突き合わせ・Guest仮想バッジの合成)を3クライアント
+      // それぞれで再実装させないため、この判定を含めてサーバー側の参照API
+      // (GET /rooms/:roomId/badges 等)に一本化し、直接公開はしない方針へ
+      // 変更した(lib/badges.js冒頭コメント参照)。
+      allow read, write: if false;
+    }
+
+    match /badgeGrants/{grantId} {
+      // [Phase13] バッジの付与/剥奪履歴。他人の付与状況を含むため、
+      // badgesと同様にクライアントへの直接公開は行わない。
+      allow read, write: if false;
+    }
+
+    match /config/{configId} {
+      // [Phase13] config/badgeDisplay(バッジ表示件数設定)を含む、
+      // アプリケーション全体の設定用ドキュメント群。書き込みは
+      // Admin SDK経由(GET/PATCH /admin/config/badge-display)のみ。
+      allow read, write: if false;
+    }
+
     // 上記以外のコレクション/ドキュメントへのアクセスはデフォルトで拒否。
     match /{document=**} {
       allow read, write: if false;
