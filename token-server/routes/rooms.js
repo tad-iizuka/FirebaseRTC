@@ -19,6 +19,7 @@ const { db } = require('../lib/firebaseAdmin');
 const { logAdminAction } = require('../lib/auditLog');
 const { resolveOrgContext } = require('../lib/orgContext');
 const { requireFirebaseAuth, isValidRoomId, requireRoomMembership } = require('../middleware/requireAuth');
+const { hasRoomPermission } = require('../lib/permissions');
 
 const router = express.Router();
 
@@ -53,9 +54,24 @@ function generateInviteCode() {
  * 呼び出したユーザーがownerになる新規ルームを作成する。
  * 招待コードはこの時点で発行され、レスポンスで返す
  * (ownerが招待したい相手にこのコードを別途共有する想定)。
+ *
+ * [Phase12] Guest(匿名認証)によるRoom作成を拒否する。
+ * このRoomではまだmembersドキュメントが存在しないため、/joinの
+ * role自動判定と同じ基準(firebase.sign_in_provider)をここでも直接見る。
+ * 従来はクライアント側のUI非表示のみで防いでいたが(3クライアントとも
+ * `auth.currentUser?.isAnonymous`相当を見て「ルームを作成」ボタンを隠す
+ * だけだった)、API直叩きや改造クライアントからは素通りしてしまう状態
+ * だったため、サーバー側でも明示的に強制する。
+ * 「本人確認のできないownerが永続的に残ってしまう」というGuestの
+ * 一時参加という設計思想と矛盾する事態を防ぐのが目的(Guestロール5.1参照)。
  */
 router.post('/', requireFirebaseAuth, async (req, res) => {
   const uid = req.firebaseUser.uid;
+
+  if (req.firebaseUser.firebase?.sign_in_provider === 'anonymous') {
+    return res.status(403).json({ error: 'ゲストはルームを作成できません' });
+  }
+
   const maxMembers = Number.isInteger(req.body?.maxMembers) ? req.body.maxMembers : DEFAULT_MAX_MEMBERS;
 
   if (maxMembers < 2 || maxMembers > 200) {
@@ -201,7 +217,7 @@ router.post('/:roomId/members/:targetUid/ban', requireFirebaseAuth, async (req, 
     const roomRef = db.collection('rooms').doc(roomId);
 
     const actorSnap = await roomRef.collection('members').doc(uid).get();
-    if (!actorSnap.exists || !['owner', 'moderator'].includes(actorSnap.data().role)) {
+    if (!actorSnap.exists || !hasRoomPermission(actorSnap.data().role, 'members:ban')) {
       return res.status(403).json({ error: '権限がありません' });
     }
 
@@ -271,7 +287,7 @@ router.post('/:roomId/members/:targetUid/role', requireFirebaseAuth, async (req,
     const roomRef = db.collection('rooms').doc(roomId);
 
     const actorSnap = await roomRef.collection('members').doc(uid).get();
-    if (!actorSnap.exists || actorSnap.data().role !== 'owner') {
+    if (!actorSnap.exists || !hasRoomPermission(actorSnap.data().role, 'members:assign_role')) {
       return res.status(403).json({ error: '権限がありません(ownerのみ実行可能)' });
     }
 
@@ -340,7 +356,7 @@ router.patch('/:roomId/settings', requireFirebaseAuth, async (req, res) => {
     const roomRef = db.collection('rooms').doc(roomId);
 
     const actorSnap = await roomRef.collection('members').doc(uid).get();
-    if (!actorSnap.exists || !['owner', 'moderator'].includes(actorSnap.data().role)) {
+    if (!actorSnap.exists || !hasRoomPermission(actorSnap.data().role, 'room:settings_update')) {
       return res.status(403).json({ error: '権限がありません' });
     }
 

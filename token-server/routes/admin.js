@@ -294,6 +294,81 @@ router.patch(
 );
 
 /**
+ * PATCH /admin/rooms/:roomId/members/:targetUid/role
+ * body: { role: "moderator" | "member" }
+ *
+ * [Phase12で追加]
+ * routes/rooms.js の POST /:roomId/members/:targetUid/role(Room内ownerのみ
+ * 実行可能)とは別経路で、admin-dashboardからmoderatorの任命/降格を
+ * 行えるようにする。routes/rooms.jsのmoderator任命APIは実装されて以降
+ * どのクライアントからも呼ばれておらず(Phase12棚卸しで判明)、
+ * 「room内のownerが不在・連絡が取れない場合にサイト管理者が代行できる
+ * 手段が無い」状態だったため追加した。
+ *
+ * [権限] PATCH /admin/rooms/:roomId/settings/autoRecording と同じ考え方で
+ * rooms:manage を要求する(Room内roleとは別の、サイト管理者権限の軸)。
+ *
+ * [Room内owner専用APIとの整合性] 対象がownerの場合・guestの場合を拒否する
+ * ガードは routes/rooms.js 側と同一の理由でこちらにも適用する
+ * (owner降格による管理不能事故の防止、本人確認のない匿名認証由来の
+ * guestをmoderatorに任命できる抜け道を塞ぐため)。
+ */
+router.patch(
+  '/rooms/:roomId/members/:targetUid/role',
+  requireFirebaseAuth,
+  requireAdminPermission('rooms:manage'),
+  async (req, res) => {
+    const uid = req.firebaseUser.uid;
+    const { roomId, targetUid } = req.params;
+    const role = req.body?.role;
+
+    if (!isValidRoomId(roomId)) {
+      return res.status(400).json({ error: 'roomId が不正です' });
+    }
+    if (!['moderator', 'member'].includes(role)) {
+      return res.status(400).json({ error: 'role は moderator または member を指定してください' });
+    }
+
+    try {
+      const roomRef = db.collection('rooms').doc(roomId);
+      const targetRef = roomRef.collection('members').doc(targetUid);
+      const targetSnap = await targetRef.get();
+      if (!targetSnap.exists) {
+        return res.status(404).json({ error: '対象のメンバーが見つかりません' });
+      }
+      const targetData = targetSnap.data();
+      if (targetData.role === 'owner') {
+        return res.status(403).json({ error: 'オーナーのroleは変更できません' });
+      }
+      if (targetData.status === 'banned') {
+        return res.status(400).json({ error: 'BAN済みのメンバーのroleは変更できません' });
+      }
+      if (targetData.role === 'guest') {
+        return res.status(403).json({ error: 'Guestのroleは変更できません' });
+      }
+
+      await targetRef.update({ role });
+
+      await logAdminAction({
+        actorUid: uid,
+        action: 'room:role_change',
+        targetRoomId: roomId,
+        targetUid,
+        detail: { newRole: role, previousRole: targetData.role, via: 'admin_dashboard' },
+      });
+
+      console.log(
+        `[管理者ダッシュボード: role変更] roomId=${roomId} target=${targetUid} role=${role} by=${uid}`
+      );
+      res.json({ roomId, targetUid, role });
+    } catch (e) {
+      console.error('[管理者ダッシュボード: role変更エラー]', e.message);
+      res.status(500).json({ error: 'roleの変更に失敗しました' });
+    }
+  }
+);
+
+/**
  * GET /admin/audit-logs?roomId=&actorUid=&cursor=&limit=
  *
  * [設計方針] roomId / actorUid での絞り込みは Firestore の複合インデックスが

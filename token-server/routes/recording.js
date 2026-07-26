@@ -30,6 +30,7 @@ const { db } = require('../lib/firebaseAdmin');
 const { syncRoomMetadata } = require('../lib/roomMetadata');
 const { logAdminAction } = require('../lib/auditLog');
 const { requireFirebaseAuth, requireRoomMembership } = require('../middleware/requireAuth');
+const { requireRoomPermission } = require('../lib/permissions');
 
 const router = express.Router();
 
@@ -96,17 +97,6 @@ function buildOutput(roomId) {
       }),
     },
   };
-}
-
-/**
- * requireRoomMembership の後段で使う前提(req.roomMember が必要)。
- * BAN API(routes/rooms.js)と同じ権限モデル: owner/moderatorのみ許可。
- */
-function requireModeratorOrOwner(req, res, next) {
-  if (!['owner', 'moderator'].includes(req.roomMember.role)) {
-    return res.status(403).json({ error: '権限がありません' });
-  }
-  next();
 }
 
 /**
@@ -241,7 +231,7 @@ router.post(
   '/:roomId/recording/start',
   requireFirebaseAuth,
   requireRoomMembership,
-  requireModeratorOrOwner,
+  requireRoomPermission('recording:start'),
   async (req, res) => {
     const { roomId } = req.params;
     const uid = req.firebaseUser.uid;
@@ -273,7 +263,7 @@ router.post(
   '/:roomId/recording/stop',
   requireFirebaseAuth,
   requireRoomMembership,
-  requireModeratorOrOwner,
+  requireRoomPermission('recording:stop'),
   async (req, res) => {
     const { roomId } = req.params;
     const uid = req.firebaseUser.uid;
@@ -378,7 +368,7 @@ router.get(
   '/:roomId/recordings/:recordingId/download-url',
   requireFirebaseAuth,
   requireRoomMembership,
-  requireModeratorOrOwner,
+  requireRoomPermission('recording:download_url'),
   async (req, res) => {
     const { roomId, recordingId } = req.params;
     try {
@@ -460,7 +450,7 @@ router.delete(
   '/:roomId/recordings/:recordingId',
   requireFirebaseAuth,
   requireRoomMembership,
-  requireModeratorOrOwner,
+  requireRoomPermission('recording:delete'),
   async (req, res) => {
     const { roomId, recordingId } = req.params;
     try {

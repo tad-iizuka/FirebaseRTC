@@ -563,22 +563,30 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
 
 ---
 
-## 6. 次アクションの提案（2026-07-26 十二訂で刷新）
+## 6. 次アクションの提案（2026-07-26 十四訂で更新）
 
-旧版の提案（項目1〜8）は全て完了済みのため「6.1 完了済みアクション
+旧版の提案（項目1〜9）は全て完了済みのため「6.1 完了済みアクション
 （アーカイブ）」へ集約した。現行ロードマップ（Phase11〜13の土台整備を
 優先する再編後の順序）に即して、次アクションを以下の通り刷新する。
-なお、Phase11(組織階層のデータモデル設計・実装)は本改定(十三訂)時点で
-完了しており、「6.1 完了済みアクション（アーカイブ）」item 9へ移動した。
+なお、Phase12の旧item1（role×操作の対応表の洗い出し・一元化）は
+本改定(十四訂)時点でサーバー側の一元化まで完了しており、
+「6.1 完了済みアクション（アーカイブ）」item 10へ移動した。
 
-1. **Phase12 role×操作の対応表を洗い出す**：`token-server`側
-   （`rooms.js`・`recording.js`等に分散している`['owner','moderator']`
-   等のホワイトリスト）と3クライアント側（`ban.ts`/`PTTBanStore.swift`/
-   Android版の相当箇所にある`myRole === 'owner' || myRole === 'moderator'`
-   等の分岐）を、まず一覧化することから始める。一元化の設計はこの棚卸し
-   の後に行う。あわせて、admin側の権限（`rooms:monitor`/
-   `organizations:manage`等）についても、招待コードの可視範囲（5.4参照）
-   を含めて同じ棚卸しの対象に含める
+1. **Phase12 3クライアント側のrole判定の統一方針を検討する**：
+   サーバー側は`lib/permissions.js`に一元化したが、Web(`ban.ts`)・
+   iOS(`PTTBanStore.swift`)・Android(`PTTApp.kt`)側の
+   `myRole === 'owner' || myRole === 'moderator'`という同種の分岐は
+   3言語(TypeScript/Swift/Kotlin)にまたがるため、サーバー側と同じ
+   「1モジュールを共有する」形の一元化ができない。以下のような方針の
+   選択肢があるので、どちらに寄せるかをまず決める
+   - サーバーの対応表(`lib/permissions.js`)をAPIとして配信し、
+     クライアントは起動時にそれを取得して判定する（役割定義の変更に
+     クライアント側の再ビルドが不要になる一方、実装コストは高い）
+   - 各言語で同型の定数（例: `ROOM_OPERATIONS`相当）を手動で同期する
+     運用にし、代わりに「3クライアント+サーバーで値を必ず揃える」ことを
+     チェックリスト化する（実装コストは低いが、同期漏れのリスクは残る）
+   - 「Room作成」非表示の判定軸（`isAnonymous` vs `members/{uid}.role`）
+     の統一もこの検討と合わせて行う（Phase12棚卸しで判明した論点）
 2. **Phase13 バッジ基本機能のデータモデル設計**：「5.3 バッジシステム」の
    仕様を土台に、バッジマスタ・付与記録のFirestoreスキーマ案を検討する。
    Phase11の組織階層と異なり団体単位の切り替えはPhase15まで持ち越すため、
@@ -589,6 +597,11 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
    新規に書き起こす必要がある。優先度は引き続き低いが、Phase11〜13で
    ドキュメント化すべき内容（組織階層のスキーマ・role対応表・バッジ
    スキーマ）が増える見込みのため、それらと合わせて着手すると効率的
+4. **admin-dashboardの事前権限チェックの要否を検討する**：Phase12棚卸しで
+   判明した論点。現状、`admin-dashboard`には「自分の権限を見てメニューを
+   隠す」事前チェックが無く、各画面はAPIを呼んで403が返ってから
+   エラー表示する作りになっている。Room内roleの3クライアントとは
+   設計思想が異なるため、揃えるかどうかを検討する（優先度は低い）
 
 ### 6.1 完了済みアクション（アーカイブ）
 
@@ -675,5 +688,40 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
    - 動作確認を経て、Room作成と組織階層への紐付けを分離する運用方針、
      および招待コードの可視範囲という新たな課題を確定・記録した
      （詳細は5.4参照）
+10. ✅ **完了（2026-07-26、十四訂）**: 「6. 次アクションの提案」item 1
+    （Phase12 role×操作の対応表の洗い出し）を実施し、判明した論点のうち
+    挙動を変える3点についてユーザーの意思決定を得た上で実装まで行った。
+    - `POST /reports`（通報API）: **現状維持**（`requireRoomMembership`を
+      追加しない）。通報を行う側にはmember以上の権限が想定されるという
+      判断のため、対象roomのメンバーシップを要求する制約は付けない
+      （ユーザー確認済み、2026-07-26）
+    - `POST /rooms`（Room作成）: **サーバー側でもGuest拒否を追加**。
+      `firebase.sign_in_provider === 'anonymous'`なら403を返すガードを
+      `routes/rooms.js`に実装した。従来はクライアント側のUI非表示のみで、
+      API直叩きからは素通りしていた抜け穴を塞いだ
+    - moderator任命API: **admin-dashboardから任命できるようにする**方針
+      のため、`routes/admin.js`に`PATCH /admin/rooms/:roomId/members/
+      :targetUid/role`（`rooms:manage`権限）を新設し、`admin-dashboard`の
+      `RoomDetailView.vue`（メンバー台帳テーブル）・`stores/adminRooms.ts`
+      に任命/降格UIを追加した。Room内owner専用の既存API
+      （`routes/rooms.js`側）はそのまま残し、admin側は別経路として並存
+      させている
+    - あわせて、対応表の一元化そのものとして`token-server/lib/
+      permissions.js`を新設した。Room内role(owner/moderator/member/guest)
+      ×操作のホワイトリストをこのモジュールに集約し、`routes/rooms.js`
+      （BAN・moderator任命・自動録音設定）・`routes/recording.js`
+      （録音開始/停止・ダウンロードURL発行・削除）はいずれもここから
+      参照する形に置き換えた（`['owner','moderator'].includes(role)`の
+      重複ハードコードを解消）。**サイト管理者権限
+      （`adminUsers/{uid}.permissions`、`rooms:monitor`等）はRoom内role
+      とは別軸のため対象外**とし、`middleware/requireAdmin.js`側の管理を
+      変更していない
+    - **未着手として残した項目**: 3クライアント(Web/iOS/Android)側の
+      role分岐（`ban.myRole==='owner'||'moderator'`等）は、`lib/
+      permissions.js`のようなサーバー側の一元化とは違い、各クライアントの
+      実装言語が異なる(TypeScript/Swift/Kotlin)ため、同じ意味での「一元化」
+      は単純なモジュール共有では実現できない。クライアント側をどう揃えるか
+      （例: サーバーから対応表そのものを配信する、各言語で同型の定数を
+      手動同期する等）は本改定のスコープ外とし、次アクションとして残す
 
 </details>
