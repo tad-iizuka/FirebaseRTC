@@ -2,6 +2,7 @@
 // GET /admin/rooms (一覧) / GET /admin/rooms/:roomId (詳細) に加え、
 // [Phase8] GET /admin/audit-logs / GET,POST /admin/admins* /
 // GET /rooms/:roomId/recordings* も扱う。
+// [Phase11] 組織階層(organizations/nodes)関連の型もここに追加している。
 
 export interface AdminRoomSummary {
   roomId: string
@@ -9,6 +10,12 @@ export interface AdminRoomSummary {
   createdAt: number | null
   maxMembers: number | null
   activeMemberCount: number | null
+  // [Phase11] 一覧では名前解決していない生ID。名前が要る場合は
+  // useAdminOrganizationsStore で取得済みの一覧と突き合わせる
+  // (RoomsListView.vue参照)。
+  orgId: string | null
+  nodeId: string | null
+  nodeAncestorIds: string[]
   talkLock: { uid: string; expiresAt: number } | null
   recording: { active: boolean; startedAt: number | null }
   live: { isLive: boolean; numParticipants: number }
@@ -34,12 +41,28 @@ export interface AdminLiveParticipant {
   isPublishingAudio: boolean
 }
 
+// [Phase11] lib/orgContext.js が解決する、名前付きのパンくず情報。
+// ルートに近い順(depth昇順)に並ぶ。
+export interface OrgBreadcrumbEntry {
+  nodeId: string
+  name: string
+  depth: number
+}
+
+export interface RoomOrgContext {
+  orgId: string | null
+  orgName: string | null
+  breadcrumb: OrgBreadcrumbEntry[]
+}
+
 export interface AdminRoomDetail {
   roomId: string
   ownerUid: string
   createdAt: number | null
   maxMembers: number | null
   members: AdminMember[]
+  // [Phase11] 無所属の場合は { orgId: null, orgName: null, breadcrumb: [] }
+  org: RoomOrgContext
   talkLock: { uid: string; acquiredAt: number | null; expiresAt: number } | null
   recording: { active: boolean; startedAt: number | null; startedByUid: string | null }
   liveParticipants: AdminLiveParticipant[]
@@ -95,4 +118,40 @@ export interface RecordingListResponse {
 export interface DownloadUrlResponse {
   url: string
   expiresInMs: number
+}
+
+// [Phase11] GET /admin/organizations, GET /admin/organizations/:orgId/nodes,
+// POST /admin/organizations, POST /admin/organizations/:orgId/nodes,
+// PATCH /admin/rooms/:roomId/org-assignment
+
+export interface AdminOrganization {
+  orgId: string
+  name: string
+  industryProfile: string | null
+  ownerUid: string
+  // 都度Aggregation Queryで集計しているため、取得に失敗した場合はnull。
+  roomCount: number | null
+  createdAt: number | null
+}
+
+export interface AdminOrganizationListResponse {
+  organizations: AdminOrganization[]
+}
+
+export interface AdminOrgNode {
+  nodeId: string
+  name: string
+  parentNodeId: string | null
+  depth: number
+}
+
+export interface AdminOrgNodeListResponse {
+  nodes: AdminOrgNode[]
+}
+
+export interface RoomOrgAssignment {
+  roomId: string
+  orgId: string | null
+  nodeId: string | null
+  nodeAncestorIds: string[]
 }

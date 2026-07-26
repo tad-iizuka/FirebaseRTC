@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useSettingsStore } from '@/stores/settings'
 import { useAdminRoomsStore } from '@/stores/adminRooms'
 import { usePolling } from '@/composables/usePolling'
@@ -10,6 +10,7 @@ import Input from '@/components/ui/Input.vue'
 import Badge from '@/components/ui/Badge.vue'
 import { cn } from '@/lib/utils'
 
+const route = useRoute()
 const router = useRouter()
 const settings = useSettingsStore()
 const rooms = useAdminRoomsStore()
@@ -23,6 +24,33 @@ onMounted(() => {
 usePolling(() => {
   rooms.refreshCurrentPage(settings.tokenServerUrl).catch(() => {})
 })
+
+// [Phase11] OrganizationsView.vue の「このnode配下のRoomを見る」から
+// ?orgId=&nodeId= 付きで遷移してきた場合のクライアント側フィルタ。
+//
+// [既知の制約] GET /admin/rooms は現状orgId/nodeIdでのサーバー側フィルタに
+// 対応していないため、これは「今読み込まれているページの中だけ」を絞り込む
+// 簡易フィルタである。団体・拠点配下のRoom数がページサイズ(デフォルト50件)を
+// 超える場合、次ページ以降は自動では絞り込まれない(「次のページ」ボタンで
+// 読み込んだ分だけフィルタが効く)。サーバー側フィルタ(GET /admin/rooms?
+// orgId=&nodeId=)が必要になった場合は別途追加する。
+const filterOrgId = computed(() => (typeof route.query.orgId === 'string' ? route.query.orgId : null))
+const filterNodeId = computed(() => (typeof route.query.nodeId === 'string' ? route.query.nodeId : null))
+const isFiltering = computed(() => !!filterOrgId.value)
+
+const filteredRooms = computed(() => {
+  if (!filterOrgId.value) return rooms.rooms
+  return rooms.rooms.filter((room) => {
+    if (room.orgId !== filterOrgId.value) return false
+    if (!filterNodeId.value) return true
+    // 選択したnode自身、またはその配下(nodeAncestorIdsに含まれる)のRoomを対象にする
+    return room.nodeId === filterNodeId.value || room.nodeAncestorIds.includes(filterNodeId.value)
+  })
+})
+
+function clearFilter() {
+  router.push({ name: 'rooms' })
+}
 
 function refresh() {
   rooms.goToFirstPage(settings.tokenServerUrl).catch(() => {})
@@ -42,6 +70,18 @@ function openRoom(roomId: string) {
       <Button variant="secondary" size="sm" class="w-auto" @click="refresh">再読み込み</Button>
     </div>
 
+    <div v-if="isFiltering" class="mb-4 flex items-center gap-2 text-xs">
+      <Badge variant="accent">
+        絞り込み中: orgId={{ filterOrgId }}<template v-if="filterNodeId">, nodeId={{ filterNodeId }}</template>
+      </Badge>
+      <button type="button" class="text-primary underline-offset-2 hover:underline" @click="clearFilter">
+        解除
+      </button>
+      <span class="text-[11px] text-muted-foreground">
+        (現在読み込み済みのページ内のみを絞り込んでいます。次のページで対象が増える場合があります)
+      </span>
+    </div>
+
     <p v-if="rooms.isForbidden" class="text-xs text-destructive">
       管理者権限がありません(adminUsers/&#123;uid&#125;.permissions に rooms:monitor が必要です)。
     </p>
@@ -54,13 +94,20 @@ function openRoom(roomId: string) {
     >
       読み込み中...
     </p>
+    <p
+      v-else-if="isFiltering && filteredRooms.length === 0 && !rooms.isLoadingList"
+      class="text-xs text-muted-foreground"
+    >
+      この条件に一致するRoomは、読み込み済みのページ内には見つかりませんでした。
+    </p>
 
-    <table v-if="rooms.rooms.length" class="w-full border-collapse text-xs">
+    <table v-if="filteredRooms.length" class="w-full border-collapse text-xs">
       <thead>
         <tr class="border-b border-border text-[10px] uppercase tracking-[0.06em] text-muted-foreground">
           <th class="p-2 text-left"></th>
           <th class="p-2 text-left">Room ID</th>
           <th class="p-2 text-left">Owner UID</th>
+          <th class="p-2 text-left">所属(orgId)</th>
           <th class="p-2 text-left">作成日時</th>
           <th class="p-2 text-left">接続中人数</th>
           <th class="p-2 text-left">メンバー数(active)</th>
@@ -69,7 +116,7 @@ function openRoom(roomId: string) {
       </thead>
       <tbody>
         <tr
-          v-for="room in rooms.rooms"
+          v-for="room in filteredRooms"
           :key="room.roomId"
           class="cursor-pointer border-b border-border hover:bg-white/5"
           @click="openRoom(room.roomId)"
@@ -86,6 +133,7 @@ function openRoom(roomId: string) {
           </td>
           <td class="whitespace-nowrap p-2">{{ room.roomId }}</td>
           <td class="max-w-[10rem] truncate p-2">{{ room.ownerUid }}</td>
+          <td class="max-w-[8rem] truncate p-2 text-muted-foreground">{{ room.orgId ?? '—' }}</td>
           <td class="whitespace-nowrap p-2">{{ formatTime(room.createdAt) }}</td>
           <td class="p-2">{{ room.live.numParticipants }}</td>
           <td class="p-2">{{ room.activeMemberCount ?? '—' }}</td>
@@ -100,7 +148,13 @@ function openRoom(roomId: string) {
       </tbody>
     </table>
 
-    <Button v-if="rooms.nextCursor" variant="secondary" size="sm" class="mt-3 w-auto" @click="nextPage">
+    <Button
+      v-if="rooms.nextCursor"
+      variant="secondary"
+      size="sm"
+      class="mt-3 w-auto"
+      @click="nextPage"
+    >
       次のページ
     </Button>
   </div>

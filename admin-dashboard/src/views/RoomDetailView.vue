@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSettingsStore } from '@/stores/settings'
 import { useAdminRoomsStore } from '@/stores/adminRooms'
 import { useAdminRecordingsStore } from '@/stores/adminRecordings'
+import { useAdminOrganizationsStore } from '@/stores/adminOrganizations'
 import { usePolling } from '@/composables/usePolling'
 import { formatTime } from '@/lib/format'
 import Button from '@/components/ui/Button.vue'
@@ -14,6 +15,7 @@ const router = useRouter()
 const settings = useSettingsStore()
 const rooms = useAdminRoomsStore()
 const recordings = useAdminRecordingsStore()
+const orgs = useAdminOrganizationsStore()
 
 const roomId = computed(() => String(route.params.roomId))
 
@@ -24,7 +26,12 @@ function load() {
   recordings.fetchRecordings(settings.tokenServerUrl, roomId.value).catch(() => {})
 }
 
-onMounted(load)
+onMounted(() => {
+  load()
+  // [Phase11] 割り当て変更フォームのセレクトボックス用。organizations:monitor
+  // 権限がない場合は403のままリストが空になり、フォーム自体が非表示になる。
+  orgs.fetchOrganizations(settings.tokenServerUrl).catch(() => {})
+})
 watch(roomId, load)
 // [Phase8] 詳細・録音履歴とも10秒ごとに再取得する。
 usePolling(load)
@@ -76,6 +83,48 @@ async function toggleAutoRecording() {
     // errorMessageはstore側で設定済み
   }
 }
+
+// --- [Phase11] 組織階層への割り当て変更 ---
+
+const assignOrgId = ref<string>('') // '' = 無所属
+const assignNodeId = ref<string>('') // '' = 団体直下(node未指定)
+
+// rooms.detail が読み込まれた(または別Roomへ切り替わった)タイミングで、
+// フォームの初期値を現在の割り当てに合わせる。
+watch(
+  () => rooms.detail?.org.orgId,
+  (orgId) => {
+    assignOrgId.value = orgId ?? ''
+    assignNodeId.value = rooms.detail?.org.breadcrumb.at(-1)?.nodeId ?? ''
+    if (orgId && !orgs.nodesByOrgId.has(orgId)) {
+      orgs.fetchNodes(settings.tokenServerUrl, orgId).catch(() => {})
+    }
+  },
+  { immediate: true },
+)
+
+function onAssignOrgChange() {
+  assignNodeId.value = ''
+  if (assignOrgId.value && !orgs.nodesByOrgId.has(assignOrgId.value)) {
+    orgs.fetchNodes(settings.tokenServerUrl, assignOrgId.value).catch(() => {})
+  }
+}
+
+const assignNodeOptions = computed(() => orgs.nodesByOrgId.get(assignOrgId.value) ?? [])
+
+async function saveAssignment() {
+  try {
+    await orgs.assignRoomOrg(
+      settings.tokenServerUrl,
+      roomId.value,
+      assignOrgId.value || null,
+      assignNodeId.value || null,
+    )
+    await rooms.fetchRoomDetail(settings.tokenServerUrl, roomId.value)
+  } catch {
+    // orgs.assignErrorMessage に反映済み
+  }
+}
 </script>
 
 <template>
@@ -124,6 +173,52 @@ async function toggleAutoRecording() {
           {{ rooms.detail.settings.autoRecording ? 'ON' : 'OFF' }}
         </Badge>
         <span v-if="rooms.isUpdatingAutoRecording" class="text-muted-foreground">更新中...</span>
+      </div>
+
+      <h3 class="mb-2 text-[12px] font-medium">組織</h3>
+      <div class="mb-6">
+        <div class="mb-2 text-xs">
+          <template v-if="rooms.detail.org.orgId">
+            <span>{{ rooms.detail.org.orgName }}</span>
+            <template v-for="crumb in rooms.detail.org.breadcrumb" :key="crumb.nodeId">
+              <span class="mx-1 text-muted-foreground">→</span>
+              <span>{{ crumb.name }}</span>
+            </template>
+          </template>
+          <span v-else class="text-muted-foreground">— 無所属 —</span>
+        </div>
+
+        <p v-if="orgs.isForbidden" class="text-[11px] text-muted-foreground">
+          割り当てを変更するには organizations:monitor / organizations:manage 権限が必要です。
+        </p>
+        <div v-else class="flex flex-wrap items-center gap-2">
+          <select
+            v-model="assignOrgId"
+            class="h-8 rounded-sm border border-input bg-background px-2 font-mono text-[11px] text-foreground outline-none focus:border-primary"
+            @change="onAssignOrgChange"
+          >
+            <option value="">(無所属)</option>
+            <option v-for="org in orgs.organizations" :key="org.orgId" :value="org.orgId">
+              {{ org.name }}
+            </option>
+          </select>
+          <select
+            v-model="assignNodeId"
+            class="h-8 rounded-sm border border-input bg-background px-2 font-mono text-[11px] text-foreground outline-none focus:border-primary disabled:opacity-40"
+            :disabled="!assignOrgId"
+          >
+            <option value="">(団体直下)</option>
+            <option v-for="node in assignNodeOptions" :key="node.nodeId" :value="node.nodeId">
+              {{ '　'.repeat(node.depth) }}{{ node.name }}
+            </option>
+          </select>
+          <Button size="sm" class="w-auto" :disabled="orgs.isAssigning" @click="saveAssignment">
+            {{ orgs.isAssigning ? '更新中...' : '割り当てを保存' }}
+          </Button>
+        </div>
+        <p v-if="orgs.assignErrorMessage" class="mt-1 text-[11px] text-destructive">
+          {{ orgs.assignErrorMessage }}
+        </p>
       </div>
 
       <h3 class="mb-2 text-[12px] font-medium">メンバー台帳(Firestore)</h3>

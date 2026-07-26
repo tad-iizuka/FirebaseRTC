@@ -26,12 +26,23 @@
  *     adminUsers(権限台帳)の閲覧・編集。ただし admins:manage 自体の
  *     付与/剥奪はこのAPIでは行えない(dev-tools/grant-admin-permission.js
  *     での手動運用に固定。自己昇格・権限エスカレーションを防ぐため)。
+ *
+ * [Phase11で追加]
+ *   - GET /admin/rooms のルーム一覧に orgId/nodeId/nodeAncestorIds(生ID)を
+ *     追加。名前解決はしない(一覧でのN+1読み取りを避けるため)。
+ *   - GET /admin/rooms/:roomId のルーム詳細に、lib/orgContext.js で
+ *     名前解決済みの org: {orgId, orgName, breadcrumb} を追加
+ *     (routes/rooms.js の GET /:roomId/org-context と同じ計算ロジックを
+ *     共有。権限判定の方法だけが異なる)。
+ *   - 組織階層自体のCRUD・Roomへの割り当ては routes/organizations.js
+ *     (/admin/organizations*, PATCH /admin/rooms/:roomId/org-assignment)。
  */
 
 const express = require('express');
 const { RoomServiceClient } = require('livekit-server-sdk');
 const { admin, db } = require('../lib/firebaseAdmin');
 const { logAdminAction } = require('../lib/auditLog');
+const { resolveOrgContext } = require('../lib/orgContext');
 const { requireFirebaseAuth, isValidRoomId } = require('../middleware/requireAuth');
 const { requireAdminPermission } = require('../middleware/requireAdmin');
 
@@ -108,6 +119,14 @@ router.get('/rooms', requireFirebaseAuth, requireAdminPermission('rooms:monitor'
           createdAt: room.createdAt?.toMillis?.() ?? null,
           maxMembers: room.maxMembers ?? null,
           activeMemberCount,
+          // [Phase11] 一覧では名前解決(団体名・node名)まではせず、IDのみ返す。
+          // 名前が必要な画面は別途 GET /admin/organizations 等で取得した
+          // 一覧と突き合わせるか、詳細画面(GET /admin/rooms/:roomId)で
+          // 解決済みのbreadcrumbを取得する。一覧で毎行breadcrumbを解決すると
+          // N+1読み取りになるため、ここでは意図的に生IDのみに留めている。
+          orgId: room.orgId ?? null,
+          nodeId: room.nodeId ?? null,
+          nodeAncestorIds: room.nodeAncestorIds ?? [],
           talkLock:
             room.talkLock && room.talkLock.expiresAt.toMillis() > now
               ? { uid: room.talkLock.uid, expiresAt: room.talkLock.expiresAt.toMillis() }
@@ -181,12 +200,15 @@ router.get('/rooms/:roomId', requireFirebaseAuth, requireAdminPermission('rooms:
     }
 
     const now = Date.now();
+    const org = await resolveOrgContext(room); // [Phase11]
+
     res.json({
       roomId,
       ownerUid: room.ownerUid,
       createdAt: room.createdAt?.toMillis?.() ?? null,
       maxMembers: room.maxMembers ?? null,
       members,
+      org, // [Phase11] { orgId, orgName, breadcrumb } または全てnull/空配列(無所属)
       talkLock:
         room.talkLock && room.talkLock.expiresAt.toMillis() > now
           ? {

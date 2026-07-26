@@ -17,6 +17,7 @@ const crypto = require('crypto');
 const { RoomServiceClient } = require('livekit-server-sdk');
 const { db } = require('../lib/firebaseAdmin');
 const { logAdminAction } = require('../lib/auditLog');
+const { resolveOrgContext } = require('../lib/orgContext');
 const { requireFirebaseAuth, isValidRoomId, requireRoomMembership } = require('../middleware/requireAuth');
 
 const router = express.Router();
@@ -423,34 +424,8 @@ router.get('/:roomId/org-context', requireFirebaseAuth, requireRoomMembership, a
 
   try {
     const roomSnap = await db.collection('rooms').doc(roomId).get();
-    const room = roomSnap.data() || {};
-
-    if (!room.orgId) {
-      return res.json({ orgId: null, orgName: null, breadcrumb: [] });
-    }
-
-    const orgRef = db.collection('organizations').doc(room.orgId);
-    const orgSnap = await orgRef.get();
-    if (!orgSnap.exists) {
-      // orgIdが指しているはずの団体が見つからない(削除された等)。
-      // クライアント側は無所属と同様に扱わせるため、ここでもエラーにはしない。
-      console.warn(`[org-context] roomId=${roomId} の orgId=${room.orgId} に対応する団体が存在しません`);
-      return res.json({ orgId: null, orgName: null, breadcrumb: [] });
-    }
-
-    // nodeAncestorIds(自分を含まない祖先) + nodeId(自分自身)の順で、
-    // ルートに近い順のnodeドキュメントをまとめて取得する。
-    const nodeIdsInOrder = [...(room.nodeAncestorIds || []), ...(room.nodeId ? [room.nodeId] : [])];
-    let breadcrumb = [];
-    if (nodeIdsInOrder.length > 0) {
-      const nodeRefs = nodeIdsInOrder.map((id) => orgRef.collection('nodes').doc(id));
-      const nodeSnaps = await db.getAll(...nodeRefs);
-      breadcrumb = nodeSnaps
-        .filter((s) => s.exists)
-        .map((s) => ({ nodeId: s.id, name: s.data().name, depth: s.data().depth }));
-    }
-
-    res.json({ orgId: room.orgId, orgName: orgSnap.data().name, breadcrumb });
+    const context = await resolveOrgContext(roomSnap.data());
+    res.json(context);
   } catch (e) {
     console.error('[org-context取得エラー]', e.message);
     res.status(500).json({ error: '組織階層情報の取得に失敗しました' });

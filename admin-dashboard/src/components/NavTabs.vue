@@ -23,6 +23,7 @@ const tabClass = (name: string) => [
 <template>
   <nav class="flex gap-1 border-b border-border px-5 pt-3">
     <RouterLink :to="{ name: 'rooms' }" :class="tabClass('rooms')">ルーム</RouterLink>
+    <RouterLink :to="{ name: 'organizations' }" :class="tabClass('organizations')">組織</RouterLink>
     <RouterLink :to="{ name: 'audit-logs' }" :class="tabClass('audit-logs')">監査ログ</RouterLink>
     <RouterLink :to="{ name: 'admins' }" :class="tabClass('admins')">管理者権限</RouterLink>
   </nav>

@@ -29,6 +29,14 @@ const router = createRouter({
       component: () => import('@/views/AdminsView.vue'),
       meta: { requiresAuth: true },
     },
+    {
+      // [Phase11] 組織階層(organizations/nodes)の管理・階層ナビゲーション
+      // (organizations:monitor / organizations:manage権限が必要)
+      path: '/organizations',
+      name: 'organizations',
+      component: () => import('@/views/OrganizationsView.vue'),
+      meta: { requiresAuth: true },
+    },
   ],
 })
 
