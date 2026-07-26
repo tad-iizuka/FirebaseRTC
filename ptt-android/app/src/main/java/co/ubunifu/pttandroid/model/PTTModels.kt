@@ -32,3 +32,25 @@ data class ChatMessage(
     val text: String,
     val createdAtMillis: Long?,
 )
+
+/**
+ * [Phase13] GET /rooms/:roomId/badges のレスポンス内、1バッジ分。
+ * Web版(ptt-client/src/types/api.ts の AssignedBadge)と同じフィールド構成。
+ * category は "role" | "skill" | "unit" | "rank" | "other"、
+ * source は "grant" | "guest-role"(Web版と同じ文字列をそのまま保持し、
+ * UI側での分岐には現状使わないためenum化はしていない)。
+ */
+data class AssignedBadge(
+    val badgeId: String,
+    val name: String,
+    val icon: String,
+    val category: String,
+    val priority: Int,
+    val source: String,
+)
+
+/** GET /rooms/:roomId/badges の members[uid] 1件分(Web版のRoomMemberBadgesと同じ) */
+data class RoomMemberBadges(
+    val badges: List<AssignedBadge>,
+    val topBadge: AssignedBadge?,
+)

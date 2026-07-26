@@ -66,6 +66,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.ImeAction
@@ -73,10 +75,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import co.ubunifu.pttandroid.R
 import co.ubunifu.pttandroid.auth.PTTAuthManager
+import co.ubunifu.pttandroid.badges.PTTBadgesStore
 import co.ubunifu.pttandroid.ban.PTTBanStore
 import co.ubunifu.pttandroid.ban.PTTRoomPermissions
 import co.ubunifu.pttandroid.chat.PTTChatStore
 import co.ubunifu.pttandroid.connection.PTTConnectionManager
+import co.ubunifu.pttandroid.model.AssignedBadge
 import co.ubunifu.pttandroid.model.ConnectionStatus
 import co.ubunifu.pttandroid.model.ParticipantInfo
 import co.ubunifu.pttandroid.onboarding.PTTOnboardingScreen
@@ -101,6 +105,7 @@ fun PTTApp(
     banStore: PTTBanStore,
     recordingStore: PTTRecordingStore,
     reportStore: PTTReportStore,
+    badgesStore: PTTBadgesStore,
     onboardingStore: PTTOnboardingStore,
     onRequestGoogleSignIn: () -> Unit,
 ) {
@@ -148,6 +153,8 @@ fun PTTApp(
     // [通報UI]
     val reportSubmitting by reportStore.isSubmitting.collectAsState()
     val reportError by reportStore.errorMessage.collectAsState()
+    // [Phase13・次アクションitem3] 参加者一覧のバッジ表示(ポーリング)。
+    val badgesByUid by badgesStore.byUid.collectAsState()
     // [送話ロック連携] サーバー(routes/talk.js)がRoom Metadataに書き込むcurrentTalker(uid)。
     // 自分以外のuidが入っている間はPTTボタンを無効化する。
     val currentTalkerUid by connectionManager.currentTalkerUid.collectAsState()
@@ -183,6 +190,8 @@ fun PTTApp(
         activeRoomId = roomId
         chatStore.start(roomId)
         banStore.start(roomId, currentUser?.uid ?: "")
+        // [Phase13・次アクションitem3] 参加者一覧のバッジ表示(ポーリング)。
+        badgesStore.start(scope, tokenServerUrl, roomId) { authManager.fetchIdToken() }
         connectionManager.connect(
             tokenServerUrl = tokenServerUrl,
             livekitUrl = livekitUrl,
@@ -195,6 +204,7 @@ fun PTTApp(
         if (status !is ConnectionStatus.Disconnected) connectionManager.disconnect()
         chatStore.stop()
         banStore.stop()
+        badgesStore.stop()
         activeRoomId = null
         currentInviteCode = null
         joinRoomId = ""
@@ -339,6 +349,8 @@ fun PTTApp(
                     onRequestBan = { banTarget = it },
                     onRequestReport = { reportTarget = it; reportReasonText = "" },
                     reportError = reportError,
+                    // [Phase13・次アクションitem3] uid -> 最優先1件のバッジ。
+                    topBadges = badgesByUid.mapValues { (_, entry) -> entry.topBadge },
                 )
                 Spacer(Modifier.height(16.dp))
                 ChatSection(
@@ -981,6 +993,9 @@ private fun ParticipantsSection(
     onRequestBan: (ParticipantInfo) -> Unit,
     onRequestReport: (ParticipantInfo) -> Unit,
     reportError: String?,
+    // [Phase13・次アクションitem3] uid -> 最優先1件のバッジ。取得中/未取得のuidは
+    // マップに存在しない(Web版ParticipantList.vueのtopBadgesと同じ扱い)。
+    topBadges: Map<String, AssignedBadge?>,
 ) {
     Column(Modifier.fillMaxWidth()) {
         Text(stringResource(R.string.participants_title), fontFamily = Mono, fontSize = 10.sp, color = PTTColors.Muted)
@@ -994,6 +1009,19 @@ private fun ParticipantsSection(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        // [Phase13・次アクションitem3] 最優先1件のバッジアイコン。
+                        // Web版ParticipantList.vueの:title(ツールチップ)に相当する情報を
+                        // contentDescription(スクリーンリーダー向け)として保持する。
+                        topBadges[info.identity]?.let { badge ->
+                            Text(
+                                badge.icon,
+                                fontFamily = Mono,
+                                fontSize = 12.sp,
+                                modifier = Modifier
+                                    .padding(end = 4.dp)
+                                    .semantics { contentDescription = badge.name },
+                            )
+                        }
                         Text(
                             info.name,
                             fontFamily = Mono,
