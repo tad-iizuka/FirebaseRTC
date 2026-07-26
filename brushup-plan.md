@@ -65,6 +65,27 @@ Phase2の具体的要件が確定するまでの着手条件付き(Phase15)へ�
 あわせて「6. 次アクションの提案」がほぼ全項目完了済みだったため、完了分を
 「6.1 完了済みアクション（アーカイブ）」へ集約し、新ロードマップに即した
 次アクションへ刷新した）
+十三訂: 2026-07-26（Phase11(組織階層)を実装し、token-server
+（`lib/orgContext.js`新設・`routes/organizations.js`新設・`routes/rooms.js`・
+`routes/admin.js`・`server.js`・`firestore.rules`変更）・admin-dashboard
+（`OrganizationsView.vue`・`stores/adminOrganizations.ts`新設、
+`RoomsListView.vue`・`RoomDetailView.vue`・`types/admin.ts`・
+`router/index.ts`・`NavTabs.vue`変更）双方に反映した。実装過程での
+やり取りを通じて、以下2点を運用方針として確定した。
+(1) Room作成とRoomの組織階層への紐付けは分離する。Room作成は従来通り
+PTTクライアントから行い、自動での組織紐付けは行わない。紐付けが必要な
+Roomのみ、admin-dashboardのRoom詳細画面(`org-assignment`)で管理者が事後に
+手動で行う。これに伴い、「ユーザー×団体の所属関係」（誰がどの団体に
+属するか）の設計は当面不要と判断し、着手しない。
+(2) 動作確認中、admin-dashboardのRoom詳細画面から招待コードを確認できない
+ことが判明した。`token-server/routes/admin.js`の`GET /admin/rooms`・
+`GET /admin/rooms/:roomId`はいずれも`inviteCode`を一度も返しておらず、
+これはPhase11の実装漏れではなくAdmin API側の既存の仕様(招待コードは
+`POST /rooms`作成時のレスポンスとしてのみ返却され、以降はどのAPIからも
+再取得できない)であることを確認した。追加を検討する場合、`rooms:monitor`
+権限保有者に「Roomへの参加権を事実上配布できる」権限まで広げることになる
+ため、Phase12(役割と機能の整理)でrole×操作の対応表と合わせて検討する
+持ち越し事項として5.4・Phase12双方に記録する（詳細は該当箇所参照）
 
 > 本改定では、アップロードされた `README.md`（"Connect to a place, not to a person."）に
 > 明記されたビジョン・原則・ターゲットロードマップを"あるべき姿"の物差しとして採用し、
@@ -380,6 +401,14 @@ Guestロール追加（Phase10）で顕在化した課題。現状、role別の�
 - 上記の整理と合わせて、role別のUI/UX（メニュー構成・案内文言等）を
   一通り棚卸しし、Guestロール導入で生まれた表示の抜け漏れ
   （例: 5.4の「他参加者のGuest判定手段の欠如」）の解消方針もここで検討する
+- **（2026-07-26追加）招待コードの可視範囲**：`GET /admin/rooms`・
+  `GET /admin/rooms/:roomId`はいずれも`inviteCode`を返しておらず、
+  admin-dashboard側からRoomの招待コードを確認する手段が現状存在しない
+  （Phase11実装時の動作確認で判明。詳細は5.4参照）。追加する場合、
+  `rooms:monitor`権限保有者に実質的な「Roomへの参加権配布」権限まで
+  広げることになるため、対象権限を`organizations:manage`等に絞るか、
+  閲覧自体を監査ログ(`logAdminAction`)に残すか、role×操作の対応表
+  整理の一環としてここで方針を決める
 
 ### Phase 13: バッジシステムの基本機能 → **旧Phase11から分離（2026-07-26）**
 業種プロファイルに依存しない部分のみ先行実装する。業種プロファイル単位の
@@ -503,6 +532,27 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
   （ユーザー確認済み、2026-07-25）。**Phase12（役割と機能の整理）で
   role別に何を一般メンバーへ公開してよいかを棚卸しする際、合わせて
   検討する**
+- **Room作成と組織階層への紐付けの分離（2026-07-26、確定）**：Phase11
+  実装時の検討により、Room作成時に組織階層(orgId/nodeId)へ自動で紐付ける
+  機能は実装しないことを確定した。Room作成は従来通りPTTクライアントから
+  行い、紐付けが必要なRoomのみadmin-dashboardのRoom詳細画面
+  (`PATCH /admin/rooms/:roomId/org-assignment`)から管理者が事後に手動で
+  行う運用とする。入室方法(招待コード検証)も組織階層とは無関係のまま
+  変更しない。これに伴い、「ユーザーがどの団体に属するか」という
+  ユーザー×団体の所属関係の設計・実装は当面行わない（自動紐付けや
+  招待不要参加が必要になった時点で、改めて別Phaseとして検討する）
+- **招待コードの可視範囲（2026-07-26 課題化、未着手）**：Phase11の
+  動作確認中、admin-dashboardのRoom詳細画面から招待コードを確認できない
+  ことが判明した。`token-server/routes/admin.js`の`GET /admin/rooms`・
+  `GET /admin/rooms/:roomId`はいずれも`inviteCode`を返しておらず、これは
+  Phase11の実装漏れではなく、招待コードが`POST /rooms`(Room作成)の
+  レスポンスとしてのみ返却され、以降どのAPIからも再取得できないという
+  既存の仕様によるもの。「Room作成後、必要に応じて招待コードを手動共有する」
+  という2026-07-26確定の運用（上記）を実際に回すには、admin-dashboardから
+  招待コードを確認できる手段が必要になる可能性が高いが、これを追加すると
+  `rooms:monitor`権限保有者に実質的な「Roomへの参加権配布」権限まで
+  広がってしまう。Phase12（role×操作の対応表整理）で、対象権限の絞り込み・
+  監査ログ記録の要否と合わせて検討する
 - **業界ラベリング層をロードマップ後方へ移動（2026-07-26）**：
   Phase2の具体的な案件・要件が無いまま「言語×業種プロファイル」の
   抽象化軸を設計すると、後で作り直すリスクの方が高いと判断。Phase1の
@@ -518,26 +568,22 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
 旧版の提案（項目1〜8）は全て完了済みのため「6.1 完了済みアクション
 （アーカイブ）」へ集約した。現行ロードマップ（Phase11〜13の土台整備を
 優先する再編後の順序）に即して、次アクションを以下の通り刷新する。
+なお、Phase11(組織階層のデータモデル設計・実装)は本改定(十三訂)時点で
+完了しており、「6.1 完了済みアクション（アーカイブ）」item 9へ移動した。
 
-1. **Phase11 組織階層のデータモデル設計**：`Company → Branch → Site`
-   （警備業）と`Community → Group`（一般）の両方を無理なく表現できる
-   共通スキーマ案をFirestore上で検討する。既存のフラットなRoomデータ
-   からの移行方針（既存Roomをどの階層に紐付けるか、無所属Roomを許容
-   するか等）も合わせて設計する。実装より先に、まずスキーマ案を仕様
-   レベルで固めることを推奨（Guestロールと同様、実装着手前に要件を
-   一度合意してから進める進め方が、これまでの各Phaseでも手戻りが
-   少なかったため）
-2. **Phase12 role×操作の対応表を洗い出す**：`token-server`側
+1. **Phase12 role×操作の対応表を洗い出す**：`token-server`側
    （`rooms.js`・`recording.js`等に分散している`['owner','moderator']`
    等のホワイトリスト）と3クライアント側（`ban.ts`/`PTTBanStore.swift`/
    Android版の相当箇所にある`myRole === 'owner' || myRole === 'moderator'`
    等の分岐）を、まず一覧化することから始める。一元化の設計はこの棚卸し
-   の後に行う
-3. **Phase13 バッジ基本機能のデータモデル設計**：「5.3 バッジシステム」の
+   の後に行う。あわせて、admin側の権限（`rooms:monitor`/
+   `organizations:manage`等）についても、招待コードの可視範囲（5.4参照）
+   を含めて同じ棚卸しの対象に含める
+2. **Phase13 バッジ基本機能のデータモデル設計**：「5.3 バッジシステム」の
    仕様を土台に、バッジマスタ・付与記録のFirestoreスキーマ案を検討する。
    Phase11の組織階層と異なり団体単位の切り替えはPhase15まで持ち越すため、
    Phase13時点では団体IDを持たないシンプルな1マスタ構成でよい
-4. **（低優先度・継続）** `UI_UX.md`・`SECURITY.md`・`AI.md`の空テンプレート
+3. **（低優先度・継続）** `UI_UX.md`・`SECURITY.md`・`AI.md`の空テンプレート
    整備：旧6.項目3で洗い出したまま未着手。転記元となる詳細記述が
    `token-server/README.md`側に存在しないため、内容そのものをこのタイミングで
    新規に書き起こす必要がある。優先度は引き続き低いが、Phase11〜13で
@@ -609,5 +655,25 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
    Android側のリポジトリ本体を取得してのコード検証は行っておらず、
    ユーザー申告に基づく完了として扱う。これでGuestロールはサーバー・
    Web/iOS/Androidの3クライアントすべてで実装完了
+9. ✅ **完了（2026-07-26、十三訂）**: Phase11 組織階層のデータモデル設計・
+   実装。`Company → Branch → Site`（警備業）・`Community → Group`（一般）
+   の両方を任意の深さの再帰ツリー(`organizations`/`organizations/{orgId}/
+   nodes`)として表現する設計をまず合意し、その後実装まで完了した。
+   - `firestore.rules`: `organizations`/`nodes`へのクライアント直接
+     読み書きを全面拒否(rooms本体と同じ理由)
+   - `token-server`: `routes/organizations.js`新設
+     （団体・node一覧/作成、`PATCH /admin/rooms/:roomId/org-assignment`
+     によるRoomの割り当て/解除）、`lib/orgContext.js`新設（パンくず解決
+     ロジックを`routes/rooms.js`の`GET /:roomId/org-context`と
+     `routes/admin.js`のルーム詳細で共有）
+   - `admin-dashboard`: `OrganizationsView.vue`（団体・nodeツリー管理画面）・
+     `stores/adminOrganizations.ts`新設。`RoomsListView.vue`に階層ナビゲーション
+     （既知の制約: サーバー側フィルタ未実装のため読み込み済みページ内のみ）、
+     `RoomDetailView.vue`に組織階層の表示・割り当て変更UIを追加
+   - 既存Roomの移行：強制バックフィルは行わず、無所属Roomを正式な状態として
+     許容。団体を持つ運用者が任意のタイミングでadmin-dashboardから手動割り当て
+   - 動作確認を経て、Room作成と組織階層への紐付けを分離する運用方針、
+     および招待コードの可視範囲という新たな課題を確定・記録した
+     （詳細は5.4参照）
 
 </details>
