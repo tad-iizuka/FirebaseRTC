@@ -122,6 +122,44 @@ export const useAdminRoomsStore = defineStore('adminRooms', () => {
     }
   }
 
+  // [Phase12] admin-dashboardからのmoderator任命/降格。
+  // token-server/routes/rooms.js側の同名API(Room内ownerのみ実行可能)とは別に、
+  // PATCH /admin/rooms/:roomId/members/:targetUid/role(rooms:manage権限)を叩く。
+  // 同時に複数メンバーのroleを更新できるよう、更新中のuidをSetで管理する
+  // (autoRecordingトグルと違い対象が複数行あるため、単一のbooleanでは表現できない)。
+  const updatingRoleUids = ref<Set<string>>(new Set())
+  const roleErrorMessage = ref<string | null>(null)
+
+  async function setMemberRole(
+    baseUrl: string,
+    roomId: string,
+    targetUid: string,
+    role: 'moderator' | 'member',
+  ) {
+    if (!detail.value || detail.value.roomId !== roomId) return
+    const member = detail.value.members.find((m) => m.uid === targetUid)
+    const before = member?.role
+    roleErrorMessage.value = null
+    updatingRoleUids.value = new Set(updatingRoleUids.value).add(targetUid)
+    // 楽観的更新: 成功する前提でUIを即座に反映し、失敗時のみ元に戻す
+    if (member) member.role = role
+    try {
+      await authedFetch<void>(
+        baseUrl,
+        `/admin/rooms/${encodeURIComponent(roomId)}/members/${encodeURIComponent(targetUid)}/role`,
+        { method: 'PATCH', body: { role } },
+      )
+    } catch (e) {
+      if (member && before) member.role = before
+      roleErrorMessage.value = (e as Error).message
+      throw e
+    } finally {
+      const next = new Set(updatingRoleUids.value)
+      next.delete(targetUid)
+      updatingRoleUids.value = next
+    }
+  }
+
   return {
     rooms,
     nextCursor,
@@ -132,6 +170,8 @@ export const useAdminRoomsStore = defineStore('adminRooms', () => {
     errorMessage,
     isForbidden,
     isUpdatingAutoRecording,
+    updatingRoleUids,
+    roleErrorMessage,
     fetchRooms,
     goToNextPage,
     goToFirstPage,
@@ -139,5 +179,6 @@ export const useAdminRoomsStore = defineStore('adminRooms', () => {
     fetchRoomDetail,
     clearDetail,
     setAutoRecording,
+    setMemberRole,
   }
 })

@@ -125,6 +125,30 @@ async function saveAssignment() {
     // orgs.assignErrorMessage に反映済み
   }
 }
+
+// --- [Phase12] moderator任命/降格 ---
+// owner/guest/banned済みは対象外(サーバー側でも同じガードをかけているが、
+// UI側でも選択肢自体を出さないことで「押せるのに403になる」体験を避ける)。
+function canChangeRole(member: { role: string; status: string }) {
+  return member.role !== 'owner' && member.role !== 'guest' && member.status !== 'banned'
+}
+
+// 各行の「変更先」の選択状態。uid単位で持つ(rowごとに独立したselectのため)。
+const roleDrafts = ref<Record<string, 'moderator' | 'member'>>({})
+
+function roleDraftFor(uid: string, currentRole: string) {
+  return roleDrafts.value[uid] ?? (currentRole === 'moderator' ? 'moderator' : 'member')
+}
+
+async function changeRole(targetUid: string) {
+  const draft = roleDrafts.value[targetUid]
+  if (!draft) return
+  try {
+    await rooms.setMemberRole(settings.tokenServerUrl, roomId.value, targetUid, draft)
+  } catch {
+    // rooms.roleErrorMessage に反映済み
+  }
+}
 </script>
 
 <template>
@@ -222,6 +246,9 @@ async function saveAssignment() {
       </div>
 
       <h3 class="mb-2 text-[12px] font-medium">メンバー台帳(Firestore)</h3>
+      <p v-if="rooms.roleErrorMessage" class="mb-2 text-[11px] text-destructive">
+        {{ rooms.roleErrorMessage }}
+      </p>
       <table class="mb-6 w-full border-collapse text-xs">
         <thead>
           <tr class="border-b border-border text-[10px] uppercase tracking-[0.06em] text-muted-foreground">
@@ -230,6 +257,7 @@ async function saveAssignment() {
             <th class="p-2 text-left">role</th>
             <th class="p-2 text-left">status</th>
             <th class="p-2 text-left">参加日時</th>
+            <th class="p-2 text-left"></th>
           </tr>
         </thead>
         <tbody>
@@ -241,6 +269,31 @@ async function saveAssignment() {
               <span :class="m.status === 'banned' ? 'text-destructive' : ''">{{ m.status }}</span>
             </td>
             <td class="whitespace-nowrap p-2">{{ formatTime(m.joinedAt) }}</td>
+            <td class="p-2">
+              <!-- [Phase12] owner/guest/BAN済みはrole変更対象外(canChangeRole参照)。
+                   Room内owner専用API(rooms.js)を持たない代わりに、この画面から
+                   rooms:manage権限でmoderator任命/降格ができるようにしている。 -->
+              <div v-if="canChangeRole(m)" class="flex items-center gap-1.5">
+                <select
+                  :value="roleDraftFor(m.uid, m.role)"
+                  class="h-7 rounded-sm border border-input bg-background px-1.5 font-mono text-[11px] text-foreground outline-none focus:border-primary"
+                  :disabled="rooms.updatingRoleUids.has(m.uid)"
+                  @change="roleDrafts[m.uid] = ($event.target as HTMLSelectElement).value as 'moderator' | 'member'"
+                >
+                  <option value="member">member</option>
+                  <option value="moderator">moderator</option>
+                </select>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  class="h-7 w-auto px-2 text-[11px]"
+                  :disabled="rooms.updatingRoleUids.has(m.uid) || roleDraftFor(m.uid, m.role) === m.role"
+                  @click="changeRole(m.uid)"
+                >
+                  {{ rooms.updatingRoleUids.has(m.uid) ? '変更中...' : '変更' }}
+                </Button>
+              </div>
+            </td>
           </tr>
         </tbody>
       </table>
