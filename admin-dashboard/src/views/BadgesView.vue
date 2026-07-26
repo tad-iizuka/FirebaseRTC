@@ -7,6 +7,7 @@ import Input from '@/components/ui/Input.vue'
 import Badge from '@/components/ui/Badge.vue'
 import Card from '@/components/ui/Card.vue'
 import type { BadgeCategory, BadgeGrantMethod } from '@/types/admin'
+import { cn } from '@/lib/utils'
 
 // [Phase13] バッジ基本機能のPoC管理画面。
 // 「5.3 バッジシステム」の通り、団体スコープを持たない全体共通の
@@ -145,7 +146,7 @@ async function saveDisplayConfig() {
       <Card
         v-for="b in store.badges"
         :key="b.badgeId"
-        :class="['p-3', !b.active && 'opacity-50']"
+        :class="cn('p-3', !b.active && 'opacity-50')"
       >
         <div class="mb-1 flex flex-wrap items-center gap-2">
           <span class="text-base leading-none">{{ b.icon }}</span>
