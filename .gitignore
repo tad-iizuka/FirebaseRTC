@@ -5,3 +5,4 @@ check.sh
 service-account.json
 GoogleService-Info.plist
 ptt-ios/ptt-ios.xcodeproj/project.xcworkspace/xcuserdata/Tadashi.xcuserdatad/UserInterfaceState.xcuserstate
+attachments-service-account.json

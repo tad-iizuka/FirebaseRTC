@@ -80,8 +80,8 @@ jobs:
             --region asia-northeast1 \
             --project "${{ vars.GCP_PROJECT_ID }}" \
             --allow-unauthenticated \
-            --set-secrets LIVEKIT_API_KEY=livekit-api-key:latest,LIVEKIT_API_SECRET=livekit-api-secret:latest,RECORDING_GCS_CREDENTIALS_JSON=recording-gcs-credentials:latest \
-            --set-env-vars "^@^LIVEKIT_HOST=https://ubunifu-talk-wy19xst3.livekit.cloud@FIREBASE_PROJECT_ID=fir-rtc-de1f4@ALLOWED_ORIGINS=https://fir-rtc-de1f4.web.app,https://fir-rtc-de1f4-admin.web.app@RECORDING_GCS_BUCKET=ptt-dev-recording-bucket"
+            --set-secrets LIVEKIT_API_KEY=livekit-api-key:latest,LIVEKIT_API_SECRET=livekit-api-secret:latest,RECORDING_GCS_CREDENTIALS_JSON=recording-gcs-credentials:latest,ATTACHMENTS_GCS_CREDENTIALS_JSON=attachments-gcs-credentials:latest \
+            --set-env-vars "^@^LIVEKIT_HOST=https://ubunifu-talk-wy19xst3.livekit.cloud@FIREBASE_PROJECT_ID=fir-rtc-de1f4@ALLOWED_ORIGINS=https://fir-rtc-de1f4.web.app,https://fir-rtc-de1f4-admin.web.app@RECORDING_GCS_BUCKET=ptt-dev-recording-bucket@ATTACHMENTS_GCS_BUCKET=ptt-dev-attachments-bucket"
 
       - name: デプロイ後ヘルスチェック
         run: |

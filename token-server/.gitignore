@@ -5,3 +5,4 @@ check.sh
 service-account.json
 recording-service-account.json
 GoogleService-Info.plist
+attachments-service-account.json
