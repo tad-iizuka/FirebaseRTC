@@ -139,14 +139,14 @@ function cancelPendingFile() {
       </Button>
     </div>
 
-    <div class="flex gap-1.5">
-      <input
-        ref="fileInputRef"
-        type="file"
-        accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/webm,application/pdf"
-        class="hidden"
-        @change="onFileSelected"
-      />
+    <input
+      ref="fileInputRef"
+      type="file"
+      accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/webm,application/pdf"
+      class="hidden"
+      @change="onFileSelected"
+    />
+    <div v-if="!pendingFile" class="flex gap-1.5">
       <Button
         size="sm"
         variant="ghost"
