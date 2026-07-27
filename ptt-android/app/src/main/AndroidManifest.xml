@@ -8,10 +8,13 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- 接続中にBluetoothヘッドセット等を使う場合 -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    <!-- バックグラウンドでも送受話を継続する場合、フォアグラウンドサービス化を検討する
-         (iOS版のUIBackgroundModes=audioに相当。現時点は未実装、README参照) -->
+    <!-- [Phase9] バックグラウンドでも送受話を継続するためのフォアグラウンドサービス化。
+         PTTForegroundService(connection/)がroom接続中のみstartForeground()する。
+         iOS版のUIBackgroundModes=audioに相当する仕組み -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- Android 13+ ではフォアグラウンド通知の表示自体に実行時許可が必要 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:name=".PTTApplication"
@@ -30,6 +33,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- [Phase9] バックグラウンドでの接続維持・送受話継続を担うフォアグラウンドサービス。
+             Activityの生存期間に縛られずPTTConnectionManagerを保持する
+             (connection/PTTForegroundService.kt参照) -->
+        <service
+            android:name=".connection.PTTForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
     </application>
 
 </manifest>

@@ -151,4 +151,16 @@
     <string name="log_talk_start_failed">発話を開始できませんでした: %1$s</string>
     <string name="log_mic_enable_error">マイク有効化エラー: %1$s</string>
     <string name="log_mic_disable_error">マイク無効化エラー: %1$s</string>
+
+    <!-- [Phase9] バックグラウンド動作用の常駐通知(PTTForegroundService) -->
+    <string name="notification_channel_name">PTT接続状態</string>
+    <string name="notification_channel_description">ルーム接続中に表示される常駐通知です。送話の開始/終了もここから操作できます</string>
+    <string name="notification_title_connecting">接続中…</string>
+    <string name="notification_title_connected">接続中: %1$s</string>
+    <string name="notification_title_reconnecting">再接続中: %1$s</string>
+    <string name="notification_text_sending">送話中</string>
+    <string name="notification_text_other_talking">他の参加者が送話中</string>
+    <string name="notification_text_idle">待機中</string>
+    <string name="notification_action_talk_start">送話開始</string>
+    <string name="notification_action_talk_stop">送話終了</string>
 </resources>

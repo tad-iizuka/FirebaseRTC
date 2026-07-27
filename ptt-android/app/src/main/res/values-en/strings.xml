@@ -140,4 +140,16 @@
     <string name="log_talk_start_failed">Could not start talking: %1$s</string>
     <string name="log_mic_enable_error">Microphone enable error: %1$s</string>
     <string name="log_mic_disable_error">Microphone disable error: %1$s</string>
+
+    <!-- [Phase9] Persistent notification for background operation (PTTForegroundService) -->
+    <string name="notification_channel_name">PTT connection status</string>
+    <string name="notification_channel_description">Shown while connected to a room. You can also start/stop talking from here</string>
+    <string name="notification_title_connecting">Connecting…</string>
+    <string name="notification_title_connected">Connected: %1$s</string>
+    <string name="notification_title_reconnecting">Reconnecting: %1$s</string>
+    <string name="notification_text_sending">Talking</string>
+    <string name="notification_text_other_talking">Someone else is talking</string>
+    <string name="notification_text_idle">Idle</string>
+    <string name="notification_action_talk_start">Start talking</string>
+    <string name="notification_action_talk_stop">Stop talking</string>
 </resources>

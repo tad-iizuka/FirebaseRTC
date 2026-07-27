@@ -40,6 +40,9 @@ struct ContentView: View {
     /// [Phase13 バッジ表示UI] Web版ParticipantList.vueの移植。GET /:roomId/badges をポーリングする。
     @StateObject private var badges = PTTBadgeStore()
     @StateObject private var onboarding = PTTOnboardingStore()
+    /// [Phase9 バックグラウンド動作] ロック画面/常駐通知/ヘッドセットボタンからの
+    /// 送話操作を仲介する。connectionへはattach(to:)経由でweak参照するのみ。
+    @StateObject private var backgroundControl = PTTBackgroundControlManager()
 
     @State private var tokenServerURL: String = "https://ptt-token-server-rnn4fqay3a-an.a.run.app"
     @State private var livekitURL: String = "wss://ubunifu-talk-wy19xst3.livekit.cloud"
@@ -96,6 +99,10 @@ struct ContentView: View {
         }
         .background(.pttBackground)
         .foregroundColor(.pttText)
+        .onAppear {
+            // [Phase9] 1回だけ実行すればよい(attach内部でも二重呼び出しをガードしている)。
+            backgroundControl.attach(to: connection)
+        }
         .onChange(of: auth.currentUser?.uid, initial: true) { _, newUid in
             savedRooms.load(forUid: newUid)
         }
