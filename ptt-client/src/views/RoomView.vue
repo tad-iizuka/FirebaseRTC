@@ -150,6 +150,24 @@ async function sendChat(text: string) {
   }
 }
 
+// [Phase16] 添付ファイル送信。ChatPanel.vueからFileを受け取り、圧縮・
+// アップロードURL発行・PUT・メッセージ確定までをchat.sendAttachmentに委ねる。
+async function sendChatFile(file: File) {
+  try {
+    await chat.sendAttachment(settings.tokenServerUrl, roomId.value, file)
+  } catch {
+    // chat.errorMessage に理由がセットされているのでUIには既に反映済み
+  }
+}
+
+// [Phase16] ChatPanel.vueへ渡す、baseUrl/roomIdを束縛した閲覧URL発行関数。
+function getChatAttachmentUrl(messageId: string) {
+  return chat.getAttachmentUrl(settings.tokenServerUrl, roomId.value, messageId)
+}
+function getChatThumbnailUrl(messageId: string) {
+  return chat.getThumbnailUrl(settings.tokenServerUrl, roomId.value, messageId)
+}
+
 async function updateNickname(displayName: string) {
   try {
     await ban.updateNickname(settings.tokenServerUrl, roomId.value, displayName)
@@ -222,7 +240,10 @@ onUnmounted(() => {
       :messages="chat.messages"
       :my-uid="auth.currentUser?.uid"
       :error-message="chat.errorMessage"
+      :get-attachment-url="getChatAttachmentUrl"
+      :get-thumbnail-url="getChatThumbnailUrl"
       @send="sendChat"
+      @send-file="sendChatFile"
     />
 
     <LogPanel :lines="connection.logLines" />

@@ -84,6 +84,9 @@ router.get('/organizations', requireFirebaseAuth, requireAdminPermission('organi
           industryProfile: org.industryProfile ?? null,
           ownerUid: org.ownerUid,
           roomCount,
+          // [Phase16] チャット添付ファイルの保持期間(日数)。未設定ならnull
+          // (呼び出し側でデフォルト30日を適用する。lib/attachments.js参照)。
+          attachmentRetentionDays: org.attachmentRetentionDays ?? null,
           createdAt: org.createdAt?.toMillis?.() ?? null,
         };
       })
@@ -277,6 +280,61 @@ router.post(
     } catch (e) {
       console.error('[組織階層: node作成エラー]', e.message);
       res.status(500).json({ error: 'nodeの作成に失敗しました' });
+    }
+  }
+);
+
+/**
+ * PATCH /admin/organizations/:orgId [Phase16]
+ * body: { attachmentRetentionDays: number | null }
+ *
+ * 現時点ではチャット添付ファイルの保持期間(7.3で確定: 団体単位・
+ * デフォルト30日)のみを更新対象とする。null を指定するとデフォルトへ戻す
+ * (lib/attachments.js#resolveRetentionDaysがnull/未設定時はデフォルトを使う)。
+ * name/industryProfileの更新はスコープ外のまま(Phase11時点で更新APIが
+ * 無かったのと同様、必要になった時点で別途追加する)。
+ */
+router.patch(
+  '/organizations/:orgId',
+  requireFirebaseAuth,
+  requireAdminPermission('organizations:manage'),
+  async (req, res) => {
+    const uid = req.firebaseUser.uid;
+    const { orgId } = req.params;
+    const { attachmentRetentionDays } = req.body || {};
+
+    if (!isValidId(orgId)) {
+      return res.status(400).json({ error: 'orgId が不正です' });
+    }
+    if (
+      attachmentRetentionDays !== null &&
+      (typeof attachmentRetentionDays !== 'number' ||
+        !Number.isInteger(attachmentRetentionDays) ||
+        attachmentRetentionDays <= 0)
+    ) {
+      return res.status(400).json({ error: 'attachmentRetentionDays は正の整数またはnullで指定してください' });
+    }
+
+    try {
+      const orgRef = db.collection('organizations').doc(orgId);
+      const orgSnap = await orgRef.get();
+      if (!orgSnap.exists) {
+        return res.status(404).json({ error: '団体が見つかりません' });
+      }
+
+      await orgRef.update({ attachmentRetentionDays: attachmentRetentionDays ?? null });
+
+      await logAdminAction({
+        actorUid: uid,
+        action: 'organization:update',
+        detail: { orgId, attachmentRetentionDays: attachmentRetentionDays ?? null },
+      });
+
+      console.log(`[組織階層: 保持期間更新] orgId=${orgId} attachmentRetentionDays=${attachmentRetentionDays ?? '(デフォルト)'} by=${uid}`);
+      res.json({ orgId, attachmentRetentionDays: attachmentRetentionDays ?? null });
+    } catch (e) {
+      console.error('[組織階層: 保持期間更新エラー]', e.message);
+      res.status(500).json({ error: '保持期間の更新に失敗しました' });
     }
   }
 );

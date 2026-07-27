@@ -143,6 +143,34 @@ export const useAdminOrganizationsStore = defineStore('adminOrganizations', () =
     }
   }
 
+  /**
+   * [Phase16] 団体単位のチャット添付ファイル保持期間(日数)を更新する。
+   * nullを渡すとデフォルト(30日)へ戻す(token-server/lib/attachments.js参照)。
+   */
+  const isUpdatingRetention = ref(false)
+  const retentionErrorMessage = ref<string | null>(null)
+
+  async function updateAttachmentRetentionDays(baseUrl: string, orgId: string, days: number | null) {
+    isUpdatingRetention.value = true
+    retentionErrorMessage.value = null
+    try {
+      const result = await authedFetch<{ orgId: string; attachmentRetentionDays: number | null }>(
+        baseUrl,
+        `/admin/organizations/${encodeURIComponent(orgId)}`,
+        { method: 'PATCH', body: { attachmentRetentionDays: days } },
+      )
+      organizations.value = organizations.value.map((org) =>
+        org.orgId === orgId ? { ...org, attachmentRetentionDays: result.attachmentRetentionDays } : org,
+      )
+      return result
+    } catch (e) {
+      retentionErrorMessage.value = (e as Error).message
+      throw e
+    } finally {
+      isUpdatingRetention.value = false
+    }
+  }
+
   return {
     organizations,
     isLoadingOrganizations,
@@ -155,10 +183,13 @@ export const useAdminOrganizationsStore = defineStore('adminOrganizations', () =
     createErrorMessage,
     isAssigning,
     assignErrorMessage,
+    isUpdatingRetention,
+    retentionErrorMessage,
     fetchOrganizations,
     fetchNodes,
     createOrganization,
     createNode,
     assignRoomOrg,
+    updateAttachmentRetentionDays,
   }
 })

@@ -55,6 +55,10 @@ const ROOM_OPERATIONS = {
 
   // routes/messages.js
   'chat:send': ROOM_ROLES,
+  // [Phase16] チャット添付ファイル。5.1/7.3で確定した通りGuestも送受信可能
+  // なため、テキスト送信(chat:send)と同じくrole不問とする。
+  'chat:attachment_upload': ROOM_ROLES,
+  'chat:attachment_read': ROOM_ROLES,
 
   // routes/recording.js
   'recording:start': ['owner', 'moderator'],

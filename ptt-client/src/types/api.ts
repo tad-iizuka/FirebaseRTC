@@ -37,6 +37,31 @@ export interface ChatSendResponse {
   messageId: string
 }
 
+/** [Phase16] POST /rooms/:roomId/attachments/upload-url のレスポンス */
+export interface AttachmentUploadUrlResponse {
+  uploadUrl: string
+  storagePath: string
+  expiresInMs: number
+}
+
+/** [Phase16] GET .../attachment-url ・ .../thumbnail-url のレスポンス */
+export interface AttachmentDownloadUrlResponse {
+  url: string
+  expiresInMs: number
+}
+
+export type AttachmentKind = 'image' | 'video' | 'pdf'
+
+/** [Phase16] rooms/{roomId}/messages/{messageId}.attachment のFirestore形状 */
+export interface ChatAttachment {
+  storagePath: string
+  thumbnailPath: string | null
+  contentType: string
+  kind: AttachmentKind
+  fileName: string
+  size: number
+}
+
 export interface RecordingStartResponse {
   started: true
   egressId: string
@@ -87,6 +112,8 @@ export interface ChatMessageDoc {
   displayName: string
   text: string
   createdAt: { toDate: () => Date } | null
+  // [Phase16] 添付が無いメッセージにはフィールド自体が存在しない
+  attachment?: ChatAttachment
 }
 
 export interface ChatMessage {
@@ -95,6 +122,7 @@ export interface ChatMessage {
   displayName: string
   text: string
   createdAt: Date | null
+  attachment?: ChatAttachment
 }
 
 /** サーバー(routes/talk.js)がLiveKit Room Metadataへ書き込む形状 */

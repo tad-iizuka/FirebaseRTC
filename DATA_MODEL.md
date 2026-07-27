@@ -47,14 +47,27 @@
 
 ## Message
 
-`rooms/{roomId}/messages/{messageId}` [Phase5で追加]
+`rooms/{roomId}/messages/{messageId}` [Phase5で追加、Phase16でattachment追加]
 
 | Field | Type | Description |
 |--------|------|-------------|
 | uid | string | 送信者uid |
 | displayName | string | 送信者表示名 |
-| text | string | 本文 |
+| text | string | 本文(添付のみの場合は空文字) |
 | createdAt | timestamp | 送信日時 |
+| attachment | map \| なし | 添付ファイル(画像/動画/PDF)。無い場合はフィールド自体が存在しない **[Phase16]** |
+
+`attachment`の内部構造:
+
+| Field | Type | Description |
+|--------|------|-------------|
+| storagePath | string | GCS上の保存パス(本体) |
+| thumbnailPath | string \| null | GCS上のサムネイル保存パス。生成失敗時はnull |
+| contentType | string | GCS実体から取得した実際のMIMEタイプ(クライアント自己申告値ではない) |
+| kind | 'image' \| 'video' \| 'pdf' | 内部区分 |
+| fileName | string | サニタイズ済みファイル名 |
+| size | number | GCS実体から取得したバイト数 |
+| expiresAt | timestamp | 保持期限。`dev-tools/cleanup-expired-attachments.js`が過ぎたものを削除する |
 
 ---
 
@@ -148,10 +161,19 @@ AdminUser / AuditLog … Room横断で管理者操作を扱う
 
 ---
 
-## データライフサイクル【Phase8】
+## データライフサイクル【Phase8】【Phase16】
 
 `reports`と`auditLogs`は書き込み時に`expireAt`フィールドをセットしており、
 FirestoreのTTLポリシーを有効化することで一定期間後に自動削除される。
 録音ファイル本体(GCS)にはバケットのライフサイクルルールで、一定期間後に
 低頻度アクセスクラスへの移行・削除を設定する。具体的な`gcloud`コマンドは
 `phase8-operations.md`にまとめられている。
+
+**[Phase16] 添付ファイルは同じ`expireAt`/TTL方式を採用していない。**
+フィールド名も意図的に`expiresAt`(Phase8の`expireAt`とは綴りを変えている)
+としており、これは表記揺れではなく設計上の区別である。TTLはFirestore
+ドキュメントの自動削除のみを行い、そのタイミングでGCS側のファイル実体
+(`storagePath`/`thumbnailPath`)を削除する機会を与えてくれない。そのため
+添付ファイルについては`dev-tools/cleanup-expired-attachments.js`が
+「GCS実体を消してからFirestoreドキュメントを消す」順序を明示的に制御する
+運用とした。詳細は`token-server/phase16-operations.md`を参照。

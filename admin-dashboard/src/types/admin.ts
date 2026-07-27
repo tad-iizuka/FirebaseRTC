@@ -131,6 +131,8 @@ export interface AdminOrganization {
   ownerUid: string
   // 都度Aggregation Queryで集計しているため、取得に失敗した場合はnull。
   roomCount: number | null
+  // [Phase16] チャット添付ファイルの保持期間(日数)。未設定はnull(デフォルト30日が適用される)。
+  attachmentRetentionDays: number | null
   createdAt: number | null
 }
 

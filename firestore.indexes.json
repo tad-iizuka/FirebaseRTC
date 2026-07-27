@@ -15,6 +15,13 @@
         { "fieldPath": "actorUid", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "messages",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "attachment.expiresAt", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

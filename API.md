@@ -99,7 +99,22 @@ Firebase Authを使わず、`WebhookReceiver`によるLiveKit独自の署名検�
 
 | Method | Path | 認証 | 説明 |
 |---|---|---|---|
-| POST | `/rooms/:roomId/messages` | 必須(メンバーのみ) | テキストチャット送信 |
+| POST | `/rooms/:roomId/messages` | 必須(メンバーのみ、Guest可) | テキストチャット送信。`attachment`を渡すと添付ファイル付きメッセージとして送信 **[Phase16]** |
+| POST | `/rooms/:roomId/attachments/upload-url` | 必須(メンバーのみ、Guest可) | 添付ファイル(画像/動画/PDF)のGCS書き込み用署名付きURL発行(5分間有効) **[Phase16]** |
+| GET | `/rooms/:roomId/messages/:messageId/attachment-url` | 必須(メンバーのみ、Guest可) | 添付ファイル本体の署名付き読み取りURL発行(5分間有効) **[Phase16]** |
+| GET | `/rooms/:roomId/messages/:messageId/thumbnail-url` | 必須(メンバーのみ、Guest可) | 添付ファイルのサムネイル読み取りURL発行(5分間有効) **[Phase16]** |
+
+**添付ファイル【Phase16】:** 対応形式は画像(jpeg/png/webp/gif)・動画(mp4/mov/webm)・
+PDFの3種類、1件あたり100MBまで。アップロードはtoken-serverを経由せず、
+発行された署名付きURLへクライアントが直接PUTする。詳細は
+`token-server/lib/attachments.js`・`token-server/phase16-operations.md`を参照。
+
+> **[注記]** このAPI.mdはPhase8時点(2026-07-25)の内容を土台にしており、
+> Phase11(組織階層 `/admin/organizations` 系)・Phase13(バッジ
+> `/rooms/:roomId/badges` 系・`/admin/badges` 系)のエンドポイントはまだ
+> 転記できていない(実装自体は完了済み。各`routes/*.js`のコメントが現状の
+> 一次情報)。Phase16のMessage節のみ今回あわせて更新した。全体としての
+> 棚卸し・転記漏れの解消は別途対応が必要(次アクションとして記録)。
 
 ---
 

@@ -99,7 +99,7 @@ app.get('/', (req, res) => res.send('ptt-token-server OK'));
 
 app.use('/rooms', roomsRouter);
 app.use('/rooms', talkRouter); // POST /rooms/:roomId/talk/{start,heartbeat,stop}
-app.use('/rooms', messagesRouter); // POST /rooms/:roomId/messages
+app.use('/rooms', messagesRouter); // POST /rooms/:roomId/messages, [Phase16] .../attachments/upload-url, .../messages/:messageId/(attachment|thumbnail)-url
 app.use('/rooms', recordingRouter); // POST/GET /rooms/:roomId/recording/*, /recordings*
 app.use('/rooms', roomBadgesRouter); // [Phase13] GET/POST/DELETE /rooms/:roomId/(members/:uid/)badges*
 app.use('/token', tokenRouter);

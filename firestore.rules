@@ -49,11 +49,19 @@ service cloud.firestore {
         // 自分がこのルームの「アクティブな」メンバーである場合のみ履歴を読める。
         // BANされてstatusが'banned'に変わった瞬間、この条件が false になり
         // 読み取り権限も自動的に失う(LiveKit即時キックと同様、二重の強制力を持たせる設計)。
+        //
+        // [Phase16: チャット添付ファイル] 画像/動画/PDFのメタデータ(storagePath等)は
+        // このドキュメントに `attachment` フィールドとして同居させているだけであり、
+        // 読み取り可否のルールはテキストメッセージと完全に同じ(role不問、
+        // 添付があるからといって追加のルールは無い)。ファイル実体(GCS)自体は
+        // Firestore外にあるため、実際の閲覧はtoken-server経由の短期署名付きURL
+        // 発行API(GET .../attachment-url, .../thumbnail-url)を通す
+        // (lib/attachments.js参照)。
         allow read: if request.auth != null &&
           exists(/databases/$(database)/documents/rooms/$(roomId)/members/$(request.auth.uid)) &&
           get(/databases/$(database)/documents/rooms/$(roomId)/members/$(request.auth.uid)).data.status == 'active';
         // 書き込みはtoken-server(Admin SDK経由)のみ。クライアントからの直接書き込みは禁止
-        // (本文の長さチェック・レート制限をサーバー側で強制するため)。
+        // (本文の長さチェック・レート制限・添付ファイル実体の検証をサーバー側で強制するため)。
         allow write: if false;
       }
 

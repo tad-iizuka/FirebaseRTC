@@ -22,7 +22,6 @@
  *     owner/moderator限定のGCS署名付きダウンロードURL発行(5分間有効)。
  */
 
-const fs = require('fs');
 const express = require('express');
 const { Storage } = require('@google-cloud/storage');
 const { EgressClient, EncodedFileType, GCPUpload } = require('livekit-server-sdk');
@@ -31,6 +30,7 @@ const { syncRoomMetadata } = require('../lib/roomMetadata');
 const { logAdminAction } = require('../lib/auditLog');
 const { requireFirebaseAuth, requireRoomMembership } = require('../middleware/requireAuth');
 const { requireRoomPermission } = require('../lib/permissions');
+const { loadGcsCredentials } = require('../lib/gcsCredentials');
 
 const router = express.Router();
 
@@ -72,17 +72,17 @@ const egressClient = new EgressClient(
  * (JSON文字列そのもの)のいずれかを使う想定。
  * [Phase8] 署名付きダウンロードURLの発行にも同じ認証情報を流用する
  * (Cloud Run実行SAのADCだけでは署名できないため)。
+ *
+ * [Phase16] 実際の読み込みロジック自体は lib/gcsCredentials.js に共通化した
+ * (チャット添付ファイル用の2つ目の専用バケット・専用サービスアカウントを
+ * 追加するにあたり、同じロジックの複製を避けるため)。この関数は環境変数名を
+ * 束縛するだけの薄いラッパーとして残す。
  */
-function loadGcsCredentials() {
-  if (process.env.RECORDING_GCS_CREDENTIALS_JSON) {
-    return process.env.RECORDING_GCS_CREDENTIALS_JSON;
-  }
-  if (process.env.RECORDING_GCS_KEY_FILE) {
-    return fs.readFileSync(process.env.RECORDING_GCS_KEY_FILE, 'utf8');
-  }
-  throw new Error(
-    'RECORDING_GCS_CREDENTIALS_JSON または RECORDING_GCS_KEY_FILE が未設定です'
-  );
+function loadRecordingGcsCredentials() {
+  return loadGcsCredentials({
+    jsonEnvVar: 'RECORDING_GCS_CREDENTIALS_JSON',
+    keyFileEnvVar: 'RECORDING_GCS_KEY_FILE',
+  });
 }
 
 function buildOutput(roomId) {
@@ -92,7 +92,7 @@ function buildOutput(roomId) {
     output: {
       case: 'gcp',
       value: new GCPUpload({
-        credentials: loadGcsCredentials(),
+        credentials: loadRecordingGcsCredentials(),
         bucket: process.env.RECORDING_GCS_BUCKET,
       }),
     },
@@ -392,7 +392,7 @@ router.get(
         });
       }
 
-      const storage = new Storage({ credentials: JSON.parse(loadGcsCredentials()) });
+      const storage = new Storage({ credentials: JSON.parse(loadRecordingGcsCredentials()) });
       const bucket = storage.bucket(process.env.RECORDING_GCS_BUCKET);
       const file = bucket.file(recording.filepath);
 
@@ -478,7 +478,7 @@ router.delete(
 
       if (recording.filepath) {
         try {
-          const storage = new Storage({ credentials: JSON.parse(loadGcsCredentials()) });
+          const storage = new Storage({ credentials: JSON.parse(loadRecordingGcsCredentials()) });
           const bucket = storage.bucket(process.env.RECORDING_GCS_BUCKET);
           await bucket.file(recording.filepath).delete();
         } catch (gcsError) {

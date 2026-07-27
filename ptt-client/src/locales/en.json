@@ -118,7 +118,10 @@
   "chat": {
     "title": "Chat",
     "placeholder": "Type a message",
-    "send": "Send"
+    "send": "Send",
+    "attachmentPick": "Attach a file",
+    "attachmentOpen": "Open attachment",
+    "attachmentLoading": "Loading..."
   },
   "errors": {
     "notSignedIn": "Not signed in",
@@ -126,6 +129,7 @@
     "appleSignIn": "Apple sign-in error: {message}",
     "guestSignIn": "Guest sign-in error: {message}",
     "chatFetch": "Chat fetch error: {message}",
+    "chatAttachmentUploadFailed": "Failed to upload the attachment",
     "roleFetch": "Role fetch error: {message}",
     "banWatch": "Ban monitoring error: {message}"
   },

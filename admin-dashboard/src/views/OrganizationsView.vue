@@ -106,6 +106,29 @@ async function createNode() {
     // createErrorMessageに反映済み
   }
 }
+
+// --- [Phase16] チャット添付ファイル保持期間 ---
+// 選択中の団体が変わるたびに、現在値(未設定ならデフォルト30日)を入力欄へ反映する。
+const retentionDaysInput = ref('')
+const selectedOrg = computed(() => orgs.organizations.find((o) => o.orgId === selectedOrgId.value) ?? null)
+
+function onSelectOrg(orgId: string) {
+  selectOrg(orgId)
+  const org = orgs.organizations.find((o) => o.orgId === orgId)
+  retentionDaysInput.value = String(org?.attachmentRetentionDays ?? '')
+}
+
+async function saveRetentionDays() {
+  if (!selectedOrgId.value) return
+  const trimmed = retentionDaysInput.value.trim()
+  const days = trimmed === '' ? null : Number(trimmed)
+  if (days !== null && (!Number.isInteger(days) || days <= 0)) return
+  try {
+    await orgs.updateAttachmentRetentionDays(settings.tokenServerUrl, selectedOrgId.value, days)
+  } catch {
+    // retentionErrorMessageに反映済み
+  }
+}
 </script>
 
 <template>
@@ -144,7 +167,7 @@ async function createNode() {
               selectedOrgId === org.orgId && 'border-primary',
             )
           "
-          @click="selectOrg(org.orgId)"
+          @click="onSelectOrg(org.orgId)"
         >
           <div class="mb-1 flex items-center justify-between gap-2">
             <span class="text-xs font-medium">{{ org.name }}</span>
@@ -185,6 +208,33 @@ async function createNode() {
       <p v-if="!selectedOrgId" class="text-xs text-muted-foreground">左の一覧から団体を選択してください。</p>
 
       <template v-else>
+        <div class="mb-5 max-w-md rounded-sm border border-border p-3">
+          <h3 class="mb-2 text-[11px] font-medium text-muted-foreground">
+            チャット添付ファイルの保持期間【Phase16】
+          </h3>
+          <div class="flex items-center gap-2">
+            <Input
+              v-model="retentionDaysInput"
+              type="number"
+              min="1"
+              placeholder="30"
+              class="w-24"
+            />
+            <span class="text-xs text-muted-foreground">日(空欄でデフォルト30日)</span>
+            <Button size="sm" class="w-auto" :disabled="orgs.isUpdatingRetention" @click="saveRetentionDays">
+              {{ orgs.isUpdatingRetention ? '保存中...' : '保存' }}
+            </Button>
+          </div>
+          <p class="mt-1 text-[11px] text-muted-foreground">
+            現在値: {{ selectedOrg?.attachmentRetentionDays ?? 'デフォルト(30日)' }}。
+            この団体に割り当てられたRoomの画像/動画/PDF添付が、送信からこの日数を
+            過ぎると自動的に削除される。
+          </p>
+          <p v-if="orgs.retentionErrorMessage" class="mt-1 text-xs text-destructive">
+            {{ orgs.retentionErrorMessage }}
+          </p>
+        </div>
+
         <p v-if="orgs.nodesErrorMessage" class="text-xs text-destructive">{{ orgs.nodesErrorMessage }}</p>
         <p
           v-else-if="orgs.isLoadingNodes && selectedNodes.length === 0"
