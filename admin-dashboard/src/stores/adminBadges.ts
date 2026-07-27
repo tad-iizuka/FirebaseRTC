@@ -9,16 +9,21 @@ import type {
   BadgeCategory,
   RoomBadgesResponse,
   RoomMemberBadges,
-  BadgeGrantResult,
 } from '@/types/admin'
 
 // [Phase13] token-server/routes/badges.js のラッパーstore。
 //
 // [設計方針]
 // バッジマスタ(全団体共通の1マスタ、BadgesView.vue向け)と、
-// 「特定Roomのメンバーが現在持っているバッジ」(RoomDetailView.vue向け)を
-// 別々の状態として持つ(useAdminOrganizationsStoreのorganizations一覧/
-// node一覧の分け方と同じ考え方)。
+// 「特定Roomのメンバーが現在持っているバッジ」(RoomDetailView.vue向け、
+// 読み取り専用)を別々の状態として持つ(useAdminOrganizationsStoreの
+// organizations一覧/node一覧の分け方と同じ考え方)。
+//
+// [2026-07-27] 付与/剥奪の実行は`stores/userDirectory.ts`
+// (ユーザー管理画面)に一本化した。badgeGrantsがRoomに紐付かない
+// ユーザー単位のレコードである以上、Room文脈から操作するのは不自然と
+// いうユーザー指摘を受けての変更。このstoreにはマスタCRUDと、Room詳細
+// 画面向けの読み取り専用表示のみを残している。
 
 export const useAdminBadgesStore = defineStore('adminBadges', () => {
   const badges = ref<AdminBadge[]>([])
@@ -124,15 +129,17 @@ export const useAdminBadgesStore = defineStore('adminBadges', () => {
     }
   }
 
-  // --- Room内メンバーのバッジ(RoomDetailView.vue向け) ---
+  // --- Room内メンバーのバッジ(RoomDetailView.vue向け、読み取り専用) ---
+  // [2026-07-27] 付与/剥奪はここではなく stores/userDirectory.ts
+  // (ユーザー管理画面)で行う。バッジがRoomに紐付かないユーザー単位の
+  // 概念であるため、Room詳細画面からの操作は一本化して廃止した。
+  // ここに残すのは「このRoomの現在のメンバーが何を持っているか」の
+  // 読み取り専用表示のみ。
 
   const roomBadges = ref<Record<string, RoomMemberBadges>>({})
   const isLoadingRoomBadges = ref(false)
   const roomBadgesErrorMessage = ref<string | null>(null)
   const isRoomBadgesForbidden = ref(false)
-
-  const grantingUids = ref<Set<string>>(new Set())
-  const grantErrorMessage = ref<string | null>(null)
 
   async function fetchRoomBadges(baseUrl: string, roomId: string) {
     isLoadingRoomBadges.value = true
@@ -153,47 +160,6 @@ export const useAdminBadgesStore = defineStore('adminBadges', () => {
       throw e
     } finally {
       isLoadingRoomBadges.value = false
-    }
-  }
-
-  async function grantBadge(baseUrl: string, roomId: string, targetUid: string, badgeId: string) {
-    grantErrorMessage.value = null
-    grantingUids.value = new Set(grantingUids.value).add(targetUid)
-    try {
-      const result = await authedFetch<BadgeGrantResult>(
-        baseUrl,
-        `/admin/rooms/${encodeURIComponent(roomId)}/members/${encodeURIComponent(targetUid)}/badges`,
-        { method: 'POST', body: { badgeId } },
-      )
-      await fetchRoomBadges(baseUrl, roomId)
-      return result
-    } catch (e) {
-      grantErrorMessage.value = (e as Error).message
-      throw e
-    } finally {
-      const next = new Set(grantingUids.value)
-      next.delete(targetUid)
-      grantingUids.value = next
-    }
-  }
-
-  async function revokeBadge(baseUrl: string, roomId: string, targetUid: string, badgeId: string) {
-    grantErrorMessage.value = null
-    grantingUids.value = new Set(grantingUids.value).add(targetUid)
-    try {
-      await authedFetch<void>(
-        baseUrl,
-        `/admin/rooms/${encodeURIComponent(roomId)}/members/${encodeURIComponent(targetUid)}/badges/${encodeURIComponent(badgeId)}`,
-        { method: 'DELETE' },
-      )
-      await fetchRoomBadges(baseUrl, roomId)
-    } catch (e) {
-      grantErrorMessage.value = (e as Error).message
-      throw e
-    } finally {
-      const next = new Set(grantingUids.value)
-      next.delete(targetUid)
-      grantingUids.value = next
     }
   }
 
@@ -218,11 +184,7 @@ export const useAdminBadgesStore = defineStore('adminBadges', () => {
     isLoadingRoomBadges,
     roomBadgesErrorMessage,
     isRoomBadgesForbidden,
-    grantingUids,
-    grantErrorMessage,
     fetchRoomBadges,
-    grantBadge,
-    revokeBadge,
     clearRoomBadges,
   }
 })

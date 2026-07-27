@@ -216,3 +216,37 @@ export interface BadgeGrantResult {
   uid: string
   badgeId: string
 }
+
+// GET /admin/users, GET /admin/users/:uid, POST/DELETE /admin/users/:uid/badges*
+// (users:monitor / badges:manage)。2026-07-27新設。
+//
+// [命名について] 既存の`AdminUserEntry`/`AdminUserListResponse`(上記)は
+// 「サイト管理者権限を持つ人(adminUsers/{uid}.permissions)」を指す別概念
+// (AdminsView.vue「管理者権限」タブ)であり、ここで扱うのは一般の
+// Firebase Authユーザー(主にMember)なので、名前が衝突しないよう
+// `AppUser*`という別プレフィックスにしている。
+//
+// [設計] バッジ付与/剥奪はもともとRoomDetailView.vueのメンバー台帳から
+// 行っていたが、badgeGrantsがそもそもRoomに紐付かないユーザー単位の
+// レコードである以上、Room文脈から付与するのは不自然というユーザー指摘を
+// 受けて、この「ユーザー管理」画面に一本化した(brushup-plan.md参照)。
+// 将来のユーザー無効化等、他のユーザー単位の管理操作もここに追加していく
+// ことを見込んだ、拡張しやすい構成にしている。
+export interface AppUserSummary {
+  uid: string
+  email: string | null
+  isGuest: boolean
+  disabled: boolean
+  createdAt: string | null
+  lastSignInAt: string | null
+}
+
+export interface AppUserListResponse {
+  users: AppUserSummary[]
+  nextPageToken: string | null
+}
+
+export interface AppUserProfile extends AppUserSummary {
+  badges: AssignedBadge[]
+  topBadge: AssignedBadge | null
+}

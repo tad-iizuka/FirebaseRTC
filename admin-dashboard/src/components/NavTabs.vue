@@ -9,6 +9,7 @@ const route = useRoute()
 
 function isActive(name: string): boolean {
   if (name === 'rooms') return route.name === 'rooms' || route.name === 'room-detail'
+  if (name === 'users') return route.name === 'users' || route.name === 'user-detail'
   return route.name === name
 }
 
@@ -25,6 +26,7 @@ const tabClass = (name: string) => [
     <RouterLink :to="{ name: 'rooms' }" :class="tabClass('rooms')">ルーム</RouterLink>
     <RouterLink :to="{ name: 'organizations' }" :class="tabClass('organizations')">組織</RouterLink>
     <RouterLink :to="{ name: 'badges' }" :class="tabClass('badges')">バッジ</RouterLink>
+    <RouterLink :to="{ name: 'users' }" :class="tabClass('users')">ユーザー</RouterLink>
     <RouterLink :to="{ name: 'audit-logs' }" :class="tabClass('audit-logs')">監査ログ</RouterLink>
     <RouterLink :to="{ name: 'admins' }" :class="tabClass('admins')">管理者権限</RouterLink>
   </nav>

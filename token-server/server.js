@@ -42,6 +42,7 @@ const recordingRouter = require('./routes/recording');
 const organizationsRouter = require('./routes/organizations'); // [Phase11] GET .../org-context, /admin/organizations*, PATCH /admin/rooms/:roomId/org-assignment
 const badgesRouter = require('./routes/badges'); // [Phase13] /admin/badges*, /admin/config/badge-display, /admin/rooms/:roomId/badges*
 const roomBadgesRouter = require('./routes/roomBadges'); // [Phase13] GET/POST/DELETE /rooms/:roomId/(members/:uid/)badges*
+const usersRouter = require('./routes/users'); // [2026-07-27] /admin/users*, /admin/users/:uid/badges* (ユーザー管理画面)
 
 const PORT = process.env.PORT || 8080;
 
@@ -106,6 +107,7 @@ app.use('/reports', reportsRouter);
 app.use('/admin', adminRouter); // GET /admin/rooms, GET /admin/rooms/:roomId [Phase 5]
 app.use('/admin', organizationsRouter); // [Phase11] /admin/organizations*, PATCH /admin/rooms/:roomId/org-assignment
 app.use('/admin', badgesRouter); // [Phase13] /admin/badges*, /admin/config/badge-display, /admin/rooms/:roomId/badges*
+app.use('/admin', usersRouter); // [2026-07-27] /admin/users*, /admin/users/:uid/badges*
 
 app.listen(PORT, () => {
   console.log(`ptt-token-server listening on :${PORT}`);

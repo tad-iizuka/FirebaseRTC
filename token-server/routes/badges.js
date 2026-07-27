@@ -2,8 +2,8 @@
  * routes/badges.js
  *
  * [Phase13] バッジマスタ(badges collection)の管理API、および
- * admin-dashboardからのバッジ付与/剥奪の並行パス。すべて/admin配下に
- * マウントする(routes/organizations.jsと同じ構成)。
+ * admin-dashboard向けのRoomメンバーのバッジ閲覧(読み取り専用)。
+ * すべて/admin配下にマウントする(routes/organizations.jsと同じ構成)。
  *
  * [権限]
  * バッジマスタの閲覧・作成・編集は organizations.js の
@@ -18,13 +18,14 @@
  * (lib/permissions.js)ではなくサイト管理者権限(middleware/requireAdmin.js)
  * 側に置く。
  *
- * [admin-dashboard経由のgrant/revokeについて]
- * routes/roomBadges.js のRoom内owner専用パスとは別に、admin-dashboardから
- * 直接付与/剥奪できる経路をここに用意する。moderator任命APIが
- * routes/admin.js に同種の並行パスを持つのと同じ理由
- * (「room内のownerが不在・連絡が取れない場合にサイト管理者が代行できる
- * 手段」)。実処理は lib/badges.js の grantBadge/revokeBadge を共有するため、
- * 一意性チェック・監査ログの実装は重複しない。
+ * [admin-dashboard経由のgrant/revokeについて(2026-07-27 移設)]
+ * 以前はここにRoom内メンバーへのバッジ付与/剥奪(`POST/DELETE
+ * /admin/rooms/:roomId/members/:targetUid/badges*`)も実装していたが、
+ * バッジ自体がRoomに紐付かないユーザー単位の概念である以上、Room詳細画面
+ * から付与するのは不自然というユーザー指摘を受け、`routes/users.js`の
+ * `POST/DELETE /admin/users/:uid/badges*`に一本化した。このファイルには
+ * 「このRoomの現在のメンバーが何のバッジを持っているか」を見るための
+ * 読み取り専用API(下記GET)のみを残す。
  */
 
 const express = require('express');
@@ -37,8 +38,6 @@ const {
   createBadge,
   updateBadge,
   getBadgesForRoomMembers,
-  grantBadge,
-  revokeBadge,
   getBadgeDisplayConfig,
   setBadgeDisplayConfig,
 } = require('../lib/badges');
@@ -161,87 +160,6 @@ router.get(
       res.json({ roomId, members: badgesByUid });
     } catch (e) {
       handleLibError(res, e, 'バッジ情報の取得に失敗しました');
-    }
-  }
-);
-
-/**
- * POST /admin/rooms/:roomId/members/:targetUid/badges
- * body: { badgeId }
- *
- * [Room内owner専用APIとの整合性] Guest・BAN済みを対象にした場合を拒否する
- * ガードは routes/roomBadges.js 側と同一の理由でこちらにも適用する。
- */
-router.post(
-  '/rooms/:roomId/members/:targetUid/badges',
-  requireFirebaseAuth,
-  requireAdminPermission('badges:manage'),
-  async (req, res) => {
-    const { roomId, targetUid } = req.params;
-    const badgeId = req.body?.badgeId;
-
-    if (!isValidRoomId(roomId)) {
-      return res.status(400).json({ error: 'roomId が不正です' });
-    }
-    if (typeof badgeId !== 'string' || !badgeId) {
-      return res.status(400).json({ error: 'badgeId は必須です' });
-    }
-
-    try {
-      const targetRef = db.collection('rooms').doc(roomId).collection('members').doc(targetUid);
-      const targetSnap = await targetRef.get();
-      if (!targetSnap.exists) {
-        return res.status(404).json({ error: '対象のメンバーが見つかりません' });
-      }
-      if (targetSnap.data().status === 'banned') {
-        return res.status(400).json({ error: 'BAN済みのメンバーにバッジは付与できません' });
-      }
-
-      const result = await grantBadge({
-        actorUid: req.firebaseUser.uid,
-        targetUid,
-        targetRole: targetSnap.data().role,
-        badgeId,
-      });
-
-      await logAdminAction({
-        actorUid: req.firebaseUser.uid,
-        action: 'badge.grant',
-        targetRoomId: roomId,
-        targetUid,
-        detail: { badgeId, via: 'admin_dashboard' },
-      });
-
-      res.status(201).json(result);
-    } catch (e) {
-      handleLibError(res, e, 'バッジの付与に失敗しました');
-    }
-  }
-);
-
-router.delete(
-  '/rooms/:roomId/members/:targetUid/badges/:badgeId',
-  requireFirebaseAuth,
-  requireAdminPermission('badges:manage'),
-  async (req, res) => {
-    const { roomId, targetUid, badgeId } = req.params;
-    if (!isValidRoomId(roomId)) {
-      return res.status(400).json({ error: 'roomId が不正です' });
-    }
-    try {
-      const result = await revokeBadge({ actorUid: req.firebaseUser.uid, targetUid, badgeId });
-
-      await logAdminAction({
-        actorUid: req.firebaseUser.uid,
-        action: 'badge.revoke',
-        targetRoomId: roomId,
-        targetUid,
-        detail: { badgeId, via: 'admin_dashboard' },
-      });
-
-      res.json(result);
-    } catch (e) {
-      handleLibError(res, e, 'バッジの剥奪に失敗しました');
     }
   }
 );

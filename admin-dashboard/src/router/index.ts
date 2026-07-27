@@ -44,6 +44,23 @@ const router = createRouter({
       component: () => import('@/views/BadgesView.vue'),
       meta: { requiresAuth: true },
     },
+    {
+      // [2026-07-27新設] ユーザー管理(検索一覧。users:monitor権限が必要)。
+      // バッジの付与/剥奪は元々RoomDetailView.vueから行っていたが、
+      // Roomに紐付かないユーザー単位の概念であるため、この画面に一本化した。
+      path: '/users',
+      name: 'users',
+      component: () => import('@/views/UsersView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      // [2026-07-27新設] ユーザープロフィール・バッジ付与/剥奪
+      // (users:monitor / badges:manage権限が必要)
+      path: '/users/:uid',
+      name: 'user-detail',
+      component: () => import('@/views/UserDetailView.vue'),
+      meta: { requiresAuth: true },
+    },
   ],
 })
 

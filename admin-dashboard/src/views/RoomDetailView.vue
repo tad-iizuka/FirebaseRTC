@@ -36,8 +36,6 @@ onMounted(() => {
   // [Phase11] 割り当て変更フォームのセレクトボックス用。organizations:monitor
   // 権限がない場合は403のままリストが空になり、フォーム自体が非表示になる。
   orgs.fetchOrganizations(settings.tokenServerUrl).catch(() => {})
-  // [Phase13] バッジ付与フォームのセレクトボックス用。
-  badges.fetchBadges(settings.tokenServerUrl).catch(() => {})
 })
 watch(roomId, load)
 // [Phase8] 詳細・録音履歴とも10秒ごとに再取得する。
@@ -158,50 +156,18 @@ async function changeRole(targetUid: string) {
   }
 }
 
-// --- [Phase13] バッジの付与/剥奪 ---
-// Guest・BAN済みは付与対象外(サーバー側でも同じガードをかけているが、
-// UI側でも選択肢自体を出さないことで「押せるのに403/400になる」体験を避ける。
-// canChangeRoleと同じ考え方)。
-function canGrantBadges(member: { role: string; status: string }) {
-  return member.role !== 'guest' && member.status !== 'banned'
-}
-
-// 手動付与可能(active かつ grantMethod が manual/both)なバッジのみを選択肢にする。
-const grantableBadges = computed(() =>
-  badges.badges.filter((b) => b.active && (b.grantMethod === 'manual' || b.grantMethod === 'both')),
-)
-
-// 各行の「付与するバッジ」の選択状態。
-const badgeDrafts = ref<Record<string, string>>({})
-
+// --- [Phase13] バッジ(読み取り専用) ---
+// [2026-07-27] 付与/剥奪はUsersView.vue/UserDetailView.vue(ユーザー管理画面)
+// に一本化した(badgeGrantsがRoomに紐付かないユーザー単位のレコードである
+// ため、Room詳細画面から操作するのは不自然というユーザー指摘を受けての変更)。
+// この画面では「このRoomの現在のメンバーが何を持っているか」を見るだけに
+// とどめ、実際の付与/剥奪操作はユーザープロフィール画面へのリンクへ委ねる。
 function badgesFor(uid: string) {
   return badges.roomBadges[uid]?.badges ?? []
 }
 
-// 既に付与済みのバッジは選択肢から外す(grantBadge側の一意性チェックで
-// 409になる前に、UI側でも防ぐ)。
-function grantableBadgesFor(uid: string) {
-  const grantedIds = new Set(badgesFor(uid).map((b) => b.badgeId))
-  return grantableBadges.value.filter((b) => !grantedIds.has(b.badgeId))
-}
-
-async function grantBadge(targetUid: string) {
-  const badgeId = badgeDrafts.value[targetUid]
-  if (!badgeId) return
-  try {
-    await badges.grantBadge(settings.tokenServerUrl, roomId.value, targetUid, badgeId)
-    badgeDrafts.value[targetUid] = ''
-  } catch {
-    // badges.grantErrorMessage に反映済み
-  }
-}
-
-async function revokeBadge(targetUid: string, badgeId: string) {
-  try {
-    await badges.revokeBadge(settings.tokenServerUrl, roomId.value, targetUid, badgeId)
-  } catch {
-    // badges.grantErrorMessage に反映済み
-  }
+function openUserProfile(uid: string) {
+  router.push({ name: 'user-detail', params: { uid } })
 }
 </script>
 
@@ -303,9 +269,6 @@ async function revokeBadge(targetUid: string, badgeId: string) {
       <p v-if="rooms.roleErrorMessage" class="mb-2 text-[11px] text-destructive">
         {{ rooms.roleErrorMessage }}
       </p>
-      <p v-if="badges.grantErrorMessage" class="mb-2 text-[11px] text-destructive">
-        {{ badges.grantErrorMessage }}
-      </p>
       <p v-if="badges.isRoomBadgesForbidden" class="mb-2 text-[11px] text-muted-foreground">
         バッジ情報を見るには badges:monitor 権限が必要です。
       </p>
@@ -356,9 +319,10 @@ async function revokeBadge(targetUid: string, badgeId: string) {
               </div>
             </td>
             <td class="p-2">
-              <!-- [Phase13] Guest(役割バッジのみ対象)・BAN済みは手動付与対象外
-                   (canGrantBadges参照)。Guest自身の役割バッジは仮想バッジ
-                   (badgeGrantsに実体を持たない)のため、剥奪ボタンも出さない。 -->
+              <!-- [2026-07-27] 読み取り専用表示のみ。付与/剥奪は
+                   ユーザープロフィール画面(users:monitor + badges:manage)
+                   から行う(バッジがRoomに紐付かないユーザー単位の概念で
+                   あるため。brushup-plan.md参照)。 -->
               <div class="mb-1 flex flex-wrap items-center gap-1">
                 <span
                   v-for="assigned in badgesFor(m.uid)"
@@ -368,39 +332,17 @@ async function revokeBadge(targetUid: string, badgeId: string) {
                 >
                   <span>{{ assigned.icon }}</span>
                   <span>{{ assigned.name }}</span>
-                  <button
-                    v-if="assigned.source === 'grant'"
-                    type="button"
-                    class="text-destructive opacity-70 hover:opacity-100"
-                    :disabled="badges.grantingUids.has(m.uid)"
-                    @click="revokeBadge(m.uid, assigned.badgeId)"
-                  >
-                    ×
-                  </button>
                 </span>
                 <span v-if="badgesFor(m.uid).length === 0" class="text-[11px] text-muted-foreground">—</span>
               </div>
-              <div v-if="canGrantBadges(m)" class="flex items-center gap-1.5">
-                <select
-                  v-model="badgeDrafts[m.uid]"
-                  class="h-7 rounded-sm border border-input bg-background px-1.5 text-[11px] text-foreground outline-none focus:border-primary"
-                  :disabled="badges.grantingUids.has(m.uid)"
-                >
-                  <option value="">(バッジを選択)</option>
-                  <option v-for="b in grantableBadgesFor(m.uid)" :key="b.badgeId" :value="b.badgeId">
-                    {{ b.icon }} {{ b.name }}
-                  </option>
-                </select>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  class="h-7 w-auto px-2 text-[11px]"
-                  :disabled="badges.grantingUids.has(m.uid) || !badgeDrafts[m.uid]"
-                  @click="grantBadge(m.uid)"
-                >
-                  {{ badges.grantingUids.has(m.uid) ? '処理中...' : '付与' }}
-                </Button>
-              </div>
+              <button
+                v-if="m.role !== 'guest'"
+                type="button"
+                class="text-[11px] text-primary underline-offset-2 hover:underline"
+                @click="openUserProfile(m.uid)"
+              >
+                ユーザー管理で編集 →
+              </button>
             </td>
           </tr>
         </tbody>
