@@ -69,6 +69,11 @@ All three user clients follow the same functional model:
 4. Hold the PTT control only after acquiring the server-enforced talk lock.
 5. Use Firestore listeners for chat history and for their own membership status.
 
+The web client additionally supports image, video, and PDF attachments. It asks
+the token server for a short-lived GCS upload URL, uploads directly to GCS, and
+then creates the chat message through the normal server API. The iOS and Android
+clients currently support text chat but not attachment UI.
+
 The clients do not treat their local UI state as authorization. UI state can
 hide unavailable actions, but the token server checks membership and roles for
 every protected action.
@@ -255,10 +260,10 @@ organizations, badges, and users.
 ## Current scope and future work
 
 The implemented architecture covers authentication, invite-only rooms, PTT
-voice, text chat, moderation, recording, organization management, badges, and
-administration. AI participants, notifications, image/file/location events,
-and broader event types are product directions described in the project vision;
-they are not yet first-class runtime components in this repository.
+voice, text chat, image/video/PDF attachments on the web client, moderation,
+recording, organization management, badges, and administration. Native
+attachment UI, AI participants, notifications, location events, reactions, and
+broader event types remain future work.
 
 Future extensions should preserve the existing boundary: clients request an
 action, the token server authorizes and persists it, and LiveKit or Firebase

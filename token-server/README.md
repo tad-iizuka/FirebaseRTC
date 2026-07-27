@@ -12,6 +12,8 @@
 - フェーズ5: テキストチャット・複数ルーム横断監視ダッシュボード等の付加機能
 - **フェーズ8: 運用機能の拡充(監査ログ・moderator任命API・録音履歴一覧/ダウンロードAPI・
   Firestore/GCSのデータライフサイクル管理・管理者ダッシュボードへの権限管理UI)**
+- **フェーズ11/13: 組織階層・バッジ基本機能・管理者ユーザー管理**
+- **フェーズ16: 画像・動画・PDFのチャット添付（署名付きGCS URL）**
 
 ## アーキテクチャ
 
@@ -32,6 +34,12 @@ routes/recording.js     … 録音(Egress)の開始/停止/状態取得/一覧/�
 routes/webhooks.js      … LiveKit Webhook受信(Egress終了イベントの確定処理、
 録音履歴のサブコレクション保存) [Phase4で追加、Phase8で履歴保存を追加]
 routes/messages.js      … テキストチャット [Phase5で追加]
+lib/attachments.js      … 添付ファイルの署名付きURL、GCS実体検証、サムネイル生成 [Phase16]
+lib/gcsCredentials.js   … 録音・添付で共通のGCS認証情報読み込み
+routes/organizations.js … 組織階層とRoom割り当て [Phase11]
+routes/badges.js        … バッジマスタ・管理画面向けバッジ参照 [Phase13]
+routes/roomBadges.js    … Room内のバッジ参照・ownerによる付与/剥奪 [Phase13]
+routes/users.js         … 管理者のユーザー検索・ユーザー別バッジ管理
 routes/admin.js         … 複数ルーム横断監視API、監査ログ閲覧API、管理者権限管理API
 [Phase5で追加、Phase8で監査ログ・権限管理APIを追加]
 server.js               … 上記をマウントするエントリーポイント
@@ -191,6 +199,9 @@ cp .env.example .env
 - `RECORDING_GCS_BUCKET` / `RECORDING_GCS_KEY_FILE`（録音機能を試す場合。
   GCSバケットへの書き込み権限を持つサービスアカウントのJSONキーを別途発行し、
   そのパスを指定する）
+- `ATTACHMENTS_GCS_BUCKET` / `ATTACHMENTS_GCS_KEY_FILE`（添付ファイルを試す場合。
+  Cloud Runではキーの代わりに`ATTACHMENTS_GCS_CREDENTIALS_JSON`をSecret Managerから
+  注入する。バケットCORS・保持期限の設定は`phase16-operations.md`を参照）
 
 ```bash
 node -r dotenv/config server.js
@@ -476,9 +487,9 @@ NAT配下で複数の正規ユーザーが同一IPになるケースを考慮し
   仕組み。不特定多数への公開を想定する場合、スクリプトからの直接叩き・
   トークン乱発を防ぐために実質必須だが、クライアント側の追加実装
   (reCAPTCHA/DeviceCheck設定)が必要なため今回のスコープからは外している。
-- **クライアント側UI(録音の開始/停止ボタン)**: Web版は実装済み
-  (2026-07-24の`rec feature`コミット)。iOS/Androidは録音中フラグの
-  受信のみで、開始/停止ボタン自体は別途実装が必要。
+- **クライアント側UI(録音の開始/停止ボタン)**: Web/iOS/Androidの全クライアントで
+  実装済み。録音中フラグはRoom Metadata経由で受信し、開始/停止操作は
+  `/rooms/:roomId/recording/start`・`/stop`を通じて行う。
   録音履歴の一覧・ダウンロードは管理者ダッシュボード(Vue版)に実装済み
   (Phase8, `admin-dashboard/src/views/RoomDetailView.vue`)。
 - **プッシュ通知**: 今後の実装対象。

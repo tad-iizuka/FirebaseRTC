@@ -29,6 +29,10 @@
 | maxMembers | number | 定員 |
 | talkLock | `{ uid, acquiredAt, expiresAt }` \| null | 送話ロックの状態 [Phase2で追加] |
 | recording | `{ active, egressId, startedAt, startedByUid }` \| null | 現在進行中の録音1件のみ保持 [Phase5で追加] |
+| settings.autoRecording | boolean | Roomがアクティブになったときの自動録音設定 [Phase9] |
+| orgId | string \| null | 所属する団体ID。無所属はnull [Phase11] |
+| nodeId | string \| null | 団体内の所属node ID。無所属はnull [Phase11] |
+| nodeAncestorIds | string[] | 所属nodeの祖先ID。階層フィルター用 [Phase11] |
 
 ---
 
@@ -38,7 +42,7 @@
 
 | Field | Type | Description |
 |--------|------|-------------|
-| role | string | `"owner"` \| `"moderator"` \| `"member"` |
+| role | string | `"owner"` \| `"moderator"` \| `"member"` \| `"guest"` |
 | displayName | string | 表示名 |
 | status | string | `"active"` \| `"banned"` |
 | joinedAt | timestamp | 参加日時 |
@@ -140,6 +144,33 @@
 
 ---
 
+## Organization / Badge
+
+`organizations/{orgId}` [Phase11]
+
+| Field | Type | Description |
+|--------|------|-------------|
+| name | string | 団体名 |
+| industryProfile | string \| null | 将来の業界ラベリング用の任意プロファイル |
+| ownerUid | string | 団体を作成した管理者uid |
+| attachmentRetentionDays | number \| null | 添付ファイルの保持日数。null/未設定は30日 [Phase16] |
+
+`organizations/{orgId}/nodes/{nodeId}` は任意深さの階層nodeで、`name`、
+`parentNodeId`、`ancestorIds`、`depth`を持つ。
+
+`badges/{badgeId}` と `badgeGrants/{grantId}` [Phase13]
+
+- `badges`はグローバルなバッジマスタで、名称、アイコン、カテゴリ、付与方式、
+  優先度、有効状態を保持する。
+- `badgeGrants`はユーザー単位の付与/剥奪履歴であり、同一`uid`と`badgeId`に
+  対してアクティブな付与は1件だけにする。
+- Guestの役割バッジは`badgeGrants`へ書き込まない仮想バッジである。
+
+これらのコレクションはクライアントから直接読めず、token-serverの組織・
+バッジAPI経由で参照する。
+
+---
+
 ## Notification
 
 README本文に該当コレクションの記載なし。「未実装・今後の検討事項」節で
@@ -157,6 +188,8 @@ Room
 
 Report … Room / Participant を roomId・reporterUid・reportedUid で参照
 AdminUser / AuditLog … Room横断で管理者操作を扱う
+Organization / Node … Roomを任意にグループ化
+Badge / BadgeGrant … Userへ付与するバッジを表す
 ```
 
 ---

@@ -24,6 +24,9 @@ Firebase Admin SDK (`admin.auth().verifyIdToken()`) で検証し、得られる 
 | POST | `/rooms/:roomId/join` | 必須 | 招待コードを検証しmembersに追加 |
 | POST | `/rooms/:roomId/members/:targetUid/ban` | 必須(owner/moderatorのみ) | BAN化 + LiveKitから即時キック |
 | POST | `/rooms/:roomId/members/:targetUid/role` | 必須(ownerのみ) | moderator/memberへのrole変更 **[Phase8]** |
+| PATCH | `/rooms/:roomId/settings` | 必須(owner/moderatorのみ) | `autoRecording`設定を更新 **[Phase9]** |
+| PATCH | `/rooms/:roomId/nickname` | 必須(本人・メンバーのみ) | 自分の表示名を更新 **[Phase10]** |
+| GET | `/rooms/:roomId/org-context` | 必須(メンバーのみ) | Roomの組織階層コンテキストを取得 **[Phase11]** |
 
 **BANについて:** `AccessToken` のTTLは10分。Firestoreの`status`を`banned`に
 書き換えるだけでは既存接続が最大10分残ってしまうため、BAN処理では
@@ -33,6 +36,10 @@ Firebase Admin SDK (`admin.auth().verifyIdToken()`) で検証し、得られる 
 **role変更について【Phase8】:** 実行権限はowner本人のみに固定
 (moderatorが別のmoderatorを任命・降格することは不可)。ownerロール自体は
 このAPIでは変更できない(誤操作でowner不在になる事故を防ぐため)。
+
+**Guestについて【Phase10】:** Firebase匿名認証で参加したユーザーはサーバー側で
+`guest`ロールとして判定される。Guestも送話・チャット・添付ファイル送受信はできるが、
+BAN・role変更・録音・Room設定などの管理操作は実行できない。
 
 ---
 
@@ -109,12 +116,40 @@ PDFの3種類、1件あたり100MBまで。アップロードはtoken-serverを�
 発行された署名付きURLへクライアントが直接PUTする。詳細は
 `token-server/lib/attachments.js`・`token-server/phase16-operations.md`を参照。
 
-> **[注記]** このAPI.mdはPhase8時点(2026-07-25)の内容を土台にしており、
-> Phase11(組織階層 `/admin/organizations` 系)・Phase13(バッジ
-> `/rooms/:roomId/badges` 系・`/admin/badges` 系)のエンドポイントはまだ
-> 転記できていない(実装自体は完了済み。各`routes/*.js`のコメントが現状の
-> 一次情報)。Phase16のMessage節のみ今回あわせて更新した。全体としての
-> 棚卸し・転記漏れの解消は別途対応が必要(次アクションとして記録)。
+---
+
+## Organization
+
+| Method | Path | 認証 | 説明 |
+|---|---|---|---|
+| GET | `/admin/organizations` | 必須(`organizations:monitor`) | 団体一覧 |
+| GET | `/admin/organizations/:orgId/nodes` | 必須(`organizations:monitor`) | 団体配下の階層node一覧 |
+| POST | `/admin/organizations` | 必須(`organizations:manage`) | 団体を作成 |
+| POST | `/admin/organizations/:orgId/nodes` | 必須(`organizations:manage`) | 階層nodeを作成 |
+| PATCH | `/admin/organizations/:orgId` | 必須(`organizations:manage`) | 添付ファイル保持日数を更新 **[Phase16]** |
+| PATCH | `/admin/rooms/:roomId/org-assignment` | 必須(`organizations:manage`) | Roomを団体/nodeへ割り当て、または無所属へ戻す |
+
+組織階層は`organizations`と任意深さの`nodes`で表す。Roomの組織所属は任意であり、
+作成時には自動割り当てされない。
+
+---
+
+## Badge
+
+| Method | Path | 認証 | 説明 |
+|---|---|---|---|
+| GET | `/rooms/:roomId/badges` | 必須(メンバーのみ) | Roomのアクティブメンバーのバッジ/最優先バッジ一覧 |
+| POST | `/rooms/:roomId/members/:targetUid/badges` | 必須(ownerのみ) | Roomメンバーへバッジを付与 |
+| DELETE | `/rooms/:roomId/members/:targetUid/badges/:badgeId` | 必須(ownerのみ) | Roomメンバーからバッジを剥奪 |
+| GET | `/admin/badges` | 必須(`badges:monitor`) | バッジマスタ一覧 |
+| POST | `/admin/badges` | 必須(`badges:manage`) | バッジマスタを作成 |
+| PATCH | `/admin/badges/:badgeId` | 必須(`badges:manage`) | バッジマスタを更新・無効化 |
+| GET | `/admin/config/badge-display` | 必須(`badges:monitor`) | 表示件数設定を取得 |
+| PATCH | `/admin/config/badge-display` | 必須(`badges:manage`) | 表示件数設定を更新 |
+| GET | `/admin/rooms/:roomId/badges` | 必須(`badges:monitor`) | 管理画面向けRoomバッジ一覧 |
+
+`badges`と`badgeGrants`はクライアントから直接読めない。参加者一覧はこのAPIで
+返す判定済みの`topBadge`を表示する。
 
 ---
 
@@ -135,6 +170,10 @@ PDFの3種類、1件あたり100MBまで。アップロードはtoken-serverを�
 | GET | `/admin/audit-logs` | 必須(`audit:read`) | 監査ログ一覧(roomId/actorUidで絞込可) **[Phase8]** |
 | GET | `/admin/admins` | 必須(`admins:manage`) | 管理者権限台帳の一覧 **[Phase8]** |
 | POST | `/admin/admins/:uid/permissions` | 必須(`admins:manage`) | 他ユーザーへの権限付与/剥奪(`admins:manage`自体は対象外) **[Phase8]** |
+| GET | `/admin/users` | 必須(`users:monitor`) | メールアドレスを持つユーザーの検索一覧 |
+| GET | `/admin/users/:uid` | 必須(`users:monitor`) | ユーザープロフィールと保持バッジ |
+| POST | `/admin/users/:uid/badges` | 必須(`badges:manage`) | ユーザーへバッジを付与 |
+| DELETE | `/admin/users/:uid/badges/:badgeId` | 必須(`badges:manage`) | ユーザーからバッジを剥奪 |
 
 **監査ログ【Phase8】:** BAN・role変更・録音の開始/停止依頼・ダウンロードURL発行・
 管理者権限の付与/剥奪といった管理系操作は、すべて`lib/auditLog.js`の

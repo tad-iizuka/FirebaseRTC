@@ -120,7 +120,15 @@ Roomのみ、admin-dashboardのRoom詳細画面(`org-assignment`)で管理者が
   電話着信等でオーディオセッションを奪われた際は安全側に倒して送話を
   自動終了するようにした。`ContentView.swift`に`@StateObject`として
   追加し、`.onAppear`で一度だけ`attach(to:)`する形で組み込んだ。
-  `Localizable.xcstrings`に新規文言のen翻訳を追加した。
+`Localizable.xcstrings`に新規文言のen翻訳を追加した。
+
+十五訂: 2026-07-28（実装済みコードを再棚卸しし、Phase13のバッジ基本機能、
+管理者のユーザー管理、Phase16のチャット添付ファイルを計画へ反映した。Phase13は
+グローバルな1バッジマスタ、ユーザー単位の付与記録、3クライアントでの参加者一覧
+表示、管理画面でのマスタ・ユーザー別付与/剥奪まで実装済み。Phase16は画像・動画・
+PDFをGCSの署名付きURLで送受信するサーバーおよびWeb UIまで実装済みである。一方、
+iOS/Androidの添付UI、自動付与バッチ、添付用GCSの本番運用設定、バックグラウンド
+動作のビルド・実機検証は未完了として次アクションに残す。）
 
 **（重要な留保）** 以下の2点は本改定時点で未実施・未確認である。
 1. **実機検証が未実施**: このドキュメント作成時点でのAndroid/iOSの
@@ -171,9 +179,9 @@ Roomのみ、admin-dashboardのRoom詳細画面(`org-assignment`)で管理者が
 | Long-Term Architecture | 実装は業界非依存。警備業=`Company→Branch→Site→Room`、一般=`Community→Group→Room`。**UIだけ変わり内部構造は同じ** |
 | Future Features | Public/Temporary Rooms、QR/NFC/Nearby Join、AI Participants、Live Translation、Spatial Audio、Transcription、AI Summary/Moderation 等 |
 
-この物差しに照らすと、現在の実装は **「Phase1（警備業）の土台は完成しつつあるが、
-Phase1の目的そのもの（音質・低遅延の作り込み）とPermission ModelのGuest、
-Long-Term Architectureの組織階層はまだ手つかず」** という状態にある。なお
+この物差しに照らすと、現在の実装は **「Phase1（警備業）の土台にGuestロール・
+組織階層・バッジ・添付ファイルまで加わったが、実機検証、通知、App Check、
+業界ラベリング層は未完了」** という状態にある。なお
 2026-07-25の実コード検証により、Communication Modelの`Text` Event
 （テキストチャット）は3クライアント・サーバー双方で既に実装済みであることが
 判明しており（詳細は「1. 実コード確認済みの現状」参照）、Phase1の要件外の
@@ -181,12 +189,13 @@ Long-Term Architectureの組織階層はまだ手つかず」** という状態�
 
 ## 1. 実コード確認済みの現状（README改定前の分析を上書き）
 
-サーバー(token-server)はPhase 1〜8まで実装済み（認証・招待制ルーム・BAN・
+サーバー(token-server)はPhase 1〜13およびPhase16の基盤まで実装済み（認証・招待制ルーム・BAN・
 送話ロック・録音Egress・Webhook・moderator任命API・監査ログ・管理者権限API・
 GCS/FirestoreのTTL/ライフサイクル管理・**テキストチャットAPI**）。クライアント
 3種(Web/iOS/Android)もBAN・送話ロック・オンボーディング・i18n・
-デザイントークン統一・**テキストチャットUI**まで実装済みで、管理者サイトも
-Vue 3の本格SPA(`admin-dashboard/`)へ刷新済み。
+デザイントークン統一・**テキストチャットUI**、参加者一覧のバッジ表示まで実装済みで、
+管理者サイトもVue 3の本格SPA(`admin-dashboard/`)へ刷新済み。Phase16の添付送受信UIは
+現時点ではWeb版のみである。
 
 **（2026-07-25再々改定時の追記）** `token-server/routes/messages.js`（Phase5、
 2026-07-08実装）と、Web(`ChatPanel.vue`/`stores/chat.ts`)・iOS
@@ -201,11 +210,9 @@ Modelが定義する残りのEvent種別（Image/File/Location/Reaction/System/A
 Message）はコード上どこにも見当たらず、依然として未着手である。
 
 **機能の作り込みという意味では従来の想定より進んでいる。** 一方で、README.md
-が定義する3つの原則──①Permission ModelのGuestロール、②業界ごとに名称だけ
-差し替えるラベリング層、③Company/Branch/Site等の組織階層──は**まだ実装されて
-いない**。これらはPhase1(警備業)を"完成"と呼べるかどうかの分水嶺であり、
-かつPhase2(ビジネスチーム)へ進む前提条件でもあるため、ここに焦点を当てて
-計画を組み直す。
+が定義する3つの原則のうち、①Permission ModelのGuestロールと③Company/Branch/Site等の
+組織階層は実装済みである。②業界ごとに名称だけ差し替えるラベリング層は、Phase2の
+具体要件が確定してから設計する方針で未着手のままである。
 
 | 領域 | Web | iOS | Android | 備考 |
 |---|---|---|---|---|
@@ -218,11 +225,13 @@ Message）はコード上どこにも見当たらず、依然として未着手�
 | 通報機能UI | ✅ | ✅ | ✅ | 2026-07-25、Web版を移植する形でiOS/Androidに実装完了（十訂） |
 | 録音の開始/停止UI | ✅ | ✅ | ✅ | 同上。録音中判定はRoom Metadata経由で`PTTConnectionManager`が確定状態を保持 |
 | **自動録音トグル(auto-recording ON設定)** | ✅ | ❌ | ❌ | Web版`RecordingBar.vue`のみの機能。iOS/Androidは今回意図的にスコープ外（ユーザー確認済み、2026-07-25） |
-| **テキストチャット(Text Event)** | ✅ | ✅ | ✅ | `token-server/routes/messages.js`(Phase5)＋3クライアント。2026-07-08実装、本計画では今回初めて記載 |
+| **テキストチャット(Text Event)** | ✅ | ✅ | ✅ | `token-server/routes/messages.js`(Phase5)＋3クライアント |
+| **画像・動画・PDF添付(Image/File Event)** | ✅ | ❌ | ❌ | Phase16。Webは署名付きURLによる送受信・サムネイル表示まで対応。ネイティブUIは未実装 |
 | バックグラウンド動作(送受信) | - | ⚠️実装済み・実機未検証 | ⚠️実装済み・実機未検証 | 2026-07-27、十四訂で実装。ビルド確認・実機検証は次アクション |
 | **Guestロール** | ✅ | ✅ | ✅ | 2026-07-25 実装完了。`token-server`のrole自動判定(匿名認証)・3クライアントのGuest導線・ニックネーム変更UI・Guestバッジ(自分自身のみ)まで対応。他参加者のGuest判定は別途検討（5.4参照） |
 | **業界別ラベリング(UIのみ差し替え)** | ❌ | ❌ | ❌ | 「警備業向け」の文言・概念が全画面にハードコード |
-| **組織階層(Company/Branch/Site)** | ❌ | ❌ | ❌ | データモデルはRoom直下がフラットなまま |
+| **組織階層(Company/Branch/Site)** | 参照APIのみ | 参照APIのみ | 参照APIのみ | Phase11。管理画面で団体・再帰node・Room割当を管理。各ユーザー向けUIのパンくず表示は未実装 |
+| **参加者一覧のバッジ表示** | ✅ | ✅ | ✅ | Phase13。Room APIを20秒間隔でポーリングし最優先1件を表示 |
 
 管理者サイトは`admin-dashboard/`(Vue 3+TS+Pinia)としてルーム一覧/詳細・
 監査ログ・管理者権限・録音履歴DLまで実装済み。閲覧専用だった旧
@@ -232,17 +241,15 @@ Message）はコード上どこにも見当たらず、依然として未着手�
 
 ## 2. README.mdのビジョンに照らした課題整理
 
-### A. Permission Model：Guestロールの欠落
+### A. Permission Model：Guestロール → 実装完了、権限の一元化が残課題
 
-README.mdは`Owner → Moderator → Member → Guest`の4段階を定義しているが、
-現行実装(`token-server/routes/rooms.js`)は`owner`/`moderator`/`member`の
-3種のみ。Guestが想定する「一時参加・権限最小・名前だけ登録して即解散」
-というPrivacy First/Temporary Relationshipsの体験が今のところ存在しない。
+README.mdが定義する`Owner → Moderator → Member → Guest`の4段階は、
+`token-server/routes/rooms.js`と3クライアントに実装済みである。匿名認証の
+参加者はサーバーが`guest`として判定し、ニックネーム変更と送話は許可する一方、
+BAN・役割変更・録音などの管理操作は拒否する。
 
-- Guestロールの権限定義（例: 送話不可・閲覧のみ、あるいは招待コードだけで
-  本登録なしに一時参加できる、等）をまず要件として固める
-- Firestoreのroleフィールド・Firestoreルール・BAN/moderator任命APIの
-  権限チェック全箇所への影響範囲の洗い出しが必要
+残課題は、各ルート・各クライアントに分散したrole判定を、Phase12の
+role×操作対応表に基づき一元化することである。
 
 ### B. 業界ごとのUIラベリング層が未着手
 
@@ -256,18 +263,16 @@ README.mdは「実装は業界に依存させない。業界ごとの名称はUI
 - 例: `role.owner`を業種設定に応じて「現場責任者」「イベント主催者」等に
   出し分けるレイヤーを追加
 
-### C. Long-Term Architecture：組織階層の欠如
+### C. Long-Term Architecture：組織階層 → 管理基盤は実装完了
 
-README.mdの警備業モデル`Company → Branch → Site → Room`、一般モデル
-`Community → Group → Room`はいずれも未実装。現行のデータモデルは
-Room単体がフラットに存在するのみで、複数拠点・複数現場をまたいだ管理者
-ビューが作れない。
+Phase11で、`organizations/{orgId}`と任意深さの`nodes`により、警備業の
+`Company → Branch → Site → Room`と一般の`Community → Group → Room`を
+同じデータモデルで表現できるようにした。Roomは無所属のままでもよく、必要な
+場合だけ管理画面から団体・nodeへ割り当てる。
 
-- Phase2以降(複数現場を横断して管理したい警備会社、複数拠点を持つ
-  イベント運営会社)に進む前に、最低限「Room の上位に何らかのグルーピング
-  概念を1段挟めるようにする」設計判断が必要
-- 管理者サイト(`admin-dashboard`)のルーム一覧も、現状は全ルームがフラットな
-  一覧のため、階層が入った時点でナビゲーション設計をやり直す必要がある
+管理画面には団体/nodeの管理、Roomの割り当て、一覧の階層フィルターがある。
+ユーザー向けクライアント側では`GET /rooms/:roomId/org-context`を利用できるが、
+パンくず等の表示はまだ実装していない。
 
 ### D. Phase1(警備業)としての完成度に直結する残課題
 
@@ -445,15 +450,14 @@ Phase8で到達済み。音質・低遅延はLiveKit（WebRTC/NetEQ）への移�
 特定用途でのみ利用される想定。Phase2以降（イベント運営等）での
 利用頻度の方が高くなる可能性がある。
 
-### Phase 11: 組織階層(Long-Term Architecture)の導入 → **旧Phase12を繰り上げ（2026-07-26）**
+### Phase 11: 組織階層(Long-Term Architecture)の導入 → **実装完了（2026-07-26）**
 業態にかかわらず必要な基盤であり、かつバッジマスタの団体単位管理
 （旧Phase11後半）・管理者サイトの階層ナビゲーション等、後続の複数機能が
 これに依存するため優先度を上げた。
 
-- Room の上位グルーピング概念（Company/Branch/Site、あるいは
-  Community/Group）をデータモデルに追加
-- 管理者サイトのルーム一覧を階層ナビゲーションに対応させる
-- 既存のフラットなRoomデータからの移行方針を設計する
+- `organizations`/任意深さの`nodes`、Roomへの任意割り当て、`org-context`参照APIを実装
+- 管理者サイトに団体・nodeの管理と、Room一覧の階層ナビゲーションを実装
+- 既存Roomの強制バックフィルは行わず、無所属を正式な状態として扱う
 
 ### Phase 12: 役割(Role)と機能(Permission)の整理・UI/UX基盤化 → **新設（2026-07-26）**
 Guestロール追加（Phase10）で顕在化した課題。現状、role別の権限チェックが
@@ -482,22 +486,17 @@ Guestロール追加（Phase10）で顕在化した課題。現状、role別の�
   閲覧自体を監査ログ(`logAdminAction`)に残すか、role×操作の対応表
   整理の一環としてここで方針を決める
 
-### Phase 13: バッジシステムの基本機能 → **旧Phase11から分離（2026-07-26）**
+### Phase 13: バッジシステムの基本機能 → **実装完了（2026-07-27）**
 業種プロファイルに依存しない部分のみ先行実装する。業種プロファイル単位の
 自動付与条件・団体単位でのマスタ書き換えはPhase15（業界ラベリング層）側に
 分離し、Phase2の具体的な需要が見えてから着手する。
 
-- バッジの基本機能（詳細は「5.3 バッジシステム」参照）
-  - アイコン表示、Owner手動付与・剥奪
-  - 優先順位に基づく表示、Room内・参加者一覧では最優先1個のみ表示
-  - Guestの役割バッジ（Guestである表示）付与
-- バッジマスタは、Phase11で導入する組織階層のうち最上位の団体単位で
-  保持する（業種プロファイル単位での複数プロファイル切り替えは
-  Phase15まで持ち越し、今は団体ごとに1セットのみ）
-- 自動付与条件（技能章・部隊章・階級章等）のうち、業種に依存しない
-  最小限の条件だけをバッチ処理で先行実装し、業種プロファイル単位の
-  条件出し分けはPhase15に持ち越す
-- バッジ管理画面のPoCをここで実施する
+- グローバルな`badges`マスタ、`badgeGrants`の付与履歴、表示設定を実装
+- 3クライアントの参加者一覧で最優先1件を表示。Guestは仮想の役割バッジを表示
+- 管理画面でマスタを管理し、ユーザー管理画面からユーザー単位で手動付与・剥奪
+- Room owner向けの付与/剥奪APIもあるが、現時点の3クライアントにはその操作UIを設けない
+
+自動付与の実行バッチ、団体/業種プロファイル単位の複数マスタはPhase15以降の対象とする。
 
 ### Phase 14: Phase2(ビジネスチーム)展開に向けた仕上げ → **旧Phase13を繰り下げ**
 - Firebase App Check導入
@@ -643,14 +642,16 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
 
 ---
 
-## 6. 次アクションの提案（2026-07-27 十四訂で更新）
+## 6. 次アクションの提案（2026-07-28 十五訂で更新）
 
 1. **バックグラウンド動作(十四訂)のビルド確認・実機検証**：手元のXcode/
    Android Studioでのビルド確認、実機でのロック画面操作・常駐通知の
    送話トグル・Bluetoothヘッドセット操作・長時間バックグラウンド接続
    維持・電力最適化機能の影響確認を行う。問題があれば都度この計画へ
    反映する
-2. **Phase12 role×操作の対応表を洗い出す**：`token-server`側
+2. **Phase12 role×操作の対応表を実装へつなげる**：対応表の棚卸しは
+   [`phase12-role-operation-inventory.md`](phase12-role-operation-inventory.md)として完了している。
+   `token-server`側
    （`rooms.js`・`recording.js`等に分散している`['owner','moderator']`
    等のホワイトリスト）と3クライアント側（`ban.ts`/`PTTBanStore.swift`/
    Android版の相当箇所にある`myRole === 'owner' || myRole === 'moderator'`
@@ -658,11 +659,14 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
    の後に行う。あわせて、admin側の権限（`rooms:monitor`/
    `organizations:manage`等）についても、招待コードの可視範囲（5.4参照）
    を含めて同じ棚卸しの対象に含める
-3. **Phase13 バッジ基本機能のデータモデル設計**：「5.3 バッジシステム」の
-   仕様を土台に、バッジマスタ・付与記録のFirestoreスキーマ案を検討する。
-   Phase11の組織階層と異なり団体単位の切り替えはPhase15まで持ち越すため、
-   Phase13時点では団体IDを持たないシンプルな1マスタ構成でよい
-4. **（低優先度・継続）** `UI_UX.md`・`SECURITY.md`・`AI.md`の空テンプレート
+3. **Phase16 添付ファイルの運用・クライアント展開**：添付用GCSバケット、
+   CORS、サービスアカウント、保持期限クリーンアップを
+   `token-server/phase16-operations.md`に沿って本番へ設定・検証する。続いて
+   iOS/Androidへ画像・動画・PDF添付UIを展開するか、Web限定とするかを決める
+4. **APIドキュメントの継続的な同期**：Phase11・Phase13・ユーザー管理・
+   Phase16のエンドポイントは`API.md`に反映した。以後もルート追加時には
+   同じ変更でAPI.mdとDATA_MODEL.mdを更新する
+5. **（低優先度・継続）** `UI_UX.md`・`SECURITY.md`・`AI.md`の空テンプレート
    整備：旧6.項目3で洗い出したまま未着手。転記元となる詳細記述が
    `token-server/README.md`側に存在しないため、内容そのものをこのタイミングで
    新規に書き起こす必要がある。優先度は引き続き低いが、Phase11〜13で
@@ -756,4 +760,3 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
      （詳細は5.4参照）
 
 </details>
-
