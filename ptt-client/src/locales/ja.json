@@ -120,6 +120,8 @@
     "placeholder": "メッセージを入力",
     "send": "送信",
     "attachmentPick": "ファイルを添付",
+    "attachmentSend": "送信",
+    "attachmentCancel": "キャンセル",
     "attachmentOpen": "添付ファイルを開く",
     "attachmentLoading": "読み込み中..."
   },

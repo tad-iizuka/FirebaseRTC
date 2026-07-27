@@ -120,6 +120,8 @@
     "placeholder": "Type a message",
     "send": "Send",
     "attachmentPick": "Attach a file",
+    "attachmentSend": "Send",
+    "attachmentCancel": "Cancel",
     "attachmentOpen": "Open attachment",
     "attachmentLoading": "Loading..."
   },

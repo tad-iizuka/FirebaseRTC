@@ -59,6 +59,8 @@ async function openAttachment(messageId: string) {
 }
 
 const fileInputRef = ref<HTMLInputElement | null>(null)
+// [Phase16] 選択直後には送信せず、送信ボタンが押されるまで保持しておくファイル
+const pendingFile = ref<File | null>(null)
 
 function pickFile() {
   fileInputRef.value?.click()
@@ -67,8 +69,18 @@ function pickFile() {
 function onFileSelected(e: Event) {
   const input = e.target as HTMLInputElement
   const file = input.files?.[0]
-  if (file) emit('sendFile', file)
+  if (file) pendingFile.value = file
   input.value = '' // 同じファイルを連続選択しても change イベントが発火するように
+}
+
+function sendPendingFile() {
+  if (!pendingFile.value) return
+  emit('sendFile', pendingFile.value)
+  pendingFile.value = null
+}
+
+function cancelPendingFile() {
+  pendingFile.value = null
 }
 </script>
 
@@ -114,6 +126,19 @@ function onFileSelected(e: Event) {
       </div>
     </div>
     <p v-if="errorMessage" class="mb-2 text-[11px] text-destructive">{{ errorMessage }}</p>
+
+    <div
+      v-if="pendingFile"
+      class="mb-2 flex items-center gap-1.5 rounded-sm border border-border px-2 py-1.5 text-[11px]"
+    >
+      <span>📎</span>
+      <span class="max-w-40 flex-1 truncate text-muted-foreground">{{ pendingFile.name }}</span>
+      <Button size="sm" class="w-auto px-3" @click="sendPendingFile">{{ t('chat.attachmentSend') }}</Button>
+      <Button size="sm" variant="ghost" class="w-auto px-2.5" @click="cancelPendingFile">
+        {{ t('chat.attachmentCancel') }}
+      </Button>
+    </div>
+
     <div class="flex gap-1.5">
       <input
         ref="fileInputRef"
