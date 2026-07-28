@@ -65,6 +65,12 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.json:json:20240303")
 
+    // [Phase16] チャット添付ファイルの画像サムネイル表示用。Web版はブラウザの<img>で
+    // 済むが、Composeには標準の非同期画像読み込みが無いため導入する
+    // (署名付きURLは短期間で失効するため、キャッシュはURL単位ではなくmessageId単位で
+    // chat.ktのgetThumbnailUrl側が管理し、Coilにはメモリ/ディスクキャッシュの制御は委ねない)。
+    implementation("io.coil-kt:coil-compose:2.6.0")
+
     // 通話中の画面点灯維持等で使うことがあるため保持(未使用なら削除可)
     implementation("androidx.core:core-splashscreen:1.0.1")
 }

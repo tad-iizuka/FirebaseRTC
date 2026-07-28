@@ -114,6 +114,12 @@
     <string name="chat_title">チャット</string>
     <string name="chat_placeholder">メッセージを入力</string>
     <string name="chat_send">送信</string>
+    <!-- [Phase16] チャット添付ファイル。ptt-client/src/locales/ja.jsonの chat.attachment* と同じ文言 -->
+    <string name="chat_attachment_pick">ファイルを添付</string>
+    <string name="chat_attachment_send">送信</string>
+    <string name="chat_attachment_cancel">キャンセル</string>
+    <string name="chat_attachment_open">添付ファイルを開く</string>
+    <string name="chat_attachment_loading">読み込み中...</string>
 
     <!-- errors -->
     <string name="errors_not_signed_in">サインインしていません</string>
@@ -129,6 +135,8 @@
     <string name="errors_room_request_failed">リクエストに失敗しました (HTTP %1$d)</string>
     <string name="errors_ban_action_failed">BAN処理に失敗しました (HTTP %1$d)</string>
     <string name="errors_chat_send_failed">メッセージの送信に失敗しました (HTTP %1$d)</string>
+    <string name="errors_chat_attachment_upload_failed">添付ファイルのアップロードに失敗しました</string>
+    <string name="errors_chat_attachment_too_large">ファイルサイズは100MB以内にしてください</string>
     <string name="errors_talk_lock_failed">発話ロックの操作に失敗しました (HTTP %1$d)</string>
     <string name="errors_token_fetch_failed">トークン取得に失敗しました (HTTP %1$d)</string>
     <string name="errors_recording_operation_failed">録音の操作に失敗しました (HTTP %1$d)</string>

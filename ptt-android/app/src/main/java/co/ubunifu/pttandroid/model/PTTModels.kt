@@ -24,6 +24,34 @@ data class ParticipantInfo(
     val muted: Boolean,
 )
 
+/**
+ * [Phase16] rooms/{roomId}/messages/{messageId}.attachment のFirestore形状
+ * (Web版 ptt-client/src/types/api.ts の ChatAttachment と同じフィールド構成)。
+ * kindはtoken-server/lib/attachments.jsのCONTENT_TYPE_KINDが返す文字列
+ * ("image"|"video"|"pdf")を反映する。未知の値はUNKNOWNへフォールバックする。
+ */
+enum class AttachmentKind {
+    IMAGE, VIDEO, PDF, UNKNOWN;
+
+    companion object {
+        fun fromWire(value: String?): AttachmentKind = when (value) {
+            "image" -> IMAGE
+            "video" -> VIDEO
+            "pdf" -> PDF
+            else -> UNKNOWN
+        }
+    }
+}
+
+data class ChatAttachment(
+    val storagePath: String,
+    val thumbnailPath: String?,
+    val contentType: String,
+    val kind: AttachmentKind,
+    val fileName: String,
+    val size: Long,
+)
+
 /** rooms/{roomId}/messages の1件分(Web版・iOS版と同じスキーマ) */
 data class ChatMessage(
     val id: String,
@@ -31,6 +59,8 @@ data class ChatMessage(
     val displayName: String,
     val text: String,
     val createdAtMillis: Long?,
+    // [Phase16] 添付が無いメッセージはnull
+    val attachment: ChatAttachment? = null,
 )
 
 /**

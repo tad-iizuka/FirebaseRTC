@@ -103,6 +103,11 @@
     <string name="chat_title">Chat</string>
     <string name="chat_placeholder">Type a message</string>
     <string name="chat_send">Send</string>
+    <string name="chat_attachment_pick">Attach a file</string>
+    <string name="chat_attachment_send">Send</string>
+    <string name="chat_attachment_cancel">Cancel</string>
+    <string name="chat_attachment_open">Open attachment</string>
+    <string name="chat_attachment_loading">Loading...</string>
 
     <!-- errors -->
     <string name="errors_not_signed_in">Not signed in</string>
@@ -118,6 +123,8 @@
     <string name="errors_room_request_failed">Request failed (HTTP %1$d)</string>
     <string name="errors_ban_action_failed">Ban failed (HTTP %1$d)</string>
     <string name="errors_chat_send_failed">Failed to send message (HTTP %1$d)</string>
+    <string name="errors_chat_attachment_upload_failed">Failed to upload the attachment</string>
+    <string name="errors_chat_attachment_too_large">File size must be 100MB or less</string>
     <string name="errors_talk_lock_failed">Talk lock operation failed (HTTP %1$d)</string>
     <string name="errors_token_fetch_failed">Token fetch failed (HTTP %1$d)</string>
     <string name="errors_recording_operation_failed">Recording operation failed (HTTP %1$d)</string>

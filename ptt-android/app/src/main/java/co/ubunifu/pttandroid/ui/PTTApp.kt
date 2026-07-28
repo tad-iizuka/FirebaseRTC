@@ -26,6 +26,12 @@
  */
 package co.ubunifu.pttandroid.ui
 
+import android.content.Intent
+import android.net.Uri
+import android.provider.OpenableColumns
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -39,9 +45,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -55,6 +63,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -64,6 +73,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -81,6 +91,7 @@ import co.ubunifu.pttandroid.ban.PTTRoomPermissions
 import co.ubunifu.pttandroid.chat.PTTChatStore
 import co.ubunifu.pttandroid.connection.PTTConnectionManager
 import co.ubunifu.pttandroid.model.AssignedBadge
+import co.ubunifu.pttandroid.model.AttachmentKind
 import co.ubunifu.pttandroid.model.ConnectionStatus
 import co.ubunifu.pttandroid.model.ParticipantInfo
 import co.ubunifu.pttandroid.onboarding.PTTOnboardingScreen
@@ -91,9 +102,21 @@ import co.ubunifu.pttandroid.room.PTTRoomManager
 import co.ubunifu.pttandroid.room.PTTSavedRoomsStore
 import co.ubunifu.pttandroid.room.SavedRoom
 import co.ubunifu.pttandroid.ui.theme.PTTColors
+import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
 
 private val Mono = FontFamily.Monospace
+
+/** [Phase16] ACTION_OPEN_DOCUMENTで選択されたUriの表示名を解決する(送信前の確認行用)。 */
+private fun queryDisplayName(context: android.content.Context, uri: Uri): String {
+    context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+        val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+        if (cursor.moveToFirst() && nameIdx >= 0) {
+            cursor.getString(nameIdx)?.let { return it }
+        }
+    }
+    return uri.lastPathSegment ?: "file"
+}
 
 @Composable
 fun PTTApp(
@@ -176,6 +199,29 @@ fun PTTApp(
     // (Web版の`window.prompt`・iOS版のtextField付きalertに相当)。
     var reportTarget by remember { mutableStateOf<ParticipantInfo?>(null) }
     var reportReasonText by remember { mutableStateOf("") }
+    // [Phase16] 選択直後には送信せず、送信ボタンが押されるまで保持しておくファイル
+    // (Web版ChatPanel.vueのpendingFileと同じ設計)。
+    var pendingAttachmentUri by remember { mutableStateOf<Uri?>(null) }
+    var attachmentSending by remember { mutableStateOf(false) }
+
+    val localContext = LocalContext.current
+    val pendingAttachmentName = remember(pendingAttachmentUri) {
+        pendingAttachmentUri?.let { queryDisplayName(localContext, it) }
+    }
+    // [不具合修正・再修正] 一度Intent.createChooser()でラップする実装を試したが、
+    // 候補アプリが1つしかない環境では自動転送時に新しいタスクとして起動されてしまい、
+    // 「戻る」を押すとアプリのタスクへ戻れず直接ホーム画面に抜けてしまう不具合が
+    // 実機検証(Android Studioエミュレータ)で確認された。ACTION_OPEN_DOCUMENTは
+    // 元々それ単体で選択元切り替え可能なピッカーUIとして機能する設計であり、
+    // createChooser()で包むのは非標準。Google公式のActivityResultContracts.
+    // OpenDocument()(chooserラップなし)へ戻し、同一タスク内での通常の
+    // back-stack遷移になるようにする。
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri -> if (uri != null) pendingAttachmentUri = uri }
+    fun launchAttachmentPicker() {
+        filePickerLauncher.launch(PTTChatStore.ALLOWED_MIME_TYPES)
+    }
 
     // [送話ロック連携] 自分以外が発話ロックを保持しているか、および相手の表示名
     val someoneElseIsTalking = currentTalkerUid != null && currentTalkerUid != currentUser?.uid
@@ -210,6 +256,7 @@ fun PTTApp(
         joinRoomId = ""
         joinInviteCode = ""
         chatInput = ""
+        pendingAttachmentUri = null
     }
 
     // [BAN対応] 自分がBANされたことをリアルタイム検知したら、即座にルームから退出する。
@@ -260,6 +307,42 @@ fun PTTApp(
         }
     }
 
+    // [Phase16] pendingAttachmentUriの送信・取消。Web版sendPendingFile/cancelPendingFileの移植。
+    fun sendPendingAttachment() {
+        val uri = pendingAttachmentUri ?: return
+        val roomId = activeRoomId ?: return
+        pendingAttachmentUri = null
+        attachmentSending = true
+        scope.launch {
+            try {
+                val idToken = authManager.fetchIdToken()
+                chatStore.sendAttachment(tokenServerUrl, idToken, roomId, uri)
+            } catch (e: Exception) {
+                // chatStore.errorMessage に理由がセットされているのでUIには既に反映済み
+            } finally {
+                attachmentSending = false
+            }
+        }
+    }
+
+    fun cancelPendingAttachment() {
+        pendingAttachmentUri = null
+    }
+
+    // [Phase16] ChatSectionへ渡す、tokenServerUrl/roomIdを束縛した閲覧URL発行関数
+    // (Web版RoomView.vueがChatPanel.vueへgetAttachmentUrl/getThumbnailUrlを注入するのと同じ設計)。
+    suspend fun resolveAttachmentUrl(messageId: String): String {
+        val roomId = activeRoomId ?: throw IllegalStateException("not in a room")
+        val idToken = authManager.fetchIdToken()
+        return chatStore.getAttachmentUrl(tokenServerUrl, idToken, roomId, messageId)
+    }
+
+    suspend fun resolveThumbnailUrl(messageId: String): String {
+        val roomId = activeRoomId ?: throw IllegalStateException("not in a room")
+        val idToken = authManager.fetchIdToken()
+        return chatStore.getThumbnailUrl(tokenServerUrl, idToken, roomId, messageId)
+    }
+
     // [通報UI] 理由入力ダイアログで「送信する」を選んだ際に呼ばれる。
     // Web版のreportParticipant(window.promptの戻り値をtrimして空ならskip)と同じ挙動。
     fun submitReport(target: ParticipantInfo) {
@@ -278,7 +361,16 @@ fun PTTApp(
         }
     }
 
-    Column(Modifier.fillMaxWidth().padding(16.dp)) {
+    // [チャット添付UI追加に伴う修正] 画面全体が縦スクロール無しの固定Columnだったため、
+    // チャット欄・添付ファイルの確認行など縦方向のコンテンツが増えると画面下端が
+    // 見えなくなる(送信ボタンやログ欄に到達できない)不具合があった。
+    // verticalScrollを付与し、画面全体をスクロール可能にする。
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+    ) {
         HeaderRow(
             currentUserName = authManager.displayName,
             channelLabel = channelLabel(status),
@@ -373,6 +465,13 @@ fun PTTApp(
                             }
                         }
                     },
+                    pendingAttachmentName = pendingAttachmentName,
+                    attachmentSending = attachmentSending,
+                    onPickAttachment = { launchAttachmentPicker() },
+                    onSendPendingAttachment = { sendPendingAttachment() },
+                    onCancelPendingAttachment = { cancelPendingAttachment() },
+                    getAttachmentUrl = { messageId -> resolveAttachmentUrl(messageId) },
+                    getThumbnailUrl = { messageId -> resolveThumbnailUrl(messageId) },
                 )
                 Spacer(Modifier.height(16.dp))
                 LogSection(logLines)
@@ -1080,34 +1179,152 @@ private fun ChatSection(
     onInputChange: (String) -> Unit,
     errorMessage: String?,
     onSend: () -> Unit,
+    // [Phase16] 添付ファイル。Web版ChatPanel.vueのprops/emitと同じ役割分担:
+    // 呼び出し元(PTTApp)がtokenServerUrl/roomIdを束縛したURL発行関数を注入する。
+    pendingAttachmentName: String?,
+    attachmentSending: Boolean,
+    onPickAttachment: () -> Unit,
+    onSendPendingAttachment: () -> Unit,
+    onCancelPendingAttachment: () -> Unit,
+    getAttachmentUrl: suspend (String) -> String,
+    getThumbnailUrl: suspend (String) -> String,
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    // [Phase16] サムネイルは表示のたびに1回だけ発行し、messageIdをキーに保持する
+    // (Web版ChatPanel.vueのthumbSrcByMessageIdと同じ設計)。
+    val thumbSrcByMessageId = remember { mutableStateMapOf<String, String>() }
+
+    LaunchedEffect(messages) {
+        for (m in messages) {
+            val thumbnailPath = m.attachment?.thumbnailPath
+            if (thumbnailPath != null && thumbSrcByMessageId[m.id] == null) {
+                try {
+                    thumbSrcByMessageId[m.id] = getThumbnailUrl(m.id)
+                } catch (e: Exception) {
+                    // 失敗時は汎用アイコン表示のままにする(Web版と同じくerrorMessageには出さない)
+                }
+            }
+        }
+    }
+
+    fun openAttachment(messageId: String) {
+        scope.launch {
+            try {
+                val url = getAttachmentUrl(messageId)
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            } catch (e: Exception) {
+                // errorMessageは送受信本体のみに使う(Web版と同じ)
+            }
+        }
+    }
+
     Column(Modifier.fillMaxWidth()) {
         Text(stringResource(R.string.chat_title), fontFamily = Mono, fontSize = 10.sp, color = PTTColors.Muted)
         Spacer(Modifier.height(6.dp))
         LazyColumn(Modifier.fillMaxWidth().height(160.dp)) {
             items(messages) { message ->
-                Text(
-                    "${message.displayName}: ${message.text}",
-                    fontFamily = Mono,
-                    fontSize = 12.sp,
-                    color = if (message.uid == myUid) PTTColors.Live else MaterialTheme.colorScheme.onSurface,
-                )
+                Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                    if (message.text.isNotEmpty()) {
+                        Text(
+                            "${message.displayName}: ${message.text}",
+                            fontFamily = Mono,
+                            fontSize = 12.sp,
+                            color = if (message.uid == myUid) PTTColors.Live else MaterialTheme.colorScheme.onSurface,
+                        )
+                    } else {
+                        Text(
+                            message.displayName,
+                            fontFamily = Mono,
+                            fontSize = 12.sp,
+                            color = if (message.uid == myUid) PTTColors.Live else MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                    message.attachment?.let { attachment ->
+                        Spacer(Modifier.height(2.dp))
+                        if (attachment.kind == AttachmentKind.IMAGE) {
+                            val thumbUrl = thumbSrcByMessageId[message.id]
+                            if (thumbUrl != null) {
+                                AsyncImage(
+                                    model = thumbUrl,
+                                    contentDescription = attachment.fileName,
+                                    contentScale = ContentScale.Fit,
+                                    modifier = Modifier
+                                        .height(96.dp)
+                                        .clickable { openAttachment(message.id) },
+                                )
+                            } else {
+                                Text(
+                                    "[${stringResource(R.string.chat_attachment_loading)}]",
+                                    fontFamily = Mono,
+                                    fontSize = 11.sp,
+                                    color = PTTColors.Muted,
+                                    modifier = Modifier.clickable { openAttachment(message.id) },
+                                )
+                            }
+                        } else {
+                            val icon = if (attachment.kind == AttachmentKind.VIDEO) "\uD83C\uDFAC" else "\uD83D\uDCC4"
+                            Text(
+                                "$icon ${attachment.fileName}",
+                                fontFamily = Mono,
+                                fontSize = 11.sp,
+                                color = PTTColors.Muted,
+                                modifier = Modifier.clickable { openAttachment(message.id) },
+                            )
+                        }
+                    }
+                }
             }
         }
         errorMessage?.let { Text(it, color = PTTColors.Danger, fontFamily = Mono, fontSize = 11.sp) }
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = input,
-                onValueChange = onInputChange,
-                modifier = Modifier.weight(1f),
-                singleLine = true,
-                placeholder = { Text(stringResource(R.string.chat_placeholder), fontFamily = Mono, fontSize = 12.sp) },
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { onSend() }),
-            )
-            Spacer(Modifier.width(8.dp))
-            Button(onClick = onSend, enabled = input.isNotBlank()) {
-                Text(stringResource(R.string.chat_send), fontFamily = Mono)
+
+        if (pendingAttachmentName != null) {
+            Spacer(Modifier.height(6.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("\uD83D\uDCCE", fontFamily = Mono, fontSize = 12.sp)
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    pendingAttachmentName,
+                    fontFamily = Mono,
+                    fontSize = 11.sp,
+                    color = PTTColors.Muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(6.dp))
+                Button(onClick = onSendPendingAttachment, enabled = !attachmentSending) {
+                    Text(stringResource(R.string.chat_attachment_send), fontFamily = Mono)
+                }
+                Spacer(Modifier.width(6.dp))
+                OutlinedButton(onClick = onCancelPendingAttachment, enabled = !attachmentSending) {
+                    Text(stringResource(R.string.chat_attachment_cancel), fontFamily = Mono)
+                }
+            }
+        } else {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(
+                    onClick = onPickAttachment,
+                    modifier = Modifier
+                        .width(48.dp)
+                        .semantics { contentDescription = context.getString(R.string.chat_attachment_pick) },
+                ) {
+                    Text("\uD83D\uDCCE", fontFamily = Mono)
+                }
+                Spacer(Modifier.width(8.dp))
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = onInputChange,
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    placeholder = { Text(stringResource(R.string.chat_placeholder), fontFamily = Mono, fontSize = 12.sp) },
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { onSend() }),
+                )
+                Spacer(Modifier.width(8.dp))
+                Button(onClick = onSend, enabled = input.isNotBlank()) {
+                    Text(stringResource(R.string.chat_send), fontFamily = Mono)
+                }
             }
         }
     }
