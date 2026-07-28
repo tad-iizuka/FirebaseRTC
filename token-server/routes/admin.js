@@ -36,6 +36,15 @@
  *     共有。権限判定の方法だけが異なる)。
  *   - 組織階層自体のCRUD・Roomへの割り当ては routes/organizations.js
  *     (/admin/organizations*, PATCH /admin/rooms/:roomId/org-assignment)。
+ *
+ * [ルーム作成のadmin-dashboard移管で追加]
+ *   - rooms/{roomId} に name(表示名, 未設定はnull)フィールドを追加。
+ *     GET /admin/rooms・GET /admin/rooms/:roomId のレスポンスにも含める。
+ *   - POST /admin/rooms(rooms:create権限): admin-dashboardからのルーム
+ *     新規作成。呼び出した管理者がownerになる。routes/rooms.jsの
+ *     `POST /rooms`(rooms:create権限必須へ変更)と処理を共有する
+ *     (lib/roomCreation.js)。
+ *   - PATCH /admin/rooms/:roomId/name(rooms:manage権限): ルーム名の変更。
  */
 
 const express = require('express');
@@ -46,6 +55,7 @@ const { resolveOrgContext } = require('../lib/orgContext');
 const { requireFirebaseAuth, isValidRoomId } = require('../middleware/requireAuth');
 const { requireAdminPermission } = require('../middleware/requireAdmin');
 const { checkRoleAssignmentTarget } = require('../lib/permissions');
+const { resolveMaxMembers, createRoomAndOwnerMember, normalizeRoomName } = require('../lib/roomCreation');
 
 const router = express.Router();
 
@@ -116,6 +126,7 @@ router.get('/rooms', requireFirebaseAuth, requireAdminPermission('rooms:monitor'
 
         return {
           roomId,
+          name: room.name ?? null,
           ownerUid: room.ownerUid,
           createdAt: room.createdAt?.toMillis?.() ?? null,
           maxMembers: room.maxMembers ?? null,
@@ -205,6 +216,7 @@ router.get('/rooms/:roomId', requireFirebaseAuth, requireAdminPermission('rooms:
 
     res.json({
       roomId,
+      name: room.name ?? null,
       ownerUid: room.ownerUid,
       createdAt: room.createdAt?.toMillis?.() ?? null,
       maxMembers: room.maxMembers ?? null,
@@ -236,6 +248,119 @@ router.get('/rooms/:roomId', requireFirebaseAuth, requireAdminPermission('rooms:
     res.status(500).json({ error: 'ルーム詳細の取得に失敗しました' });
   }
 });
+
+/**
+ * POST /admin/rooms
+ * body: { name: string, maxMembers?: number }
+ *
+ * [ルーム作成のadmin-dashboard移管]
+ * ルーム作成をadmin-dashboard専用の経路に一本化する。以前ptt-client等の
+ * クライアントから叩いていた `POST /rooms`(routes/rooms.js)は
+ * `rooms:create`権限必須へ変更した上で残しているが、今後の正規の作成経路は
+ * こちら。呼び出した管理者自身がownerになる(`POST /rooms`時代と同じ、
+ * 呼び出しユーザーがownerになるという設計を踏襲。admin-dashboard側で
+ * 別途owner変更手段は用意していない)。
+ *
+ * 招待コードは作成時のこのレスポンスでのみ返却され、以降どのAPIからも
+ * 再取得できない(brushup-plan.md 5.4「招待コードの可視範囲」で洗い出した
+ * 既存の制約と同じ)。admin-dashboard側は作成直後に必ず表示・コピーできる
+ * UIにする必要がある(RoomsListView.vue参照)。
+ *
+ * 共通の作成処理は lib/roomCreation.js に集約している
+ * (routes/rooms.js の `POST /rooms` と重複させないため)。
+ */
+router.post('/rooms', requireFirebaseAuth, requireAdminPermission('rooms:create'), async (req, res) => {
+  const uid = req.firebaseUser.uid;
+  const name = req.body?.name;
+
+  if (typeof name !== 'string' || !name.trim()) {
+    return res.status(400).json({ error: 'name は必須です' });
+  }
+
+  const maxMembersResult = resolveMaxMembers(req.body?.maxMembers);
+  if ('error' in maxMembersResult) {
+    return res.status(400).json({ error: maxMembersResult.error });
+  }
+
+  try {
+    const created = await createRoomAndOwnerMember({
+      ownerUid: uid,
+      ownerDisplayName: req.firebaseUser.name || req.firebaseUser.email || uid,
+      name,
+      maxMembers: maxMembersResult.value,
+    });
+
+    await logAdminAction({
+      actorUid: uid,
+      action: 'room:create',
+      targetRoomId: created.roomId,
+      detail: { name: created.name, maxMembers: created.maxMembers, via: 'admin_dashboard' },
+    });
+
+    console.log(`[管理者ダッシュボード: ルーム作成] roomId=${created.roomId} name=${created.name} owner=${uid}`);
+    res.status(201).json({
+      roomId: created.roomId,
+      name: created.name,
+      inviteCode: created.inviteCode,
+      ownerUid: uid,
+      createdAt: created.createdAt.getTime(),
+      maxMembers: created.maxMembers,
+    });
+  } catch (e) {
+    console.error('[管理者ダッシュボード: ルーム作成エラー]', e.message);
+    res.status(500).json({ error: 'ルームの作成に失敗しました' });
+  }
+});
+
+/**
+ * PATCH /admin/rooms/:roomId/name
+ * body: { name: string }
+ *
+ * ルーム名を変更する。空文字を送ると未設定(null)に戻せる
+ * (lib/roomCreation.js の normalizeRoomName が空文字/空白のみをnullへ
+ * 正規化するため)。rooms:manage権限(PATCH .../settings/autoRecordingや
+ * moderator任命APIと同じ権限)を要求する。
+ */
+router.patch(
+  '/rooms/:roomId/name',
+  requireFirebaseAuth,
+  requireAdminPermission('rooms:manage'),
+  async (req, res) => {
+    const { roomId } = req.params;
+
+    if (!isValidRoomId(roomId)) {
+      return res.status(400).json({ error: 'roomId が不正です' });
+    }
+    if (typeof req.body?.name !== 'string') {
+      return res.status(400).json({ error: 'name は必須です(未設定に戻す場合は空文字を指定してください)' });
+    }
+
+    const name = normalizeRoomName(req.body.name);
+
+    try {
+      const roomRef = db.collection('rooms').doc(roomId);
+      const roomSnap = await roomRef.get();
+      if (!roomSnap.exists) {
+        return res.status(404).json({ error: 'ルームが見つかりません' });
+      }
+
+      await roomRef.update({ name });
+
+      await logAdminAction({
+        actorUid: req.firebaseUser.uid,
+        action: 'room:name_update',
+        targetRoomId: roomId,
+        detail: { name },
+      });
+
+      console.log(`[管理者ダッシュボード: ルーム名変更] roomId=${roomId} name=${name} by=${req.firebaseUser.uid}`);
+      res.json({ roomId, name });
+    } catch (e) {
+      console.error('[管理者ダッシュボード: ルーム名変更エラー]', e.message);
+      res.status(500).json({ error: 'ルーム名の変更に失敗しました' });
+    }
+  }
+);
 
 /**
  * PATCH /admin/rooms/:roomId/settings/autoRecording

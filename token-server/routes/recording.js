@@ -296,6 +296,9 @@ router.post(
  * 保存済みルームへの再入室時にも設定状態を取得できるよう、入室のたびに
  * 呼ばれるこのエンドポイントに持たせている(ptt-client/src/stores/room.ts
  * の fetchAutoRecording 参照)。
+ *
+ * [ルーム名] 同じ理由で room.name も併せて返す。/join を経由しない
+ * 再入室時にもルーム名を最新化できるようにするため。
  */
 router.get(
   '/:roomId/recording/status',
@@ -313,6 +316,8 @@ router.get(
         active: !!recording.active,
         startedAt: recording.startedAt?.toMillis?.() ?? null,
         autoRecording: !!room.settings?.autoRecording,
+        // [ルーム名] admin-dashboardで設定された名前。未設定はnull。
+        name: room.name ?? null,
       });
     } catch (e) {
       console.error('[録音状態取得エラー]', e.message);

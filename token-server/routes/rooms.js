@@ -13,13 +13,14 @@
  */
 
 const express = require('express');
-const crypto = require('crypto');
 const { RoomServiceClient } = require('livekit-server-sdk');
 const { db } = require('../lib/firebaseAdmin');
 const { logAdminAction } = require('../lib/auditLog');
 const { resolveOrgContext } = require('../lib/orgContext');
 const { requireFirebaseAuth, isValidRoomId, requireRoomMembership } = require('../middleware/requireAuth');
+const { requireAdminPermission } = require('../middleware/requireAdmin');
 const { hasRoomPermission, requireRoomPermission, checkRoleAssignmentTarget } = require('../lib/permissions');
+const { resolveMaxMembers, createRoomAndOwnerMember } = require('../lib/roomCreation');
 
 const router = express.Router();
 
@@ -31,78 +32,52 @@ const roomService = new RoomServiceClient(
   process.env.LIVEKIT_API_SECRET
 );
 
-const DEFAULT_MAX_MEMBERS = 20;
-
-/**
- * 人が手入力・共有しやすい8文字の招待コードを生成する。
- * 紛らわしい文字(0/O, 1/I/L等)は除外している。
- */
-function generateInviteCode() {
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  const bytes = crypto.randomBytes(8);
-  let code = '';
-  for (let i = 0; i < 8; i++) {
-    code += alphabet[bytes[i] % alphabet.length];
-  }
-  return code;
-}
-
 /**
  * POST /rooms
- * body: { maxMembers?: number }
+ * body: { name?: string, maxMembers?: number }
+ *
+ * [ルーム作成のadmin-dashboard移管]
+ * 以前は認証済みユーザーなら誰でも(Guestを除き)呼べたが、ルーム作成は
+ * admin-dashboard専用の運用へ移行したため、`rooms:create`
+ * (adminUsers/{uid}.permissions、サイト管理者権限)を必須にした。
+ * 通常のアプリユーザーはこの権限を持たないため、実質的にこのAPIを
+ * 呼べるのはadmin-dashboardの管理者のみになる。admin-dashboard自体は
+ * 別経路の `POST /admin/rooms` を使うため(lib/roomCreation.js参照)、
+ * この `POST /rooms` は「permission配布さえ受ければ、admin-dashboardを
+ * 介さずAPIを直接叩いても同じことができる」という一貫性のために残して
+ * いる(エンドポイント自体は廃止しない)。
  *
  * 呼び出したユーザーがownerになる新規ルームを作成する。
  * 招待コードはこの時点で発行され、レスポンスで返す
  * (ownerが招待したい相手にこのコードを別途共有する想定)。
  *
- * [Phase12] Guest(匿名認証)によるRoom作成を拒否する。
- * このRoomではまだmembersドキュメントが存在しないため、/joinの
- * role自動判定と同じ基準(firebase.sign_in_provider)をここでも直接見る。
- * 従来はクライアント側のUI非表示のみで防いでいたが(3クライアントとも
- * `auth.currentUser?.isAnonymous`相当を見て「ルームを作成」ボタンを隠す
- * だけだった)、API直叩きや改造クライアントからは素通りしてしまう状態
- * だったため、サーバー側でも明示的に強制する。
+ * [Phase12] Guest(匿名認証)によるRoom作成拒否は、`rooms:create`権限を
+ * 持つ通常ユーザーが存在しない設計上ほぼ意味を失ったが、
  * 「本人確認のできないownerが永続的に残ってしまう」というGuestの
- * 一時参加という設計思想と矛盾する事態を防ぐのが目的(Guestロール5.1参照)。
+ * 一時参加という設計思想と矛盾する事態を防ぐため、防御的にそのまま残す。
  */
-router.post('/', requireFirebaseAuth, async (req, res) => {
+router.post('/', requireFirebaseAuth, requireAdminPermission('rooms:create'), async (req, res) => {
   const uid = req.firebaseUser.uid;
 
   if (req.firebaseUser.firebase?.sign_in_provider === 'anonymous') {
     return res.status(403).json({ error: 'ゲストはルームを作成できません' });
   }
 
-  const maxMembers = Number.isInteger(req.body?.maxMembers) ? req.body.maxMembers : DEFAULT_MAX_MEMBERS;
-
-  if (maxMembers < 2 || maxMembers > 200) {
-    return res.status(400).json({ error: 'maxMembers は 2〜200 の範囲で指定してください' });
+  const maxMembersResult = resolveMaxMembers(req.body?.maxMembers);
+  if ('error' in maxMembersResult) {
+    return res.status(400).json({ error: maxMembersResult.error });
   }
 
   try {
-    const roomRef = db.collection('rooms').doc();
-    const inviteCode = generateInviteCode();
-
-    await roomRef.set({
+    const created = await createRoomAndOwnerMember({
       ownerUid: uid,
-      createdAt: new Date(),
-      visibility: 'invite_only',
-      inviteCode,
-      maxMembers,
-      // [Phase9] ルームがアクティブになった瞬間(room_startedイベント)に
-      // 自動で録音を開始するかどうか。デフォルトはfalse(従来通り手動開始)。
-      // routes/webhooks.js の handleRoomStarted / PATCH /:roomId/settings 参照。
-      settings: { autoRecording: false },
+      ownerDisplayName: req.firebaseUser.name || req.firebaseUser.email || uid,
+      name: req.body?.name,
+      maxMembers: maxMembersResult.value,
     });
 
-    await roomRef.collection('members').doc(uid).set({
-      role: 'owner',
-      displayName: req.firebaseUser.name || req.firebaseUser.email || uid,
-      status: 'active',
-      joinedAt: new Date(),
-    });
-
-    console.log(`[ルーム作成] roomId=${roomRef.id} owner=${uid}`);
-    res.status(201).json({ roomId: roomRef.id, inviteCode });
+    console.log(`[ルーム作成] roomId=${created.roomId} owner=${uid}`);
+    res.status(201).json({ roomId: created.roomId, name: created.name, inviteCode: created.inviteCode });
   } catch (e) {
     console.error('[ルーム作成エラー]', e.message);
     res.status(500).json({ error: 'ルームの作成に失敗しました' });
@@ -178,12 +153,17 @@ router.post('/:roomId/join', requireFirebaseAuth, async (req, res) => {
     // Metadata経由で開示する既存方針(recording.js冒頭コメント参照)を、
     // 「まだ誰も録音開始ボタンを押していないのに録音が始まる」自動録音の
     // ケースでも入室前から満たすため。
+    // [ルーム名] 同じタイミングでルーム名も返す(admin-dashboardで設定)。
+    // 再入室時は GET /recording/status 側にも同じフィールドを持たせている
+    // (room.ts の fetchAutoRecording 参照)。
     const finalMemberSnap = memberSnap.exists ? memberSnap : await memberRef.get();
     res.json({
       roomId,
       joined: true,
       role: finalMemberSnap.data().role,
       autoRecording: !!room.settings?.autoRecording,
+      // [ルーム名] admin-dashboardで設定された名前。未設定はnull。
+      name: room.name ?? null,
     });
   } catch (e) {
     console.error('[ルーム参加エラー]', e.message);

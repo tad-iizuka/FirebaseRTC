@@ -6,16 +6,19 @@ export interface ServerErrorResponse {
   code?: string
 }
 
-export interface CreateRoomResponse {
-  roomId: string
-  inviteCode: string
-}
+// [ルーム作成のadmin-dashboard移管] ルーム作成はadmin-dashboard専用の
+// POST /admin/rooms(rooms:create権限)に移管し、ptt-client側のPOST /rooms
+// (旧CreateRoomResponse)は廃止した。ptt-clientは常に既存ルームへの
+// join(招待コード検証)のみを行う。詳細はbrushup-plan.mdのルーム名・
+// ルーム作成移管に関する改定を参照。
 
 export interface JoinRoomResponse {
   roomId: string
   joined: true
   role: 'owner' | 'moderator' | 'member' | 'guest'
   autoRecording: boolean
+  // [ルーム名] admin-dashboardで設定されたルーム名。未設定の場合はnull。
+  name: string | null
 }
 
 export interface TokenResponse {
@@ -76,6 +79,9 @@ export interface RecordingStatusResponse {
   active: boolean
   startedAt: number | null
   autoRecording: boolean
+  // [ルーム名] /join を経由しない再入室時にもルーム名を最新化できるよう、
+  // このエンドポイントにも同居させている(autoRecordingと同じ理由。room.ts参照)。
+  name: string | null
 }
 
 export interface RoomSettingsResponse {
