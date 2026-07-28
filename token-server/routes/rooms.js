@@ -19,7 +19,7 @@ const { db } = require('../lib/firebaseAdmin');
 const { logAdminAction } = require('../lib/auditLog');
 const { resolveOrgContext } = require('../lib/orgContext');
 const { requireFirebaseAuth, isValidRoomId, requireRoomMembership } = require('../middleware/requireAuth');
-const { hasRoomPermission } = require('../lib/permissions');
+const { hasRoomPermission, requireRoomPermission, checkRoleAssignmentTarget } = require('../lib/permissions');
 
 const router = express.Router();
 
@@ -293,22 +293,14 @@ router.post('/:roomId/members/:targetUid/role', requireFirebaseAuth, async (req,
 
     const targetRef = roomRef.collection('members').doc(targetUid);
     const targetSnap = await targetRef.get();
-    if (!targetSnap.exists) {
-      return res.status(404).json({ error: '対象のメンバーが見つかりません' });
+    // [Phase12] owner降格禁止・BAN済み対象禁止・guest任命禁止のガードは
+    // routes/admin.js の代行API(サイト管理者経由)と共通のため
+    // lib/permissions.js の checkRoleAssignmentTarget に集約した。
+    const targetGuardError = checkRoleAssignmentTarget(targetSnap.exists ? targetSnap.data() : null);
+    if (targetGuardError) {
+      return res.status(targetGuardError.status).json({ error: targetGuardError.error });
     }
     const targetData = targetSnap.data();
-    if (targetData.role === 'owner') {
-      return res.status(403).json({ error: 'オーナーのroleは変更できません' });
-    }
-    if (targetData.status === 'banned') {
-      return res.status(400).json({ error: 'BAN済みのメンバーのroleは変更できません' });
-    }
-    // [Phase10: Guestロール] Guestは本人確認のない匿名認証由来のため、
-    // このAPI経由でmoderatorへ任命できてしまう抜け道を塞ぐ。
-    // Member昇格の導線自体を設けない方針(5.1参照)とも整合させている。
-    if (targetData.role === 'guest') {
-      return res.status(403).json({ error: 'Guestのroleは変更できません' });
-    }
 
     await targetRef.update({ role });
 
@@ -400,8 +392,17 @@ const MAX_NICKNAME_LENGTH = 30;
  *
  * リアルタイム反映は既存のFirestoreクライアントリスナー(BAN即時反映等と
  * 同じ仕組み)に乗るため、このAPI側で追加の通知処理は行わない。
+ *
+ * [Phase12] `requireRoomPermission('nickname:update')`を追加。
+ * ROOM_OPERATIONSでは元々role不問と定義済みだったが、実装は
+ * `requireRoomMembership`止まりだったため揃えた(挙動は変わらない)。
  */
-router.patch('/:roomId/nickname', requireFirebaseAuth, requireRoomMembership, async (req, res) => {
+router.patch(
+  '/:roomId/nickname',
+  requireFirebaseAuth,
+  requireRoomMembership,
+  requireRoomPermission('nickname:update'),
+  async (req, res) => {
   const uid = req.firebaseUser.uid;
   const { roomId } = req.params;
   const displayName = typeof req.body?.displayName === 'string' ? req.body.displayName.trim() : '';
@@ -434,8 +435,17 @@ router.patch('/:roomId/nickname', requireFirebaseAuth, requireRoomMembership, as
  *
  * 無所属Roomはエラーではなく正式な状態として扱う(5.4参照)。
  * その場合は404ではなく200 + null群を返す。
+ *
+ * [Phase12] `requireRoomPermission('org_context:read')`を追加。
+ * ROOM_OPERATIONSでは元々role不問と定義済みだったが、実装は
+ * `requireRoomMembership`止まりだったため揃えた(挙動は変わらない)。
  */
-router.get('/:roomId/org-context', requireFirebaseAuth, requireRoomMembership, async (req, res) => {
+router.get(
+  '/:roomId/org-context',
+  requireFirebaseAuth,
+  requireRoomMembership,
+  requireRoomPermission('org_context:read'),
+  async (req, res) => {
   const { roomId } = req.params;
 
   try {

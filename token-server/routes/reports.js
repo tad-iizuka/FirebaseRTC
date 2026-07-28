@@ -8,6 +8,15 @@
  *
  * [Phase8] 書き込み時に expireAt をセットし、Firestore TTLポリシーで
  * 一定期間後に自動削除されるようにする(phase8-operations.md参照)。
+ *
+ * [Phase12] 通報者がroomIdのメンバーであることを検証する。
+ * このルーターは`/reports`直下にマウントされておりroomIdはbodyから来るため
+ * (`server.js`参照)、req.paramsを前提とする既存の`requireRoomMembership`
+ * ミドルウェアはそのまま使えない。そのため同等の判定(メンバー存在確認・
+ * BAN済みでないこと)をこのファイル内で行う。以前は`requireFirebaseAuth`のみ
+ * で、ログイン済みであれば対象roomのメンバーでなくても任意のroomId/
+ * reportedUidで通報できてしまっていた
+ * (phase12-role-operation-inventory.md 1章「気づいた点」)。
  */
 
 const express = require('express');
@@ -38,6 +47,19 @@ router.post('/', requireFirebaseAuth, async (req, res) => {
   }
   if (reportedUid === reporterUid) {
     return res.status(400).json({ error: '自分自身を通報することはできません' });
+  }
+
+  try {
+    const reporterMemberSnap = await db.doc(`rooms/${roomId}/members/${reporterUid}`).get();
+    if (!reporterMemberSnap.exists) {
+      return res.status(403).json({ error: 'このルームのメンバーではありません' });
+    }
+    if (reporterMemberSnap.data().status === 'banned') {
+      return res.status(403).json({ error: 'このルームから排除されています' });
+    }
+  } catch (e) {
+    console.error('[通報受付: メンバーシップ確認エラー]', e.message);
+    return res.status(500).json({ error: 'メンバーシップの確認に失敗しました' });
   }
 
   try {

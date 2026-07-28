@@ -196,6 +196,57 @@ PUT→GCS実体検証を伴う`POST /messages`確定、という一連の経路�
 ユーザーが確認した」という中間〜高めの確度の確認として記録し、次アクション
 item 3を完了扱いとして「6.1」へ移動する）
 
+十八訂: 2026-07-28（「6. 次アクションの提案」item 2「Phase12 role×操作の
+対応表を実装へつなげる」に着手・完了した。棚卸し
+（`phase12-role-operation-inventory.md`）の時点で判明していた論点のうち
+実装アクションが伴うもの（論点1・2・4）と、実コード確認の過程で新たに
+見つかった「対応表に定義はあるが実装が経由していない」操作群（論点8として
+追記）を解消した。詳細は`phase12-role-operation-inventory.md`「4. 対応表
+一元化に向けた論点まとめ」の追記も参照。
+- **`POST /reports`のmembership非チェックを修正**: `routes/reports.js`の
+  ハンドラ内で、通報者が対象roomIdのメンバーであること・BAN済みでないことの
+  検証を追加した。このルーターは`/reports`直下にマウントされておりroomIdは
+  bodyから来るため（`server.js`参照）、`req.params`前提の既存
+  `requireRoomMembership`ミドルウェアはそのまま使えず、同等の判定を
+  ハンドラ内に直接実装する形をとった。以前はログイン済みであれば対象roomの
+  メンバーでなくても任意の`roomId`/`reportedUid`で通報できてしまっていた
+- **`ROOM_OPERATIONS`に定義済みだが未配線だった4操作を配線**:
+  `lib/permissions.js`の対応表には`talk:control`（送話ロック）・
+  `nickname:update`・`org_context:read`・`chat:send`がrole不問
+  （`ROOM_ROLES`）としてすでに定義されていたが、実際の`routes/talk.js`
+  （3エンドポイント）・`routes/rooms.js`（nickname/org-context）・
+  `routes/messages.js`（チャット送信）は`requireRoomMembership`止まりで
+  `hasRoomPermission`/`requireRoomPermission`を経由していなかった。
+  「対応表を変更しても一部の操作の挙動には反映されない」という事故の
+  もとになるため、いずれも`requireRoomPermission('...')`を追加し、表と
+  実装の強制経路を一致させた（現状は全roleが対象のため挙動自体は変わらない。
+  `chat:attachment_upload`/`chat:attachment_read`は元々配線済みだったため
+  対象外だった）
+- **`rooms.js`/`admin.js`間で重複していたmoderator任命ガードを共通化**:
+  Room内owner専用API（`routes/rooms.js`）とサイト管理者代行API
+  （`routes/admin.js`、`rooms:manage`権限、Phase12で追加されていたことを
+  今回確認）の両方に、「owner降格禁止・BAN済み対象禁止・guest任命禁止」
+  という全く同じガードが重複実装されていた（棚卸しの論点4で指摘した内容）。
+  `lib/permissions.js`に`checkRoleAssignmentTarget()`を新設し、両ルートから
+  参照する形に一本化した
+- 変更した6ファイル（`token-server/routes/{reports,talk,rooms,messages,
+  admin}.js`・`token-server/lib/permissions.js`）はいずれも`node --check`で
+  構文確認済み。既存の`scripts/check-role-sync.js`（サーバーの対応表と
+  3クライアントの定数の同期チェック）も引き続き成功することを確認した
+  （今回の変更はクライアント側定数には触れていないため無関係だが、
+  退行が無いことの確認として実行した）
+- **今回対応しなかった論点（棚卸しの論点3・5・6・7）**: 「Room作成」非表示の
+  判定軸は`isAnonymous`を正とする決定がすでにコード上のコメントで明文化
+  されていることを確認した（論点3、実質決着済み）。admin-dashboardの事前
+  権限チェック追加（論点5）・招待コードの可視範囲（論点6）は実装ではなく
+  仕様判断が先に必要なため、次アクションとして残す。`settings.autoRecording`
+  の複数権限経路の表現方法（論点7）はドキュメント表現の問題であり実装
+  アクションを伴わない
+- **今回の変更はアップロードされたリポジトリのソースファイルへ直接行った
+  ものであり、`tad-iizuka/FirebaseRTC`への実際のコミット・反映は本改定時点
+  では未確認**。六訂・八訂・十六訂で踏んだのと同じ、`git show`等による
+  リポジトリ側での反映確認を次アクションとして残す
+
 > 本改定では、アップロードされた `README.md`（"Connect to a place, not to a person."）に
 > 明記されたビジョン・原則・ターゲットロードマップを"あるべき姿"の物差しとして採用し、
 > 実装済みコードとの差分を再整理した。前版（初回作成）は実装状況の一般的な整理に
@@ -694,40 +745,44 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
 
 ---
 
-## 6. 次アクションの提案（2026-07-28 十七訂で更新）
+## 6. 次アクションの提案（2026-07-28 十八訂で更新）
 
-Phase16添付ファイル（iOS/Android実装・本番運用設定の両方）が完了したため
-「6.1」item 11へ移動し、以下の残項目を1つ繰り上げて番号を振り直した。
+Phase12 role×操作の対応表実装（旧item 2）が完了したため「6.1」item 12へ
+移動し、残項目を1つ繰り上げて番号を振り直した。
 
 1. **バックグラウンド動作(十四訂)のビルド確認・実機検証**：手元のXcode/
    Android Studioでのビルド確認、実機でのロック画面操作・常駐通知の
    送話トグル・Bluetoothヘッドセット操作・長時間バックグラウンド接続
    維持・電力最適化機能の影響確認を行う。問題があれば都度この計画へ
    反映する
-2. **Phase12 role×操作の対応表を実装へつなげる**：対応表の棚卸しは
-   [`phase12-role-operation-inventory.md`](phase12-role-operation-inventory.md)として完了している。
-   `token-server`側
-   （`rooms.js`・`recording.js`等に分散している`['owner','moderator']`
-   等のホワイトリスト）と3クライアント側（`ban.ts`/`PTTBanStore.swift`/
-   Android版の相当箇所にある`myRole === 'owner' || myRole === 'moderator'`
-   等の分岐）を、まず一覧化することから始める。一元化の設計はこの棚卸し
-   の後に行う。あわせて、admin側の権限（`rooms:monitor`/
-   `organizations:manage`等）についても、招待コードの可視範囲（5.4参照）
-   を含めて同じ棚卸しの対象に含める
-3. **APIドキュメントの継続的な同期**：Phase11・Phase13・ユーザー管理・
+2. **APIドキュメントの継続的な同期**：Phase11・Phase13・ユーザー管理・
    Phase16のエンドポイントは`API.md`に反映した。以後もルート追加時には
    同じ変更でAPI.mdとDATA_MODEL.mdを更新する
-4. **（低優先度・継続）** `UI_UX.md`・`SECURITY.md`・`AI.md`の空テンプレート
+3. **（低優先度・継続）** `UI_UX.md`・`SECURITY.md`・`AI.md`の空テンプレート
    整備：旧6.項目3で洗い出したまま未着手。転記元となる詳細記述が
    `token-server/README.md`側に存在しないため、内容そのものをこのタイミングで
    新規に書き起こす必要がある。優先度は引き続き低いが、Phase11〜13で
    ドキュメント化すべき内容（組織階層のスキーマ・role対応表・バッジ
    スキーマ）が増える見込みのため、それらと合わせて着手すると効率的
+4. **Phase12の残課題（棚卸しの論点5・6）の仕様判断**：十八訂で実装した
+   のは棚卸しの論点1・2・4、および新たに見つかった論点8（対応表未配線の
+   4操作）のみ。以下の2点は実装ではなく仕様判断が先に必要なため、
+   判断が付き次第着手する。
+   - admin-dashboardに事前権限チェック（メニュー非表示等）を追加するか
+     （論点5）
+   - 招待コードの可視範囲。`rooms:monitor`権限保有者に「Roomへの参加権を
+     事実上配布できる」権限まで広げることになるため、対象権限の絞り込み・
+     監査ログ記録の要否と合わせて検討する（論点6、5.4参照）
+5. **十八訂の変更のリポジトリへの反映確認**：今回の実装はアップロードされた
+   リポジトリのソースファイルへ直接行ったものであり、
+   `tad-iizuka/FirebaseRTC`への実際のコミット・反映は本ドキュメント作成
+   時点では未確認。六訂・八訂・十六訂で踏んだのと同じ`git show`等での
+   確認プロセスを次アクションとして残す
 
 ### 6.1 完了済みアクション（アーカイブ）
 
 <details>
-<summary>2026-07-28までに完了した旧提案1〜11（クリックで展開）</summary>
+<summary>2026-07-28までに完了した旧提案1〜12（クリックで展開）</summary>
 
 1. ✅ **完了（2026-07-25、十訂）**: iOS/Androidへの通報UI・録音開始/停止UIを
    実装した。Web版(`ptt-client`)の設計(`recording.ts`・`reportParticipant`)
@@ -846,5 +901,31 @@ Phase16添付ファイル（iOS/Android実装・本番運用設定の両方）�
     エンドツーエンドの機能確認であり、単なる口頭申告よりは確度が高いものと
     位置づけて記録する。これでPhase16添付ファイル機能は、クライアント実装・
     本番運用設定の両面で完了した
+12. ✅ **完了（2026-07-28、十八訂）**: Phase12 role×操作の対応表を実装へ
+    つなげた。棚卸し（`phase12-role-operation-inventory.md`）で判明していた
+    論点のうち実装アクションを伴う論点1・2・4、および実装確認の過程で
+    新たに見つかった論点8（対応表定義済みだが未配線の操作群）を解消した。
+    - `routes/reports.js`: 通報者のroomIdメンバーシップ検証・BAN済み
+      チェックを追加（従来`requireFirebaseAuth`のみで、任意roomId宛てに
+      通報できてしまっていた）
+    - `routes/talk.js`（3エンドポイント）・`routes/rooms.js`
+      （nickname/org-context）・`routes/messages.js`（チャット送信）に
+      `requireRoomPermission('...')`を追加し、`lib/permissions.js`の
+      `ROOM_OPERATIONS`定義と実際の強制経路を一致させた（挙動は不変）
+    - `lib/permissions.js`に`checkRoleAssignmentTarget()`を新設し、
+      `routes/rooms.js`（Room内owner専用API）と`routes/admin.js`
+      （`rooms:manage`権限による代行API）に重複していたmoderator任命の
+      対象role guardを一本化した
+    - 論点3（Room作成非表示の判定軸）はコード上のコメントで
+      「isAnonymousを正とする意図的な使い分け」と既に明文化されていることを
+      確認し、決着済みと判断した。論点5(admin-dashboard事前権限チェック)・
+      論点6(招待コードの可視範囲)は実装ではなく仕様判断が先に必要なため、
+      次アクションとして残した
+    - 変更ファイルは`node --check`で構文確認済み、`scripts/
+      check-role-sync.js`も引き続き成功することを確認した。**（留保）**
+      今回の変更はアップロードされたリポジトリのソースファイルへ直接行った
+      ものであり、`tad-iizuka/FirebaseRTC`への実際のコミット・反映は
+      本ドキュメント作成時点では未確認（六訂・八訂・十六訂と同じ確認
+      プロセスを次アクションとして残す）
 
 </details>

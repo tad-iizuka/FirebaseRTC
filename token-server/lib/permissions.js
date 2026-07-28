@@ -105,4 +105,48 @@ function requireRoomPermission(operation) {
   };
 }
 
-module.exports = { ROOM_ROLES, ROOM_OPERATIONS, hasRoomPermission, requireRoomPermission };
+/**
+ * [Phase12] moderator任命/降格の「対象role」ガード。
+ *
+ * routes/rooms.js の `POST /:roomId/members/:targetUid/role`(Room内owner専用)と
+ * routes/admin.js の `PATCH /admin/rooms/:roomId/members/:targetUid/role`
+ * (サイト管理者による代行、rooms:manage権限)の2箇所で、
+ * 「owner降格禁止・BAN済み対象禁止・guest任命禁止」という全く同じチェックが
+ * 重複実装されていた(phase12-role-operation-inventory.md 論点4)ため、
+ * ここに集約する。
+ *
+ * ここで見るのは「誰が呼んでいるか」ではなく「対象(targetData)に対して
+ * このrole変更を行ってよいか」のみ。呼び出し側の権限確認(owner本人か、
+ * rooms:manage権限を持つ管理者か)は、この関数を呼ぶ側の責務のまま分離している
+ * (Room内roleとサイト管理者権限は別軸のため、ここで一緒くたにしない)。
+ *
+ * @param {{role?: string, status?: string} | null | undefined} targetData
+ *   対象メンバーのFirestoreドキュメントデータ(存在しない場合はnull/undefined)
+ * @returns {{status: number, error: string} | null}
+ *   許可されない場合は{status, error}。許可される場合はnull。
+ */
+function checkRoleAssignmentTarget(targetData) {
+  if (!targetData) {
+    return { status: 404, error: '対象のメンバーが見つかりません' };
+  }
+  if (targetData.role === 'owner') {
+    return { status: 403, error: 'オーナーのroleは変更できません' };
+  }
+  if (targetData.status === 'banned') {
+    return { status: 400, error: 'BAN済みのメンバーのroleは変更できません' };
+  }
+  // Guestは本人確認のない匿名認証由来のため、moderatorへ任命できてしまう
+  // 抜け道を塞ぐ。Member昇格の導線自体を設けない方針(5.1参照)とも整合させる。
+  if (targetData.role === 'guest') {
+    return { status: 403, error: 'Guestのroleは変更できません' };
+  }
+  return null;
+}
+
+module.exports = {
+  ROOM_ROLES,
+  ROOM_OPERATIONS,
+  hasRoomPermission,
+  requireRoomPermission,
+  checkRoleAssignmentTarget,
+};

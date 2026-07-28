@@ -20,6 +20,14 @@
  * このファイルではRoomServiceClientを直接持たず、Firestoreの talkLock を
  * 更新した後、syncRoomMetadata(roomId) を呼ぶだけにする。
  *
+ * [Phase12] 3エンドポイントとも`requireRoomPermission('talk:control')`を
+ * 追加した。`lib/permissions.js`のROOM_OPERATIONSでは元々`talk:control`を
+ * ROOM_ROLES(role不問)と定義済みだったが、実際のルートは
+ * `requireRoomMembership`止まりで`hasRoomPermission`を経由していなかった
+ * (表の定義と実際の強制経路が一致していない状態)。挙動は変わらないが、
+ * 対応表を変更すれば実装にも反映される状態に揃えた
+ * (phase12-role-operation-inventory.md参照)。
+ *
  * [将来のSTT連携を見据えて]
  * currentTalker (uid) を単一の値としてサーバーが常に把握できる状態にしておくことで、
  * 将来LiveKit EgressやサーバーサイドでのTrack購読から音声を拾ってSTTにかける際、
@@ -30,6 +38,7 @@ const express = require('express');
 const { db } = require('../lib/firebaseAdmin');
 const { syncRoomMetadata } = require('../lib/roomMetadata');
 const { requireFirebaseAuth, requireRoomMembership } = require('../middleware/requireAuth');
+const { requireRoomPermission } = require('../lib/permissions');
 
 const router = express.Router();
 
@@ -57,7 +66,12 @@ function isStale(talkLock, at) {
  * ロックが空 / 失効済み / 既に自分自身が保持中 のいずれかであれば取得成功。
  * 他人が有効に保持中なら 409。
  */
-router.post('/:roomId/talk/start', requireFirebaseAuth, requireRoomMembership, async (req, res) => {
+router.post(
+  '/:roomId/talk/start',
+  requireFirebaseAuth,
+  requireRoomMembership,
+  requireRoomPermission('talk:control'),
+  async (req, res) => {
   const uid = req.firebaseUser.uid;
   const { roomId } = req.params;
   const roomRef = db.collection('rooms').doc(roomId);
@@ -109,7 +123,12 @@ router.post('/:roomId/talk/start', requireFirebaseAuth, requireRoomMembership, a
  * POST /rooms/:roomId/talk/heartbeat
  * 保持中のロックのexpiresAtを延長する。MAX_HOLD_MSを超えていたら打ち切り(409)。
  */
-router.post('/:roomId/talk/heartbeat', requireFirebaseAuth, requireRoomMembership, async (req, res) => {
+router.post(
+  '/:roomId/talk/heartbeat',
+  requireFirebaseAuth,
+  requireRoomMembership,
+  requireRoomPermission('talk:control'),
+  async (req, res) => {
   const uid = req.firebaseUser.uid;
   const { roomId } = req.params;
   const roomRef = db.collection('rooms').doc(roomId);
@@ -151,7 +170,12 @@ router.post('/:roomId/talk/heartbeat', requireFirebaseAuth, requireRoomMembershi
  * 自分が保持しているロックのみ解放できる(他人のロックは触れない)。
  * 冪等: 既に解放済み/失効済みでも成功として扱う。
  */
-router.post('/:roomId/talk/stop', requireFirebaseAuth, requireRoomMembership, async (req, res) => {
+router.post(
+  '/:roomId/talk/stop',
+  requireFirebaseAuth,
+  requireRoomMembership,
+  requireRoomPermission('talk:control'),
+  async (req, res) => {
   const uid = req.firebaseUser.uid;
   const { roomId } = req.params;
   const roomRef = db.collection('rooms').doc(roomId);

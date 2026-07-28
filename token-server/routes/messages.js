@@ -97,11 +97,16 @@ router.post(
  *
  * requireRoomMembership を通すことで、BANされたユーザーは送信もできない
  * (routes/talk.js と同じミドルウェア共有)。
+ *
+ * [Phase12] `requireRoomPermission('chat:send')`を追加。
+ * ROOM_OPERATIONSでは元々role不問と定義済みだったが、実装は
+ * `requireRoomMembership`止まりだったため揃えた(挙動は変わらない)。
  */
 router.post(
   '/:roomId/messages',
   requireFirebaseAuth,
   requireRoomMembership,
+  requireRoomPermission('chat:send'),
   chatRateLimiter,
   async (req, res) => {
     const uid = req.firebaseUser.uid;

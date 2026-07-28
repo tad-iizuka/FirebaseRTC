@@ -2,6 +2,9 @@
 
 対象リポジトリ: `tad-iizuka/FirebaseRTC`（アップロードされたZIP、HEAD=`f6af498`, 2026-07-26）
 作成: 2026-07-26（`brushup-plan.md` 6章 次アクション item 1 に対応）
+追記: 2026-07-28（本棚卸しをもとに一元化を実装。「4. 対応表一元化に向けた
+論点まとめ」の各項目の対応状況を追記した。詳細は`brushup-plan.md`の
+該当改定を参照）
 
 > **位置づけ**: これは一元化の設計そのものではなく、まず現状を機械的に洗い出した
 > インベントリ。`token-server`側のホワイトリスト分岐、3クライアント側のUI分岐、
@@ -31,22 +34,31 @@ Room内ロール(`owner` / `moderator` / `member` / `guest`)によるチェッ�
 | `GET /:roomId/recordings`（録音履歴一覧） | 全role | `requireRoomMembership`のみ（「全参加者への開示」方針） | `recording.js:342` |
 | `GET /:roomId/recordings/:id/download-url` | `owner`,`moderator` | `requireModeratorOrOwner` | `recording.js:381` |
 | `DELETE /:roomId/recordings/:id` | `owner`,`moderator` | `requireModeratorOrOwner` | `recording.js:463` |
-| `POST /reports`（通報） | **role/membershipチェックなし** | `requireFirebaseAuth`のみ。対象roomIdのメンバーである保証すら無い | `reports.js:26` |
+| `POST /reports`（通報） | 全role | `requireFirebaseAuth`＋ハンドラ内でmembership検証（2026-07-28対応、下記参照） | `reports.js:26` |
 
 ### 気づいた点（Room内role分岐）
 
-- **`POST /reports`だけmembership非チェック**：他のroom内操作は最低でも
-  `requireRoomMembership`（アクティブなメンバーであること）を通すが、通報APIは
-  `requireFirebaseAuth`のみ。ログイン済みなら対象roomのメンバーでなくても
-  任意の`roomId`/`reportedUid`で通報できてしまう（悪用というより設計漏れの
-  可能性）。対応表整理の対象に含めるべき。
-- **`POST /rooms`（Room作成）はサーバー側でrole判定していない**：Guestに
-  Room作成をさせない制御は3クライアントとも**クライアント側のみ**で行っている
-  （後述2章）。API直叩き・改造クライアントからは匿名認証ユーザーでも
-  Room作成が可能な状態。
-- **moderator任命API(`POST /:roomId/members/:targetUid/role`)を呼ぶUIが
-  3クライアントいずれにも存在しない**（後述2章で確認）。サーバーにAPIはあるが
-  未使用。
+- ~~**`POST /reports`だけmembership非チェック**~~ → **対応済み（2026-07-28）**。
+  `routes/reports.js`のハンドラ内で対象roomIdのメンバーシップ確認・BAN済み
+  チェックを追加した(`/reports`は`/:roomId/...`形式でマウントされておらず
+  roomIdがbody経由のため、既存の`requireRoomMembership`ミドルウェアではなく
+  同等の判定を手動実装)。他のroom内操作は最低でも`requireRoomMembership`
+  （アクティブなメンバーであること）を通していたが、通報APIは従来
+  `requireFirebaseAuth`のみで、ログイン済みなら対象roomのメンバーでなくても
+  任意の`roomId`/`reportedUid`で通報できてしまっていた。
+- ~~**`POST /rooms`（Room作成）はサーバー側でrole判定していない**~~ →
+  **対応済み（`rooms.js:71-73`で確認）**。`firebase.sign_in_provider===
+  'anonymous'`を見て匿名認証ユーザーのRoom作成を403で拒否している。以前は
+  Guestに Room作成をさせない制御が3クライアントとも**クライアント側のみ**
+  だった（後述2章）ため、API直叩き・改造クライアントからは素通りしていた。
+- ~~**moderator任命API(`POST /:roomId/members/:targetUid/role`)を呼ぶUIが
+  3クライアントいずれにも存在しない**~~ → **別経路で対応済み**。PTTクライアント
+  側にUIを追加するのではなく、`routes/admin.js`に
+  `PATCH /admin/rooms/:roomId/members/:targetUid/role`（`rooms:manage`権限）を
+  新設し、admin-dashboardの`RoomDetailView.vue`から任命/降格できるようにした
+  （「room内ownerが不在・連絡不可の場合にサイト管理者が代行する」導線として
+  整理。詳細は「3. admin-dashboard」章参照）。`routes/rooms.js`側のRoom内
+  owner専用APIは引き続き未使用のまま残っている。
 
 ---
 
@@ -125,20 +137,49 @@ Room内roleとは別軸の「サイト管理者権限」(`adminUsers/{uid}.permi
 
 ## 4. 対応表一元化に向けた論点まとめ（次の設計フェーズへの引き継ぎ）
 
-1. `POST /reports` に `requireRoomMembership` を足すかどうか（現状は誰でも
-   任意roomId宛てに通報できる）
-2. `POST /rooms`（Room作成）をサーバー側でもGuest拒否するか、現状通り
-   クライアント側のみのガイドに留めるか
-3. 「Room作成」非表示の判定軸（`isAnonymous` vs `members/{uid}.role`）を
-   どちらかに統一するか、意図的に使い分けるものとして明文化するか
-4. moderator任命API（未使用）をどのクライアントかに実装するか、それとも
-   仕様として「当面UIは提供しない」と明記するか
-5. admin-dashboardに事前権限チェック（メニュー非表示等）を追加するか、
-   現状の「403で都度表示」のままでよしとするか
-6. 招待コードの可視範囲（`brushup-plan.md` 5.4で確定済みの持ち越し事項）
-7. `settings.autoRecording`のような複数権限経路を持つ操作をどう対応表上で
-   表現するか（1操作=1行では表現しきれない）
+**（2026-07-28追記）** 1〜4は実装まで完了した。5〜7は仕様判断待ちのため
+未着手のまま残している。
+
+1. ✅ **対応済み**: `POST /reports` に `requireRoomMembership` 相当の検証を
+   追加した（`routes/reports.js`。ルーターのマウント形式上ミドルウェアを
+   そのまま流用できないためハンドラ内で実装）
+2. ✅ **対応済み**: `POST /rooms`（Room作成）はサーバー側でもGuestを拒否する
+   実装がすでに存在していた（`rooms.js:71-73`、確認のみ）
+3. ⏳ **未着手（仕様判断待ち）**: 「Room作成」非表示の判定軸（`isAnonymous`
+   vs `members/{uid}.role`）は、Room未参加画面ではroleという概念自体が
+   存在しないためisAnonymousを正とする、という判断が
+   `ptt-client/src/lib/roomPermissions.ts`のコメントで明文化されていることを
+   確認した。「統一するか」ではなく「意図的な使い分け」として決着している
+   と見てよい
+4. ✅ **対応済み**: moderator任命APIについて、PTTクライアント側にUIを追加
+   するのではなく、`routes/admin.js`に`rooms:manage`権限の代行API
+   （`PATCH /admin/rooms/:roomId/members/:targetUid/role`）を新設し
+   admin-dashboardから任命/降格できる形で決着していた（確認のみ）。
+   ただしこのAPIは`routes/rooms.js`側のRoom内owner専用APIと全く同じ
+   「owner降格禁止・BAN済み対象禁止・guest任命禁止」のガードを重複実装
+   していたため、`lib/permissions.js`の`checkRoleAssignmentTarget()`に
+   集約し、両ルートから参照する形に揃えた
+5. ⏳ **未着手**: admin-dashboardに事前権限チェック（メニュー非表示等）を
+   追加するか、現状の「403で都度表示」のままでよしとするか。優先度は
+   低いと判断し今回は対応していない
+6. ⏳ **未着手**: 招待コードの可視範囲（`brushup-plan.md` 5.4で確定済みの
+   持ち越し事項）。方針判断が先に必要
+7. ⏳ **未着手**: `settings.autoRecording`のような複数権限経路を持つ操作を
+   どう対応表上で表現するか（1操作=1行では表現しきれない）。ドキュメント
+   表現の問題であり実装アクションは無い
+
+**（新たに見つかった論点8、2026-07-28）**
+`lib/permissions.js`の`ROOM_OPERATIONS`には`talk:control`/
+`nickname:update`/`org_context:read`/`chat:send`がrole不問(`ROOM_ROLES`)
+として定義済みだったが、実際の`routes/talk.js`（3エンドポイント）・
+`routes/rooms.js`（nickname/org-context）・`routes/messages.js`
+（チャット送信）は`requireRoomMembership`止まりで`hasRoomPermission`/
+`requireRoomPermission`を経由していなかった。「対応表を変更しても一部の
+操作には反映されない」事故のもとになるため、いずれも
+`requireRoomPermission('...')`を追加して表と実装の経路を一致させた
+（挙動は変わらない。`chat:attachment_upload`/`chat:attachment_read`は
+元々配線済みだったため対象外）。
 
 これらは棚卸しの過程で見つかった副産物であり、対応表そのものの設計判断は
-含んでいない。次のステップとして、上記1〜7を踏まえたうえで一元化の設計
+含んでいない。次のステップとして、上記5〜7を踏まえたうえで一元化の設計
 （対応表の保存場所・参照方法）に進むのが妥当。

@@ -45,6 +45,7 @@ const { logAdminAction } = require('../lib/auditLog');
 const { resolveOrgContext } = require('../lib/orgContext');
 const { requireFirebaseAuth, isValidRoomId } = require('../middleware/requireAuth');
 const { requireAdminPermission } = require('../middleware/requireAdmin');
+const { checkRoleAssignmentTarget } = require('../lib/permissions');
 
 const router = express.Router();
 
@@ -312,6 +313,9 @@ router.patch(
  * ガードは routes/rooms.js 側と同一の理由でこちらにも適用する
  * (owner降格による管理不能事故の防止、本人確認のない匿名認証由来の
  * guestをmoderatorに任命できる抜け道を塞ぐため)。
+ * [Phase12] このガード自体は routes/rooms.js と重複実装されていたため、
+ * lib/permissions.js の checkRoleAssignmentTarget に集約した
+ * (phase12-role-operation-inventory.md 論点4)。
  */
 router.patch(
   '/rooms/:roomId/members/:targetUid/role',
@@ -333,19 +337,14 @@ router.patch(
       const roomRef = db.collection('rooms').doc(roomId);
       const targetRef = roomRef.collection('members').doc(targetUid);
       const targetSnap = await targetRef.get();
-      if (!targetSnap.exists) {
-        return res.status(404).json({ error: '対象のメンバーが見つかりません' });
+      // [Phase12] owner降格禁止・BAN済み対象禁止・guest任命禁止のガードは
+      // routes/rooms.js のRoom内owner専用APIと共通のため
+      // lib/permissions.js の checkRoleAssignmentTarget に集約した。
+      const targetGuardError = checkRoleAssignmentTarget(targetSnap.exists ? targetSnap.data() : null);
+      if (targetGuardError) {
+        return res.status(targetGuardError.status).json({ error: targetGuardError.error });
       }
       const targetData = targetSnap.data();
-      if (targetData.role === 'owner') {
-        return res.status(403).json({ error: 'オーナーのroleは変更できません' });
-      }
-      if (targetData.status === 'banned') {
-        return res.status(400).json({ error: 'BAN済みのメンバーのroleは変更できません' });
-      }
-      if (targetData.role === 'guest') {
-        return res.status(403).json({ error: 'Guestのroleは変更できません' });
-      }
 
       await targetRef.update({ role });
 
