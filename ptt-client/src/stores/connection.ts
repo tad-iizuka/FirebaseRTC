@@ -171,10 +171,25 @@ export const useConnectionStore = defineStore('connection', () => {
       })
       .on(
         RoomEvent.TrackSubscribed,
-        (_track: RemoteTrack, _pub: RemoteTrackPublication, participant: RemoteParticipant) => {
+        (track: RemoteTrack, pub: RemoteTrackPublication, participant: RemoteParticipant) => {
           appendLog(t('log.trackSubscribed', { name: participant.name || participant.identity }))
+          // [再生]
+          // LiveKit JS SDK(v2系)は購読したリモートトラックを自動再生しないため、
+          // ここで明示的にDOMの<audio>要素へattachしないと音が鳴らない。
+          // keep-aliveトラック(Track.Source.Unknown、Phase9)はマイク音声ではないため
+          // 対象外とし、実際の発話(Track.Source.Microphone)のみattachする。
+          if (track.kind === Track.Kind.Audio && pub.source === Track.Source.Microphone) {
+            const el = track.attach()
+            el.dataset.livekitParticipant = participant.identity
+            el.style.display = 'none'
+            document.body.appendChild(el)
+          }
         },
       )
+      .on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack) => {
+        // attach()で生成された<audio>要素を確実に破棄する(溜まり続けるのを防ぐ)。
+        track.detach().forEach((el) => el.remove())
+      })
       .on(RoomEvent.TrackMuted, (pub: TrackPublication, participant: Participant) => {
         if (pub.kind === Track.Kind.Audio) {
           const info = participants.value.get(participant.identity)
@@ -329,6 +344,9 @@ export const useConnectionStore = defineStore('connection', () => {
       await room.disconnect()
       room = null
     }
+    // [安全策] room.disconnect()のタイミングによってはTrackUnsubscribedが
+    // 発火しないケースがあるため、attach()で生成した<audio>要素を念のため掃除する。
+    document.querySelectorAll('audio[data-livekit-participant]').forEach((el) => el.remove())
     participants.value = new Map()
     isSending.value = false
     currentTalkerUid.value = null
