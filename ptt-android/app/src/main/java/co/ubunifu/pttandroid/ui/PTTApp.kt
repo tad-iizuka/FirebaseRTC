@@ -29,6 +29,7 @@ package co.ubunifu.pttandroid.ui
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -67,6 +68,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -106,6 +108,9 @@ import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
 
 private val Mono = FontFamily.Monospace
+
+/** [不具合調査用] ファイル選択画面から戻ると在室中のルームが失われる件のログタグ。 */
+private const val TAG = "PTTApp"
 
 /** [Phase16] ACTION_OPEN_DOCUMENTで選択されたUriの表示名を解決する(送信前の確認行用)。 */
 private fun queryDisplayName(context: android.content.Context, uri: Uri): String {
@@ -187,8 +192,17 @@ fun PTTApp(
     var joinRoomId by remember { mutableStateOf("") }
     var joinInviteCode by remember { mutableStateOf("") }
     var chatInput by remember { mutableStateOf("") }
-    var activeRoomId by remember { mutableStateOf<String?>(null) }
-    var currentInviteCode by remember { mutableStateOf<String?>(null) }
+    // [不具合調査・修正] ファイル選択画面から戻るとルーム内ではなくルーム選択画面に
+    // 戻ってしまう不具合の原因調査用。activeRoomId/currentInviteCodeはこれまで
+    // 素の remember() だったため、設定変更(configChangesで吸収されない要因)や
+    // ドキュメントピッカーのような別Activity表示中にシステムがこのActivityの
+    // プロセスを破棄した場合(「アクティビティを保持しない」開発者オプション有効時や
+    // 低メモリのエミュレータでの回収)、savedInstanceStateからの再生成時に
+    // Compose側の状態が初期値(null)へ戻ってしまい、結果としてactiveRoomId==null＝
+    // ルーム選択画面が描画される。rememberSaveable化してBundleへ保存されるようにし、
+    // 再生成後も同じルームに在室中だったことを復元できるようにする。
+    var activeRoomId by rememberSaveable { mutableStateOf<String?>(null) }
+    var currentInviteCode by rememberSaveable { mutableStateOf<String?>(null) }
     // [BAN対応] BANボタン押下時の確認ダイアログの対象
     var banTarget by remember { mutableStateOf<ParticipantInfo?>(null) }
     // [BAN対応] 自分がBANされてルームを追い出された直後に表示する通知文言
@@ -218,8 +232,16 @@ fun PTTApp(
     // back-stack遷移になるようにする。
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
-    ) { uri -> if (uri != null) pendingAttachmentUri = uri }
+    ) { uri ->
+        // [不具合調査用] ここに到達した時点でactiveRoomIdが既にnullになっていれば、
+        // 「ピッカー表示中にComposeの状態(≒Activity)が失われていた」ことの
+        // 直接証拠になる。pickerからの復帰そのものは正常でも、戻ってきた瞬間には
+        // 既に別の(状態が空の)コンポジションになっている、というケースを切り分ける。
+        Log.d(TAG, "filePickerLauncher result: uri=$uri activeRoomIdAtResult=$activeRoomId")
+        if (uri != null) pendingAttachmentUri = uri
+    }
     fun launchAttachmentPicker() {
+        Log.d(TAG, "launchAttachmentPicker: activeRoomIdBeforeLaunch=$activeRoomId")
         filePickerLauncher.launch(PTTChatStore.ALLOWED_MIME_TYPES)
     }
 
@@ -231,11 +253,31 @@ fun PTTApp(
         savedRoomsStore.load(currentUser?.uid)
     }
 
-    fun enterRoom(roomId: String) {
-        banNotice = null
-        activeRoomId = roomId
+    // [不具合調査・修正] enterRoom()はこれまでactiveRoomIdの設定と各Storeの
+    // start()/connect()呼び出しを同時に行っていたが、これだと「ユーザーが
+    // 明示的に参加ボタンを押した瞬間」しか各Storeが起動しない。activeRoomIdを
+    // rememberSaveableにしてActivity再生成後も値が復元されるようにしても、
+    // chatStore/banStore/badgesStoreはMainActivity側でremember{}生成される
+    // (=再生成のたびに作り直される)新しいインスタンスのため、start()を
+    // 呼び直さない限り購読が始まらずルーム画面が実質的に機能しない。
+    // activeRoomId(復元された値を含む)を購読するLaunchedEffectに一本化し、
+    // 「明示的な参加」と「状態復元後の再開」の両方をここでカバーする。
+    // connectionManager.connect()自体は`room != null`なら即returnする
+    // (PTTConnectionManager.kt)ため、既にPTTForegroundService経由で接続済みの
+    // 場合(=Activityだけが再生成された通常のケース)に呼んでも安全。
+    LaunchedEffect(activeRoomId, currentUser?.uid) {
+        val roomId = activeRoomId ?: return@LaunchedEffect
+        val uid = currentUser?.uid
+        if (uid == null) {
+            // authManagerがサインイン状態を復元し切る前(Activity再生成直後の
+            // 数フレーム)は uid が一時的にnullになりうる。currentUser?.uid を
+            // keyに含めているため、復元完了時に自動的に再実行される。
+            Log.d(TAG, "resume-room-effect: uid not ready yet, waiting (roomId=$roomId)")
+            return@LaunchedEffect
+        }
+        Log.d(TAG, "resume-room-effect: starting stores for roomId=$roomId uid=$uid")
         chatStore.start(roomId)
-        banStore.start(roomId, currentUser?.uid ?: "")
+        banStore.start(roomId, uid)
         // [Phase13・次アクションitem3] 参加者一覧のバッジ表示(ポーリング)。
         badgesStore.start(scope, tokenServerUrl, roomId) { authManager.fetchIdToken() }
         connectionManager.connect(
@@ -246,7 +288,14 @@ fun PTTApp(
         )
     }
 
+    fun enterRoom(roomId: String) {
+        Log.d(TAG, "enterRoom: roomId=$roomId")
+        banNotice = null
+        activeRoomId = roomId
+    }
+
     fun leaveRoom() {
+        Log.d(TAG, "leaveRoom: activeRoomId=$activeRoomId")
         if (status !is ConnectionStatus.Disconnected) connectionManager.disconnect()
         chatStore.stop()
         banStore.stop()

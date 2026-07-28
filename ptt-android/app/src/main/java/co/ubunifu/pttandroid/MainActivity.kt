@@ -19,6 +19,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -77,6 +78,17 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // [不具合調査用] ファイル選択画面から戻るとルーム選択画面まで戻ってしまう件。
+        // savedInstanceStateがnullでない=システムがこのActivity(≒プロセス)を一度
+        // 破棄して再生成したことを意味する。identityHashCodeも合わせて出すことで、
+        // logcat上で「同一インスタンスの通常のonCreate再呼び出し」ではなく
+        // 「別インスタンスとして新規に生成された」ことを区別できるようにする。
+        Log.d(
+            TAG,
+            "onCreate: this=${System.identityHashCode(this)} " +
+                "savedInstanceState=${if (savedInstanceState != null) "present(=再生成)" else "null(=初回起動)"}",
+        )
 
         authManager = PTTAuthManager(
             context = applicationContext,
@@ -160,6 +172,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        Log.d(TAG, "onStart: this=${System.identityHashCode(this)}")
         // [Phase9] PTTForegroundServiceへbindし、Compose側へconnectionManagerを渡す。
         // startService()は既にonCreate()で呼び済みのため、ここでunbindしても
         // (=Activityがバックグラウンドに回っても)Serviceおよび接続は生き続ける。
@@ -190,11 +203,47 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
-        // bindのみ解除する(unbindServiceはstartService()で上がっているServiceそのものは
-        // 破棄しない。「起動側の参照」が残っているため、Activity不在中もPTTForegroundService
-        // ―ひいてはPTTConnectionManagerの接続―は維持される)。
+        Log.d(TAG, "onStop: this=${System.identityHashCode(this)} isFinishing=$isFinishing isChangingConfigurations=$isChangingConfigurations")
+        // [不具合調査・原因確定 2026-07-28、二度目の実機検証で判明]
+        // 前回のコメント(rememberSaveable化で十分、という判断)は誤りだった。
+        // 実機ログ+スクリーンショットで、ヘッダーの`channelLabel`(status.Connected時に
+        // "room: xxx"を表示。PTTConnectionManager側は生存しているため接続は維持されたまま)が
+        // 表示されているにもかかわらず、画面本体はactiveRoomId==nullの
+        // ルーム選択画面になっている状態を確認した。つまりrememberSaveableにしても
+        // activeRoomIdはリセットされ続けている。
+        //
+        // rememberSaveableが値を復元できるのは、Activity本体が実際に
+        // onSaveInstanceState→(再生成時に)onCreate(savedInstanceState)という
+        // 保存・復元サイクルを通った場合が前提。今回のようにActivity自体は
+        // 破棄されず、`if (connectionManager != null) { PTTApp(...) }` という
+        // 条件分岐だけで PTTApp() の合成部分木が着脱される場合、この着脱は
+        // 上記の保存・復元サイクルを経由しないため、rememberSaveableで登録した
+        // 値も部分木の消滅と一緒に失われる(rememberSaveableStateHolder等の
+        // 専用APIを使わない限り、単純なif分岐での着脱までは救えない)。
+        //
+        // 従って根本原因は「connectionManagerをnullにすることでPTTApp()自体を
+        // 毎回丸ごと着脱させていた、このconnectionManagerState.value = null」
+        // そのものだった。これを廃止し、bindServiceの参照だけを解除して
+        // Compose側が保持するconnectionManagerの参照はそのまま残す。
+        // PTTForegroundServiceは同一プロセス内で動くstartService()由来の
+        // フォアグラウンドサービスであり、Activity不在中もプロセスごと
+        // 生存し続けるため、unbind後もこのKotlinオブジェクト参照へメソッド呼び出しを
+        // 行うこと自体は安全(AIDL越しの別プロセスBinderのように無効化されるわけではない)。
+        // onStart()で再bindした際は同一インスタンスが返るだけであり、実質的な変化はない。
         foregroundServiceConnection?.let { unbindService(it) }
         foregroundServiceConnection = null
-        connectionManagerState.value = null
+        // [根本修正] ここで connectionManagerState.value = null していたのが原因。廃止。
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // [不具合調査用] ファイル選択画面が前面にある間にこれが呼ばれていれば、
+        // 「戻る」で見えている画面はこのインスタンスではなく、後続のonCreate()で
+        // 新規生成された(=状態が空の)別インスタンスであることが確定する。
+        Log.d(TAG, "onDestroy: this=${System.identityHashCode(this)} isFinishing=$isFinishing")
+    }
+
+    companion object {
+        private const val TAG = "MainActivity"
     }
 }
