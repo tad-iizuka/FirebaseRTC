@@ -26,6 +26,9 @@
 import SwiftUI
 import Foundation
 import FirebaseAuth
+import PhotosUI
+import UniformTypeIdentifiers
+import UIKit
 
 struct ContentView: View {
 
@@ -68,6 +71,17 @@ struct ContentView: View {
     /// [Phase10: Guestロール] ニックネーム編集中かどうか、および編集中のテキスト。
     @State private var isEditingNickname = false
     @State private var nicknameDraft: String = ""
+
+    // [Phase16: チャット添付ファイル] Web版ChatPanel.vueのpendingFileの移植。
+    // 選択直後には送信せず、送信ボタンが押されるまでここに保持しておく。
+    @State private var chatPendingAttachmentData: Data?
+    @State private var chatPendingAttachmentFileName: String?
+    @State private var chatPendingAttachmentContentType: String?
+    @State private var showChatPhotoPicker = false
+    @State private var showChatFileImporter = false
+    @State private var chatPhotoPickerItem: PhotosPickerItem?
+    /// サムネイル(画像)の表示用にダウンロード済みのUIImageをmessageIdごとにキャッシュする。
+    @State private var chatThumbnailImages: [String: UIImage] = [:]
 
     var body: some View {
         Group {
@@ -741,6 +755,10 @@ struct ContentView: View {
         joinRoomId = ""
         joinInviteCode = ""
         chatInputText = ""
+        chatPendingAttachmentData = nil
+        chatPendingAttachmentFileName = nil
+        chatPendingAttachmentContentType = nil
+        chatThumbnailImages = [:]
     }
 
     /// [BAN対応] BAN確認ダイアログで「BANする」を選んだ際に呼ばれる。
@@ -884,11 +902,15 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Chat (Phase5)
+    // MARK: - Chat (Phase5 + Phase16添付ファイル)
 
     /// テキストチャット。書き込みはtoken-server経由、配信・履歴はFirestoreの
     /// リアルタイムリスナー(PTTChatStore)に任せる。BANされた瞬間、
     /// firestore.rules側で読み取り自体もできなくなる。
+    ///
+    /// [Phase16] Web版(ptt-client/src/components/ChatPanel.vue)の移植。
+    /// 画像/動画/PDFの添付に対応。選択直後には送信せず、送信ボタンが
+    /// 押されるまで`chatPendingAttachment*`に保持しておく(Web版のpendingFileと同じ)。
     private var chatSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("チャット")
@@ -896,16 +918,9 @@ struct ContentView: View {
                 .foregroundColor(.pttMuted)
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 6) {
                     ForEach(chat.messages) { message in
-                        Text("\(message.displayName): \(message.text)")
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundColor(
-                                message.uid == auth.currentUser?.uid
-                                    ? .pttLive
-                                    : .pttText
-                            )
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        chatMessageRow(message)
                     }
                 }
             }
@@ -918,20 +933,64 @@ struct ContentView: View {
                     .foregroundColor(.pttDanger)
             }
 
-            HStack(spacing: 8) {
-                TextField("メッセージを入力", text: $chatInputText)
-                    .font(.system(size: 14, design: .monospaced))
-                    .padding(8)
-                    .background(.pttPanel.opacity(0.6))
-                    .onSubmit { sendChatMessage() }
+            if let pendingFileName = chatPendingAttachmentFileName {
+                HStack(spacing: 8) {
+                    Text("📎")
+                    Text(pendingFileName)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.pttMuted)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer()
+                    Button("送信") { sendPendingChatAttachment() }
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundColor(.pttAccent)
+                    Button("キャンセル") { cancelPendingChatAttachment() }
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundColor(.pttMuted)
+                }
+                .padding(8)
+                .background(.pttPanel.opacity(0.6))
+            } else {
+                HStack(spacing: 8) {
+                    Menu {
+                        Button("写真・動画を選択") { showChatPhotoPicker = true }
+                        Button("PDFを選択") { showChatFileImporter = true }
+                    } label: {
+                        Text("📎")
+                            .font(.system(size: 16))
+                            .frame(width: 32, height: 32)
+                            .background(.pttPanel.opacity(0.6))
+                    }
 
-                Button("送信") { sendChatMessage() }
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundColor(.pttAccent)
-                    .disabled(chatInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    TextField("メッセージを入力", text: $chatInputText)
+                        .font(.system(size: 14, design: .monospaced))
+                        .padding(8)
+                        .background(.pttPanel.opacity(0.6))
+                        .onSubmit { sendChatMessage() }
+
+                    Button("送信") { sendChatMessage() }
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundColor(.pttAccent)
+                        .disabled(chatInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
             }
         }
         .padding(14)
+        .photosPicker(
+            isPresented: $showChatPhotoPicker,
+            selection: $chatPhotoPickerItem,
+            matching: .any(of: [.images, .videos])
+        )
+        .onChange(of: chatPhotoPickerItem) { _, newItem in
+            loadPickedChatPhoto(newItem)
+        }
+        .fileImporter(
+            isPresented: $showChatFileImporter,
+            allowedContentTypes: [.pdf]
+        ) { result in
+            handlePickedChatFile(result)
+        }
     }
 
     private func sendChatMessage() {
@@ -949,6 +1008,161 @@ struct ContentView: View {
                 chatInputText = text
             }
         }
+    }
+
+    /// [Phase16] チャットメッセージ1件分の表示行。テキストに加えて添付があれば
+    /// 画像サムネイル、または動画/PDFのファイル名バッジを表示する。
+    private func chatMessageRow(_ message: ChatMessage) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("\(message.displayName): \(message.text)")
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(
+                    message.uid == auth.currentUser?.uid
+                        ? .pttLive
+                        : .pttText
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let attachment = message.attachment, let messageId = message.id {
+                chatAttachmentView(attachment: attachment, messageId: messageId)
+            }
+        }
+    }
+
+    /// [Phase16] 添付ファイルの表示。画像はサムネイルを取得して表示、
+    /// タップすると`getAttachmentUrl`で発行した本体の署名付きURLをSafariで開く
+    /// (Web版がwindow.openで新規タブに開くのと同じ扱い)。
+    private func chatAttachmentView(attachment: ChatAttachment, messageId: String) -> some View {
+        Button {
+            openChatAttachment(messageId: messageId)
+        } label: {
+            if attachment.kind == .image {
+                if let uiImage = chatThumbnailImages[messageId] {
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxHeight: 120)
+                        .cornerRadius(4)
+                } else {
+                    Text("[読み込み中...]")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.pttMuted)
+                }
+            } else {
+                HStack(spacing: 6) {
+                    Text(attachment.kind == .video ? "🎬" : "📄")
+                    Text(attachment.fileName)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.pttMuted)
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(.pttPanel)
+                .cornerRadius(4)
+            }
+        }
+        .buttonStyle(.plain)
+        .task(id: messageId) {
+            guard attachment.kind == .image, chatThumbnailImages[messageId] == nil else { return }
+            await loadChatThumbnail(messageId: messageId)
+        }
+    }
+
+    /// [Phase16] サムネイルの短期署名付きURLを発行し、画像本体をダウンロードして
+    /// キャッシュする。失敗時は汎用の「読み込み中」表示のまま残す
+    /// (Web版ChatPanel.vueと同じくベストエフォート)。
+    private func loadChatThumbnail(messageId: String) async {
+        guard let roomId = activeRoomId else { return }
+        do {
+            let idToken = try await auth.fetchIDToken()
+            let urlString = try await chat.getThumbnailURL(
+                tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId, messageId: messageId
+            )
+            guard let url = URL(string: urlString) else { return }
+            let (data, _) = try await URLSession.shared.data(from: url)
+            if let image = UIImage(data: data) {
+                chatThumbnailImages[messageId] = image
+            }
+        } catch {
+            // 失敗時は汎用表示のままにする(errorMessageは送受信本体のみに使う)
+        }
+    }
+
+    /// [Phase16] 添付ファイル本体の短期署名付きURLを発行し、外部(Safari等)で開く。
+    private func openChatAttachment(messageId: String) {
+        guard let roomId = activeRoomId else { return }
+        Task {
+            do {
+                let idToken = try await auth.fetchIDToken()
+                let urlString = try await chat.getAttachmentURL(
+                    tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId, messageId: messageId
+                )
+                if let url = URL(string: urlString) {
+                    await UIApplication.shared.open(url)
+                }
+            } catch {
+                // エラーはchat.errorMessage経由で表示される想定
+            }
+        }
+    }
+
+    /// [Phase16] PhotosPickerで写真/動画を選択した直後。すぐには送信せず、
+    /// pendingAttachmentとして保持する(Web版のonFileSelectedに相当)。
+    private func loadPickedChatPhoto(_ item: PhotosPickerItem?) {
+        guard let item else { return }
+        Task {
+            defer { chatPhotoPickerItem = nil }
+            do {
+                guard let data = try await item.loadTransferable(type: Data.self) else { return }
+                let utType = item.supportedContentTypes.first
+                let mimeType = utType?.preferredMIMEType ?? "application/octet-stream"
+                let ext = utType?.preferredFilenameExtension ?? "dat"
+                chatPendingAttachmentData = data
+                chatPendingAttachmentFileName = "photo_\(Int(Date().timeIntervalSince1970)).\(ext)"
+                chatPendingAttachmentContentType = mimeType
+            } catch {
+                // 選択キャンセル・読み込み失敗時は何もしない
+            }
+        }
+    }
+
+    /// [Phase16] ファイルアプリからPDFを選択した直後。同じくpendingAttachmentとして保持する。
+    private func handlePickedChatFile(_ result: Result<URL, Error>) {
+        guard case let .success(url) = result else { return }
+        let didAccess = url.startAccessingSecurityScopedResource()
+        defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url) else { return }
+        chatPendingAttachmentData = data
+        chatPendingAttachmentFileName = url.lastPathComponent
+        chatPendingAttachmentContentType = "application/pdf"
+    }
+
+    private func sendPendingChatAttachment() {
+        guard let data = chatPendingAttachmentData,
+              let fileName = chatPendingAttachmentFileName,
+              let contentType = chatPendingAttachmentContentType,
+              let roomId = activeRoomId else { return }
+        chatPendingAttachmentData = nil
+        chatPendingAttachmentFileName = nil
+        chatPendingAttachmentContentType = nil
+        Task {
+            do {
+                let idToken = try await auth.fetchIDToken()
+                try await chat.sendAttachment(
+                    tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId,
+                    fileData: data, fileName: fileName, contentType: contentType
+                )
+            } catch {
+                // chat.errorMessage に理由がセットされているのでUIには既に反映済み
+            }
+        }
+    }
+
+    private func cancelPendingChatAttachment() {
+        chatPendingAttachmentData = nil
+        chatPendingAttachmentFileName = nil
+        chatPendingAttachmentContentType = nil
     }
 
     // MARK: - Log
