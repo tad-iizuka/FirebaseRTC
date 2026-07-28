@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
-import { useI18n } from 'vue-i18n'
+import { onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useSavedRoomsStore } from '@/stores/savedRooms'
 import { useConnectionStore } from '@/stores/connection'
@@ -9,17 +8,10 @@ import AppHeader from '@/components/AppHeader.vue'
 import AuthView from '@/views/AuthView.vue'
 import OnboardingFlow from '@/components/OnboardingFlow.vue'
 
-const { t } = useI18n()
 const auth = useAuthStore()
 const savedRooms = useSavedRoomsStore()
 const connection = useConnectionStore()
 const onboarding = useOnboardingStore()
-
-const channelLabel = computed(() =>
-	connection.statusKind === 'connected' || connection.statusKind === 'reconnecting'
-		? `room: ${connection.roomName}`
-		: t('common.notConnected'),
-)
 
 // uidが確定/変化するたびに、そのユーザーのルーム履歴を読み直す
 // (サインアウト/別アカウントでの汚染を防ぐため、savedRooms.load()内でキーを切り替える)。
@@ -44,7 +36,8 @@ async function handleSignOut() {
 			<template v-else>
 				<AppHeader
 					:user-name="auth.currentUser?.displayName ?? auth.currentUser?.email"
-					:channel-label="channelLabel"
+					:connection-status-kind="connection.statusKind"
+					:room-id="connection.roomName"
 					@sign-out="handleSignOut"
 				/>
 				<AuthView v-if="!auth.currentUser" />

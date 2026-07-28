@@ -1,16 +1,19 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
+import ConnectionStatusIcon from '@/components/ConnectionStatusIcon.vue'
+import type { ConnectionStatusKind } from '@/stores/connection'
 
 const { t } = useI18n()
 defineProps<{
   userName?: string | null
-  channelLabel: string
+  connectionStatusKind: ConnectionStatusKind
+  roomId: string | null
 }>()
 const emit = defineEmits<{ signOut: [] }>()
 </script>
 
 <template>
-  <div class="flex items-baseline justify-between border-b border-border px-5 py-3.5">
+  <div class="flex items-center justify-between border-b border-border px-5 py-3.5">
     <span class="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">{{ t('header.appName') }}</span>
     <div v-if="userName" class="flex items-center gap-2">
       <span class="max-w-[10rem] truncate text-xs">{{ userName }}</span>
@@ -22,6 +25,6 @@ const emit = defineEmits<{ signOut: [] }>()
         {{ t('header.signOut') }}
       </button>
     </div>
-    <span class="text-[13px]">{{ channelLabel }}</span>
+    <ConnectionStatusIcon :status-kind="connectionStatusKind" :room-id="roomId" />
   </div>
 </template>

@@ -8,7 +8,8 @@
     "confirm": "Confirm",
     "remove": "Remove",
     "orDivider": "— or —",
-    "notConnected": "Not connected"
+    "notConnected": "Not connected",
+    "connectedToRoom": "room: {roomId}"
   },
   "header": {
     "appName": "PTT Client",

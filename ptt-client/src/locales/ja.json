@@ -8,7 +8,8 @@
     "confirm": "実行する",
     "remove": "削除",
     "orDivider": "— または —",
-    "notConnected": "未接続"
+    "notConnected": "未接続",
+    "connectedToRoom": "room: {roomId}"
   },
   "header": {
     "appName": "PTT Client",
