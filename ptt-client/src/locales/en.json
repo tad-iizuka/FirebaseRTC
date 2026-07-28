@@ -9,7 +9,9 @@
     "remove": "Remove",
     "orDivider": "— or —",
     "notConnected": "Not connected",
-    "connectedToRoom": "room: {roomId}"
+    "connectedToRoom": "room: {roomId}",
+    "loggedInAs": "Logged in as {name}",
+    "notLoggedIn": "Not logged in"
   },
   "header": {
     "appName": "PTT Client",
