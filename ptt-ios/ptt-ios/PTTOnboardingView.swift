@@ -27,8 +27,8 @@ private let pttOnboardingSlides: [PTTOnboardingSlide] = [
     ),
     PTTOnboardingSlide(
         systemImage: "door.left.hand.open",
-        title: "ルームを作成・参加",
-        description: "ルームは招待制です。自分でルームを作成するか、招待コードを受け取って参加しましょう。"
+        title: "招待コードでルームに参加",
+        description: "ルームは招待制です。管理者から受け取った招待コードを使って参加しましょう。"
     ),
     PTTOnboardingSlide(
         systemImage: "mic.fill",

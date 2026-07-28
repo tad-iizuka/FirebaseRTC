@@ -21,7 +21,6 @@
     <string name="common_get_started">はじめる</string>
     <string name="common_cancel">キャンセル</string>
     <string name="common_remove">削除</string>
-    <string name="common_or_divider">— または —</string>
     <string name="common_not_connected">未接続</string>
 
     <!-- header -->
@@ -41,22 +40,23 @@
     <string name="onboarding_start">はじめる</string>
     <string name="onboarding_slide1_title">PTT Client へようこそ</string>
     <string name="onboarding_slide1_description">トランシーバーのように、押している間だけ声が届くシンプルな音声チャットです。</string>
-    <string name="onboarding_slide2_title">ルームを作成・参加</string>
-    <string name="onboarding_slide2_description">ルームは招待制です。自分でルームを作成するか、招待コードを受け取って参加しましょう。</string>
+    <string name="onboarding_slide2_title">招待コードでルームに参加</string>
+    <string name="onboarding_slide2_description">ルームは招待制です。管理者から受け取った招待コードを使って参加しましょう。</string>
     <string name="onboarding_slide3_title">ボタンを押して話す</string>
     <string name="onboarding_slide3_description">中央のPTTボタンを押している間だけ音声が送信されます。誰かが話している間は自動的に送話が待機状態になります。</string>
     <string name="onboarding_slide4_title">チャットと参加者管理</string>
     <string name="onboarding_slide4_description">テキストチャットや参加者一覧に加え、モデレーター向けのBAN・通報機能も使えます。</string>
 
     <!-- roomSelect -->
-    <string name="room_select_create_room">新しいルームを作成する</string>
+    <!-- [ルーム作成のadmin-dashboard移管] ルーム作成はadmin-dashboard専用のAPIに一本化し、
+         ptt-androidは常に既存ルームへの参加(招待コードでのjoin)のみを行う
+         (Web版roomSelect.joinOnlyHintと同じ)。 -->
+    <string name="room_select_join_only_hint">ルームの作成は管理者が行います。招待コードを受け取ったら、下記から参加してください。</string>
     <string name="room_select_room_id_label">ルームID</string>
     <string name="room_select_invite_code_label">招待コード</string>
     <string name="room_select_join_room">招待コードで参加する</string>
     <string name="room_select_recent_rooms">— 最近使ったルーム —</string>
-    <string name="room_select_created_room_label">自分が作成したルーム</string>
     <string name="room_select_joined_room_label">招待コードで参加したルーム</string>
-    <string name="room_select_guest_cannot_create">ゲストはルームを作成できません。招待コードで既存のルームに参加してください。</string>
 
     <!-- room -->
     <string name="room_leave_room">ルームを退出する</string>

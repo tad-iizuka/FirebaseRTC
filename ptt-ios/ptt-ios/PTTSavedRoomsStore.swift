@@ -22,7 +22,8 @@ final class PTTSavedRoomsStore: ObservableObject {
         var id: String { roomId }
         let roomId: String
         var label: String
-        /// 自分がowner(作成者)の場合のみ非nil。再入室時に招待コードを再表示するために保持する。
+        /// 参加時に入力した招待コード。ルーム作成はadmin-dashboardへ移管済みのため
+        /// 表示用途はなく、履歴データとして保持しているのみ。
         var inviteCode: String?
         var lastUsedAt: Date
     }

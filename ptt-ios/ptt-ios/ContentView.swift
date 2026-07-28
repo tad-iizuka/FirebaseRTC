@@ -3,12 +3,20 @@
 //  ptt-ios
 //
 //  [LiveKit移行 + Firebase Auth対応 + 招待制ルーム対応 + Phase5テキストチャット + 送話ロック連携 + オンボーディング]
-//  Web版(ptt-client/public/index.html)と同等のUI:
-//  Googleサインイン → ルーム作成/招待コード参加 → PTTボタン → 送話中リスト → チャット → ログ
+//  Web版(ptt-client/src/views)と同等のUI:
+//  Googleサインイン → 招待コード参加 → PTTボタン → 送話中リスト → チャット → ログ
 //  クライアントIDの手入力は廃止(token-serverは常にFirebase ID Token由来のuidを
 //  identityとして使うため、クライアントが自己申告する値は元々使われていなかった)。
 //  ルームIDの直接入力による接続も廃止し、token-serverのinvite_only設計
-//  (POST /rooms でルーム作成、POST /rooms/:roomId/join で招待コード検証)に合わせた。
+//  (POST /rooms/:roomId/join で招待コード検証)に合わせた。
+//
+//  [ルーム作成のadmin-dashboard移管]
+//  以前はここにルーム作成ボタン(作成者への招待コード払い出し表示付き)があったが、
+//  ルーム作成はadmin-dashboard専用のPOST /admin/rooms(rooms:create権限)へ
+//  一本化した。ptt-iosは常に既存ルームへの参加(招待コードでのjoin)のみを行う
+//  (Web版ptt-client/src/views/RoomSelectView.vueと同じ設計。brushup-plan.md参照)。
+//  これに伴い、招待コードの表示(inviteBox)も廃止した。代わりにadmin-dashboardで
+//  設定できるルーム名(name)を表示する。
 //
 //  [送話ロック連携]
 //  PTTConnectionManager が token-server の /talk/start・/talk/heartbeat・/talk/stop
@@ -53,10 +61,10 @@ struct ContentView: View {
     @State private var joinInviteCode: String = ""
     @State private var chatInputText: String = ""
 
-    /// 実際に作成/参加してLiveKit接続に進んだルームID。nilの間はルーム選択画面を表示する。
+    /// 実際に参加してLiveKit接続に進んだルームID。nilの間はルーム選択画面を表示する。
     @State private var activeRoomId: String?
-    /// 自分がルーム作成者(owner)の場合のみセットされる、参加者への共有用招待コード。
-    @State private var currentInviteCode: String?
+    /// [ルーム名] admin-dashboardで設定されたルーム名。未設定 or 未取得の場合はnull。
+    @State private var currentRoomName: String?
     /// [BAN対応] BANボタン押下時の確認ダイアログの対象。
     @State private var banTarget: PTTParticipantInfo?
     /// [BAN対応] 自分がBANされてルームを追い出された直後に表示する通知文言。
@@ -95,10 +103,10 @@ struct ContentView: View {
                         if auth.currentUser == nil {
                             authSection
                         } else if activeRoomId != nil {
+                            roomNameHeader
                             statusRow
                             guestStatusSection
                             recordingSection
-                            inviteBox
                             voiceSection
                             talkArea
                             talkerSection
@@ -303,9 +311,9 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Room selection (作成 / 招待コードで参加)
+    // MARK: - Room selection (招待コードで参加)
 
-    /// サインイン済み・未入室時の画面。Web版のroomSectionに相当。
+    /// サインイン済み・未入室時の画面。Web版のRoomSelectView.vueに相当。
     private var roomSelectionSection: some View {
         VStack(spacing: 10) {
             if let banNotice {
@@ -318,39 +326,15 @@ struct ContentView: View {
             field(label: "トークンサーバーURL", text: $tokenServerURL)
             field(label: "LiveKit URL (wss://)", text: $livekitURL)
 
-            // [Phase10: Guestロール] 匿名認証ユーザーがルームを作成すると、
-            // 本人確認のできないownerが永続的に残ってしまう(Guestの「一時参加」という
-            // 設計思想と矛盾する)ため、Guestには「ルームを作成」自体を見せない。
-            // [十四訂で訂正] token-server側(POST /rooms)も現在はGuestを403で拒否する
-            // (routes/rooms.js)。ここでのUI非表示はAPI側の強制とは別に、
-            // Guestが操作を試みる前に選択肢自体を見せないためのもの。
-            //
-            // [Phase12・十五訂] ここは role ではなく isAnonymous(Firebase Auth)で判定する。
-            // 未入室(=どのRoomのmembersドキュメントも持たない)画面のため、role(Room内の
-            // 役割)という概念自体がまだ存在しない。role によるGuest判定は入室後の
-            // guestStatusSection側で行っており、この2つは統一すべき同一軸ではなく
-            // 意図的に異なるスコープ(brushup-plan.md Phase12参照)。
-            if auth.currentUser?.isAnonymous != true {
-                Button(action: handleCreateRoom) {
-                    Text(roomManager.isWorking ? String(localized: "作成中...") : String(localized: "新しいルームを作成する"))
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 9)
-                }
-                .buttonStyle(.plain)
-                .overlay(RoundedRectangle(cornerRadius: 2).stroke(Color.pttAccent, lineWidth: 1))
-                .foregroundColor(.pttAccent)
-                .disabled(roomManager.isWorking)
-
-                Text("— または —")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(.pttMuted)
-                    .frame(maxWidth: .infinity)
-            } else {
-                Text("ゲストはルームを作成できません。招待コードで既存のルームに参加してください。")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(.pttMuted)
-            }
+            // [ルーム作成のadmin-dashboard移管] ルーム作成はadmin-dashboard専用の
+            // POST /admin/rooms(rooms:create権限)へ一本化した。ptt-iosは常に
+            // 既存ルームへの招待コード参加のみを行う画面になっている
+            // (Web版roomSelect.joinOnlyHintと同じ文言。brushup-plan.md参照)。
+            // これにより、role/isAnonymous(Guest)によるボタン出し分けも不要になった。
+            Text("ルームの作成は管理者が行います。招待コードを受け取ったら、下記から参加してください。")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.pttMuted)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
             HStack(spacing: 10) {
                 field(label: "ルームID", text: $joinRoomId, placeholder: "招待された側が入力")
@@ -615,28 +599,18 @@ struct ContentView: View {
         }
     }
 
-    /// 招待コード表示。自分がowner(ルーム作成者)の場合のみ表示される。
+    /// [ルーム名] admin-dashboardで設定された名前。未設定の場合は表示しない
+    /// (roomIdはstatusRow側で常に表示されるため、名前は補助的な表示)。
+    /// Web版RoomView.vueの`<h1 v-if="roomStore.currentRoomName">`に相当。
     @ViewBuilder
-    private var inviteBox: some View {
-        if let code = currentInviteCode, let roomId = activeRoomId {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("このルームの招待コード(参加者に共有してください):")
-                    .font(.system(size: 12, design: .monospaced))
-                Text(code)
-                    .font(.system(size: 18, weight: .bold, design: .monospaced))
-                    .foregroundColor(.pttAccent)
-                Text(String(format: NSLocalizedString("ルームID: %@", comment: "Room ID label"), roomId))
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(.pttMuted)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
-            .overlay(
-                RoundedRectangle(cornerRadius: 2)
-                    .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4]))
-                    .foregroundColor(.pttAccent)
-            )
-            .padding(14)
+    private var roomNameHeader: some View {
+        if let name = currentRoomName {
+            Text(name)
+                .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.top, 10)
         }
     }
 
@@ -686,21 +660,6 @@ struct ContentView: View {
         return connection.participants[talkerUid]?.name ?? talkerUid
     }
 
-    private func handleCreateRoom() {
-        roomManager.clearError()
-        Task {
-            do {
-                let idToken = try await auth.fetchIDToken()
-                let (roomId, inviteCode) = try await roomManager.createRoom(tokenServerURL: tokenServerURL, idToken: idToken)
-                currentInviteCode = inviteCode
-                savedRooms.upsert(roomId: roomId, label: String(localized: "自分が作成したルーム"), inviteCode: inviteCode)
-                enterRoom(roomId)
-            } catch {
-                // roomManager.lastErrorMessage に理由がセットされているのでUIには既に反映済み
-            }
-        }
-    }
-
     private func handleJoinRoom() {
         let roomId = joinRoomId.trimmingCharacters(in: .whitespacesAndNewlines)
         let inviteCode = joinInviteCode.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -709,9 +668,9 @@ struct ContentView: View {
         Task {
             do {
                 let idToken = try await auth.fetchIDToken()
-                try await roomManager.joinRoom(tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId, inviteCode: inviteCode)
-                currentInviteCode = inviteCode // 参加者自身が入力したコードをそのまま保持する(以前はnilで潰していたため招待コード欄が表示されなかった)
-                savedRooms.upsert(roomId: roomId, label: String(localized: "招待コードで参加したルーム"), inviteCode: inviteCode)
+                let name = try await roomManager.joinRoom(tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId, inviteCode: inviteCode)
+                currentRoomName = name
+                savedRooms.upsert(roomId: roomId, label: name ?? String(localized: "招待コードで参加したルーム"), inviteCode: inviteCode)
                 enterRoom(roomId)
             } catch {
                 // roomManager.lastErrorMessage に理由がセットされているのでUIには既に反映済み
@@ -723,7 +682,10 @@ struct ContentView: View {
     /// 既にメンバーである前提でそのままトークン取得〜接続に進む。
     /// (メンバーでなくなっていた場合 = BAN等 は /token が403を返すのでconnection側のエラー表示に出る)
     private func rejoinSavedRoom(_ saved: PTTSavedRoomsStore.SavedRoom) {
-        currentInviteCode = saved.inviteCode
+        // /join を経由しないため、ルーム名は未取得の状態からスタートする。
+        // enterRoom側でfetchRoomName()を呼んで最新値を取り直す(admin-dashboard側で
+        // 変更されている可能性もあるため、Web版と同じく入室のたびに取り直す)。
+        currentRoomName = nil
         enterRoom(saved.roomId)
     }
 
@@ -743,6 +705,16 @@ struct ContentView: View {
             room: roomId,
             idTokenProvider: { try await auth.fetchIDToken() }
         )
+        // [ルーム名] /join を経由しない再入室や、入室後にadmin-dashboard側で
+        // 名前が変更された場合にも対応できるよう、入室のたびに最新値を取り直す
+        // (Web版RoomView.vueの`enter()`が毎回fetchAutoRecordingを呼ぶのと同じ方針)。
+        Task {
+            let idToken = try? await auth.fetchIDToken()
+            guard let idToken, activeRoomId == roomId else { return }
+            if let name = await roomManager.fetchRoomName(tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId) {
+                currentRoomName = name
+            }
+        }
     }
 
     private func leaveRoom() {
@@ -751,7 +723,7 @@ struct ContentView: View {
         ban.stop()
         badges.stop()
         activeRoomId = nil
-        currentInviteCode = nil
+        currentRoomName = nil
         joinRoomId = ""
         joinInviteCode = ""
         chatInputText = ""

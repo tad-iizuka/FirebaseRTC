@@ -1,9 +1,14 @@
 # PTTClient (Android) — Phase 3: Android対応
 
 `ptt-ios`(iOSクライアント)と同じプロトコル・同じtoken-server/Firebaseプロジェクトで
-動くAndroidクライアントです。Googleサインイン・招待制ルームの作成/参加・
+動くAndroidクライアントです。Googleサインイン・招待コードでのルーム参加・
 LiveKit経由の音声送受信・PTTボタン・送話中リスト・テキストチャットまで、
 iOS版と同等の機能をKotlin + Jetpack Composeで実装しています。
+
+**[ルーム作成のadmin-dashboard移管]** ルーム作成は本クライアントからは行えません。
+admin-dashboard専用のAPI(`POST /admin/rooms`)に一本化されており、本クライアントは
+常に既存ルームへの参加(招待コードでのjoin)のみを行います。admin-dashboardで
+ルームに設定した名前(name)がある場合、参加後の画面に表示されます。
 
 ## ファイル構成
 
@@ -13,7 +18,9 @@ app/src/main/java/co/ubunifu/pttandroid/
   MainActivity.kt                … Google Sign-InのIntent起動・マイク権限リクエスト・Compose起点
   model/PTTModels.kt              … 接続状態・参加者・チャットメッセージのデータクラス (PTTModels.swiftに相当)
   auth/PTTAuthManager.kt          … Firebase Auth + Googleサインイン (PTTAuthManager.swiftに相当)
-  room/PTTRoomManager.kt          … ルーム作成/招待コード参加のtoken-server呼び出し (PTTRoomManager.swiftに相当)
+  room/PTTRoomManager.kt          … 招待コード参加のtoken-server呼び出し(ルーム作成機能は
+                                        admin-dashboardへ移管済みで本クラスには存在しない。
+                                        PTTRoomManager.swiftに相当)
   room/PTTSavedRoomsStore.kt      … 最近使ったルームのローカル保存 (PTTSavedRoomsStore.swiftに相当)
   connection/PTTConnectionManager.kt … LiveKit接続・トークン取得・PTTのマイクON/OFF・送話ロック・
                                         録音状態(Room Metadata経由)の購読 (PTTConnectionManager.swiftに相当)
@@ -77,7 +84,8 @@ Android Studio で `ptt-android/` をプロジェクトとして開き、Gradle 
 1. アプリを起動し、初回はマイク権限ダイアログを許可する。
 2. Googleでサインインする。
 3. 「トークンサーバーURL」「LiveKit URL」を確認(デフォルトはiOS版と同じ本番Cloud Run/LiveKit Cloud)。
-4. 「新しいルームを作成する」または「招待コードで参加する」でルームに入る。
+4. 「招待コードで参加する」でルームに入る(ルーム作成はadmin-dashboard専用。
+   本クライアントにはルーム作成UIは存在しない)。
 5. 別クライアント(Web版/iOS版)を同じルームに参加させ、PTTボタンを押し合って
    実際に声が届くか確認する。
 6. owner/moderatorとして入室した場合、参加者セクションの「録音を開始」から
@@ -99,7 +107,13 @@ Android Studio で `ptt-android/` をプロジェクトとして開き、Gradle 
   LiveKitのData Channelは使わない(モデレーション・履歴配信・BAN時の読み取り遮断が
   できないため。Web版/iOS版と同じ理由)。
 - ルームは招待制(`invite_only`)。ルームIDの直接入力による接続は行わず、
-  `POST /rooms` または `POST /rooms/:roomId/join` を必ず経由する。
+  `POST /rooms/:roomId/join` を必ず経由する。ルーム作成(`POST /rooms`相当)は
+  admin-dashboard専用のAPI(`POST /admin/rooms`)に一本化されており、
+  本クライアントからは行えない。
+- **ルーム名**: admin-dashboardで設定したルーム名(`name`)は`/join`のレスポンスに
+  含まれ、参加後の画面上部にroomIdとは別に補助的に表示される。未設定の場合は
+  表示しない。保存済みルームからの再入室(`/join`を経由しない)時はルーム名を
+  取り直す仕組みを持たないため、表示されない(Web版と同じ既知の制約)。
 - PTTボタンは `Modifier.pointerInput` + `detectTapGestures(onPress = ...)` で
   押下/解放を検知し、`tryAwaitRelease()` で「離された」タイミングを取得している
   (Web版の `touchstart`/`touchend`、iOS版の `DragGesture(minimumDistance: 0)` に相当)。

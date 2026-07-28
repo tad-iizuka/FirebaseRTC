@@ -55,7 +55,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -151,7 +150,8 @@ fun PTTApp(
     // [多言語化] LaunchedEffect/scope.launchのブロックは@Composableコンテキストではないため、
     // stringResource()はここ(コンポーザブル本体)であらかじめ解決しておく必要がある。
     val banNoticeText = stringResource(R.string.room_ban_notice)
-    val createdRoomLabel = stringResource(R.string.room_select_created_room_label)
+    // [ルーム名] admin-dashboardで設定された名前が無い場合に履歴欄で使うフォールバックラベル
+    // (Web版RoomSelectView.vueの roomSelect.joinedRoomLabel と同じ役割)。
     val joinedRoomLabel = stringResource(R.string.room_select_joined_room_label)
 
     val currentUser by authManager.currentUser.collectAsState()
@@ -203,6 +203,10 @@ fun PTTApp(
     // 再生成後も同じルームに在室中だったことを復元できるようにする。
     var activeRoomId by rememberSaveable { mutableStateOf<String?>(null) }
     var currentInviteCode by rememberSaveable { mutableStateOf<String?>(null) }
+    // [ルーム名] admin-dashboardで設定されたルーム名。POST /rooms/:roomId/join の
+    // レスポンス(name)からのみ取得できる(Web版roomStore.currentRoomNameに相当)。
+    // 未設定、または保存済みルームからの再入室(/joinを経由しない)時はnullのまま。
+    var currentRoomName by rememberSaveable { mutableStateOf<String?>(null) }
     // [BAN対応] BANボタン押下時の確認ダイアログの対象
     var banTarget by remember { mutableStateOf<ParticipantInfo?>(null) }
     // [BAN対応] 自分がBANされてルームを追い出された直後に表示する通知文言
@@ -302,6 +306,7 @@ fun PTTApp(
         badgesStore.stop()
         activeRoomId = null
         currentInviteCode = null
+        currentRoomName = null
         joinRoomId = ""
         joinInviteCode = ""
         chatInput = ""
@@ -439,6 +444,21 @@ fun PTTApp(
             )
 
             activeRoomId != null -> {
+                // [ルーム名] admin-dashboardで設定された名前。未取得の場合は表示しない
+                // (roomIdはStatusRow側で常に表示されるため、名前は補助的な表示。
+                // Web版RoomView.vueのh1と同じ位置づけ)。
+                currentRoomName?.let { name ->
+                    Text(
+                        name,
+                        fontFamily = Mono,
+                        fontSize = 15.sp,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                        color = PTTColors.Text,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                }
                 StatusRow(status)
                 GuestStatusBar(
                     isGuest = myRole == "guest",
@@ -531,31 +551,9 @@ fun PTTApp(
                 onTokenServerUrlChange = { tokenServerUrl = it },
                 livekitUrl = livekitUrl,
                 onLivekitUrlChange = { livekitUrl = it },
-                // [Phase12・十五訂] ここは role ではなく isAnonymous(Firebase Auth)で判定する。
-                // 未入室(=どのRoomのmembersドキュメントも持たない)画面のため、role(Room内の
-                // 役割)という概念自体がまだ存在しない。role によるGuest判定(上のGuestStatusBar
-                // 側、myRole == "guest")とは統一すべき同一軸ではなく、意図的に異なるスコープ
-                // (brushup-plan.md Phase12参照)。なお token-server側(POST /rooms)もGuestを
-                // 403で拒否するため、ここでのUI非表示はAPI側の強制とは別に、Guestが操作を
-                // 試みる前に選択肢自体を見せないためのもの。
-                isGuest = currentUser?.isAnonymous == true,
                 isWorking = roomWorking,
                 errorMessage = roomError,
                 savedRooms = savedRooms,
-                onCreateRoom = {
-                    roomManager.clearError()
-                    scope.launch {
-                        try {
-                            val idToken = authManager.fetchIdToken()
-                            val created = roomManager.createRoom(tokenServerUrl, idToken)
-                            currentInviteCode = created.inviteCode
-                            savedRoomsStore.upsert(created.roomId, createdRoomLabel, created.inviteCode)
-                            enterRoom(created.roomId)
-                        } catch (e: Exception) {
-                            // roomManager.lastErrorMessage に理由がセットされている
-                        }
-                    }
-                },
                 joinRoomId = joinRoomId,
                 onJoinRoomIdChange = { joinRoomId = it },
                 joinInviteCode = joinInviteCode,
@@ -568,9 +566,13 @@ fun PTTApp(
                     scope.launch {
                         try {
                             val idToken = authManager.fetchIdToken()
-                            roomManager.joinRoom(tokenServerUrl, idToken, roomId, inviteCode)
+                            val joined = roomManager.joinRoom(tokenServerUrl, idToken, roomId, inviteCode)
                             currentInviteCode = inviteCode // 参加者自身が入力したコードをそのまま保持する(以前はnullで潰していたため招待コード欄が表示されなかった)
-                            savedRoomsStore.upsert(roomId, joinedRoomLabel, inviteCode)
+                            currentRoomName = joined.name
+                            // ルーム名が取得できていればそれを履歴の表示ラベルに使い、
+                            // 未設定の場合のみ従来通りの汎用ラベルにフォールバックする
+                            // (Web版RoomSelectView.vueと同じ方針)。
+                            savedRoomsStore.upsert(roomId, joined.name ?: joinedRoomLabel, inviteCode)
                             enterRoom(roomId)
                         } catch (e: Exception) {
                             // roomManager.lastErrorMessage に理由がセットされている
@@ -579,6 +581,9 @@ fun PTTApp(
                 },
                 onRejoinSaved = { saved ->
                     currentInviteCode = saved.inviteCode
+                    // /join を経由しないため、ルーム名は未取得の状態からスタートする
+                    // (Web版roomStore.reenter()と同じ方針。取り直す仕組みは持たない)。
+                    currentRoomName = null
                     enterRoom(saved.roomId)
                 },
                 onRemoveSaved = { savedRoomsStore.remove(it) },
@@ -953,11 +958,9 @@ private fun RoomSelectionSection(
     onTokenServerUrlChange: (String) -> Unit,
     livekitUrl: String,
     onLivekitUrlChange: (String) -> Unit,
-    isGuest: Boolean,
     isWorking: Boolean,
     errorMessage: String?,
     savedRooms: List<SavedRoom>,
-    onCreateRoom: () -> Unit,
     joinRoomId: String,
     onJoinRoomIdChange: (String) -> Unit,
     joinInviteCode: String,
@@ -982,26 +985,15 @@ private fun RoomSelectionSection(
             singleLine = true,
         )
 
-        // [Phase10: Guestロール] Guestはルームを作成できない(token-server側では検証していないが、
-        // Web版RoomSelectView.vueと同じくクライアントUIとしてボタン自体を隠す)。
-        if (!isGuest) {
-            Button(
-                onClick = onCreateRoom,
-                enabled = !isWorking,
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = PTTColors.Accent),
-            ) {
-                if (isWorking) CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White)
-                else Text(stringResource(R.string.room_select_create_room), fontFamily = Mono)
-            }
-        } else {
-            Text(
-                stringResource(R.string.room_select_guest_cannot_create),
-                fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Muted,
-            )
-        }
-
-        Text(stringResource(R.string.common_or_divider), fontFamily = Mono, fontSize = 10.sp, color = PTTColors.Muted, modifier = Modifier.fillMaxWidth())
+        // [ルーム作成のadmin-dashboard移管] ルーム作成はadmin-dashboard専用の
+        // POST /admin/rooms(rooms:create権限)に一本化した。ptt-androidは常に
+        // 既存ルームへの参加(招待コードでのjoin)のみを行う画面になっている
+        // (Web版RoomSelectView.vueと同じ。brushup-plan.md参照)。これにより、
+        // isAnonymous(Guest)によるボタン出し分けも不要になった。
+        Text(
+            stringResource(R.string.room_select_join_only_hint),
+            fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Muted,
+        )
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedTextField(

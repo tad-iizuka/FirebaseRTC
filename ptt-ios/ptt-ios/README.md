@@ -16,12 +16,13 @@ LiveKit経由のPTT音声・送話ロック・BAN・テキストチャットま�
 - `ptt_iosApp.swift` — Appエントリポイント。Firebase初期化、
   `AVAudioSession`を`.playAndRecord`/`.voiceChat`で設定、Googleサインインの
   リダイレクトURL処理
-- `ContentView.swift` — メイン画面(サインイン / ルーム作成・参加フォーム /
+- `ContentView.swift` — メイン画面(サインイン / 招待コード参加フォーム /
   PTTボタン / 参加者一覧・BAN操作 / チャット / ログ)
 - `PTTAuthManager.swift` — Firebase Auth経由のGoogleサインインと、
   token-server呼び出し用のID Token供給・自動リフレッシュ
-- `PTTRoomManager.swift` — token-serverの`POST /rooms`(ルーム作成)・
-  `POST /rooms/:roomId/join`(招待コードでの参加)を呼ぶ招待制ルーム管理
+- `PTTRoomManager.swift` — token-serverの`POST /rooms/:roomId/join`
+  (招待コードでの参加)を呼ぶ招待制ルーム管理。ルーム作成は
+  admin-dashboard専用のAPIへ移管済みのため、ここでは扱わない
 - `PTTConnectionManager.swift` — LiveKit Swift SDKの`Room`オブジェクトを
   生成・接続し、PTTボタンのオン/オフに合わせて
   `localParticipant.setMicrophone(enabled:)`を呼ぶ橋渡し役。送話ロックAPI
@@ -90,9 +91,12 @@ LiveKit移行に伴い**廃止済み**です。
 
 1. **サインイン**: `PTTAuthManager`がFirebase Auth経由のGoogleサインインを
    行い、以降のtoken-server呼び出しに必要なID Tokenを供給する
-2. **ルーム作成/参加**: token-serverは招待制(invite_only)のため、
-   `PTTRoomManager`が`POST /rooms`または`POST /rooms/:roomId/join`
-   （招待コード検証）を呼び、先にルームのメンバーになってから接続する
+2. **ルーム参加**: token-serverは招待制(invite_only)のため、
+   `PTTRoomManager`が`POST /rooms/:roomId/join`（招待コード検証）を呼び、
+   先にルームのメンバーになってから接続する。ルーム作成はadmin-dashboard
+   専用のAPI(`POST /admin/rooms`)へ一本化されており、ptt-ios単体では
+   行えない。admin-dashboardで設定したルーム名(`name`)は`/join`のレスポンス
+   に含まれ、入室後の画面上部に表示される
 3. **接続・PTT**: `PTTConnectionManager`が`Room(delegate: self)`を生成し
    LiveKit Cloudに接続する。接続直後はマイクを無効化しておき、PTTボタン
    押下時に送話ロックAPI(`/talk/start`)取得後にのみ
@@ -137,7 +141,8 @@ LiveKit移行に伴い**廃止済み**です。
 2. 起動後、Googleサインインを行う
 3. 「トークンサーバーURL」「LiveKit URL (wss://)」欄はデフォルト値が
    入っているため、通常は変更不要
-4. ルームを新規作成するか、招待コードを入力して参加する
+4. 管理者から受け取った招待コードとルームIDを入力して参加する
+   （ルーム作成はadmin-dashboard側で行うため、アプリ内には作成機能がない）
 5. PTTボタンを押下している間だけ発話でき、別クライアント（Web版など）を
    同じルームに参加させて実際に声が届くか確認する
 6. owner/moderatorとして入室した場合、参加者一覧の「録音を開始」ボタンで

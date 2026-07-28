@@ -10,7 +10,6 @@
     <string name="common_get_started">Get Started</string>
     <string name="common_cancel">Cancel</string>
     <string name="common_remove">Remove</string>
-    <string name="common_or_divider">— or —</string>
     <string name="common_not_connected">Not connected</string>
 
     <!-- header -->
@@ -30,22 +29,23 @@
     <string name="onboarding_start">Get Started</string>
     <string name="onboarding_slide1_title">Welcome to PTT Client</string>
     <string name="onboarding_slide1_description">A simple push-to-talk voice chat, just like a walkie-talkie: your voice is sent only while you hold the button.</string>
-    <string name="onboarding_slide2_title">Create or join a room</string>
-    <string name="onboarding_slide2_description">Rooms are invite-only. Create your own room, or join one using an invite code you received.</string>
+    <string name="onboarding_slide2_title">Join a room with an invite code</string>
+    <string name="onboarding_slide2_description">Rooms are invite-only. Join using an invite code you received from an administrator.</string>
     <string name="onboarding_slide3_title">Press the button to talk</string>
     <string name="onboarding_slide3_description">Audio is sent only while you hold the PTT button in the center. Talk is automatically put on hold while someone else is speaking.</string>
     <string name="onboarding_slide4_title">Chat and manage participants</string>
     <string name="onboarding_slide4_description">Along with the text chat and participant list, moderators can also ban participants.</string>
 
     <!-- roomSelect -->
-    <string name="room_select_create_room">Create a new room</string>
+    <!-- [Room creation moved to admin-dashboard] Room creation is now handled
+         exclusively by admin-dashboard; ptt-android always joins an existing
+         room via an invite code (mirrors web's roomSelect.joinOnlyHint). -->
+    <string name="room_select_join_only_hint">Rooms are created by an administrator. Once you receive an invite code, join using it below.</string>
     <string name="room_select_room_id_label">Room ID</string>
     <string name="room_select_invite_code_label">Invite code</string>
     <string name="room_select_join_room">Join with invite code</string>
     <string name="room_select_recent_rooms">— Recently used rooms —</string>
-    <string name="room_select_created_room_label">Room you created</string>
     <string name="room_select_joined_room_label">Room joined with an invite code</string>
-    <string name="room_select_guest_cannot_create">Guests cannot create rooms. Join an existing room with an invite code instead.</string>
 
     <!-- room -->
     <string name="room_leave_room">Leave room</string>
