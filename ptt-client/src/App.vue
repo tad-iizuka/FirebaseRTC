@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
+import { useBanStore } from '@/stores/ban'
 import { useSavedRoomsStore } from '@/stores/savedRooms'
 import { useConnectionStore } from '@/stores/connection'
 import { useOnboardingStore } from '@/stores/onboarding'
@@ -9,9 +10,19 @@ import AuthView from '@/views/AuthView.vue'
 import OnboardingFlow from '@/components/OnboardingFlow.vue'
 
 const auth = useAuthStore()
+const ban = useBanStore()
 const savedRooms = useSavedRoomsStore()
 const connection = useConnectionStore()
 const onboarding = useOnboardingStore()
+
+// [ヘッダーの表示名]
+// ゲストがルーム内で変更したニックネーム(ban.myDisplayName、rooms/{roomId}/members/{uid}の
+// displayNameをonSnapshot購読したもの)はFirebase Authのプロフィールとは別物であり、
+// auth.currentUser.displayNameには反映されない。ルーム入室中はそちらを優先し、
+// 未入室時(ban.myDisplayNameが空)はFirebase Authの値にフォールバックする。
+const headerDisplayName = computed(
+  () => ban.myDisplayName || auth.currentUser?.displayName || auth.currentUser?.email || null,
+)
 
 // uidが確定/変化するたびに、そのユーザーのルーム履歴を読み直す
 // (サインアウト/別アカウントでの汚染を防ぐため、savedRooms.load()内でキーを切り替える)。
@@ -35,7 +46,7 @@ async function handleSignOut() {
 			<OnboardingFlow v-if="!onboarding.hasCompletedOnboarding" @complete="onboarding.complete" />
 			<template v-else>
 				<AppHeader
-					:user-name="auth.currentUser?.displayName ?? auth.currentUser?.email"
+					:user-name="headerDisplayName"
 					:photo-url="auth.currentUser?.photoURL"
 					:is-signed-in="!!auth.currentUser"
 					:connection-status-kind="connection.statusKind"
