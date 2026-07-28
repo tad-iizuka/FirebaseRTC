@@ -36,6 +36,8 @@ async function handleSignOut() {
 			<template v-else>
 				<AppHeader
 					:user-name="auth.currentUser?.displayName ?? auth.currentUser?.email"
+					:photo-url="auth.currentUser?.photoURL"
+					:is-signed-in="!!auth.currentUser"
 					:connection-status-kind="connection.statusKind"
 					:room-id="connection.roomName"
 					@sign-out="handleSignOut"
