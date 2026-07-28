@@ -10,6 +10,7 @@ import { usePolling } from '@/composables/usePolling'
 import { formatTime } from '@/lib/format'
 import Button from '@/components/ui/Button.vue'
 import Badge from '@/components/ui/Badge.vue'
+import Input from '@/components/ui/Input.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -169,6 +170,26 @@ function badgesFor(uid: string) {
 function openUserProfile(uid: string) {
   router.push({ name: 'user-detail', params: { uid } })
 }
+
+// --- [ルーム名] admin-dashboardからの名称変更 ---
+const nameDraft = ref('')
+watch(
+  () => rooms.detail?.roomId,
+  () => {
+    nameDraft.value = rooms.detail?.name ?? ''
+  },
+  { immediate: true },
+)
+
+async function saveName() {
+  if (!rooms.detail) return
+  const trimmed = nameDraft.value.trim()
+  try {
+    await rooms.updateRoomName(settings.tokenServerUrl, roomId.value, trimmed)
+  } catch {
+    // rooms.nameErrorMessage に反映済み
+  }
+}
 </script>
 
 <template>
@@ -188,6 +209,23 @@ function openUserProfile(uid: string) {
 
     <template v-if="rooms.detail">
       <h2 class="mb-1 text-sm font-semibold">room: {{ rooms.detail.roomId }}</h2>
+
+      <!-- [ルーム名] admin-dashboardから変更可能(rooms:manage権限)。 -->
+      <div class="mb-2 flex items-center gap-2">
+        <Input v-model="nameDraft" placeholder="(ルーム名未設定)" class="max-w-xs" />
+        <Button
+          size="sm"
+          class="w-auto"
+          :disabled="rooms.isUpdatingName || nameDraft.trim() === (rooms.detail.name ?? '')"
+          @click="saveName"
+        >
+          {{ rooms.isUpdatingName ? '保存中...' : '名前を保存' }}
+        </Button>
+      </div>
+      <p v-if="rooms.nameErrorMessage" class="mb-2 text-[11px] text-destructive">
+        {{ rooms.nameErrorMessage }}
+      </p>
+
       <div class="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-muted-foreground">
         <span>owner={{ rooms.detail.ownerUid }}</span>
         <span>作成={{ formatTime(rooms.detail.createdAt) }}</span>

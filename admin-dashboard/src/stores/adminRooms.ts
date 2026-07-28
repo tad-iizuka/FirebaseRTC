@@ -1,7 +1,12 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { ApiError, authedFetch } from '@/lib/api'
-import type { AdminRoomDetail, AdminRoomListResponse, AdminRoomSummary } from '@/types/admin'
+import type {
+  AdminCreateRoomResponse,
+  AdminRoomDetail,
+  AdminRoomListResponse,
+  AdminRoomSummary,
+} from '@/types/admin'
 
 // [設計方針]
 // token-server/routes/admin.js は Firestore(台帳) と LiveKit(ライブな実接続状況) の
@@ -95,6 +100,91 @@ export const useAdminRoomsStore = defineStore('adminRooms', () => {
     detail.value = null
   }
 
+  // --- [ルーム作成のadmin-dashboard移管] ---
+  // 以前はptt-client(POST /rooms)からユーザー自身がルームを作成できたが、
+  // 今後は admin-dashboard専用の POST /admin/rooms(rooms:create権限)に
+  // 一本化する。招待コードは作成時のレスポンスでのみ返却され、以降どの
+  // APIからも再取得できないため(brushup-plan.md 5.4参照)、直近で作成した
+  // ルームの情報を lastCreatedRoom に保持し、UI側で作成直後に必ず表示・
+  // コピーできるようにする(ルーム一覧へ戻ると消える想定。clearLastCreated参照)。
+  const isCreatingRoom = ref(false)
+  const createRoomErrorMessage = ref<string | null>(null)
+  const lastCreatedRoom = ref<AdminCreateRoomResponse | null>(null)
+
+  async function createRoom(baseUrl: string, name: string, maxMembers?: number) {
+    isCreatingRoom.value = true
+    createRoomErrorMessage.value = null
+    try {
+      const room = await authedFetch<AdminCreateRoomResponse>(baseUrl, '/admin/rooms', {
+        method: 'POST',
+        body: { name, maxMembers: maxMembers ?? undefined },
+      })
+      lastCreatedRoom.value = room
+      // 一覧の先頭に反映しておくと、作成後すぐに一覧を見ても表示される
+      // (次のポーリング/再読み込みで正規のAdminRoomSummaryへ置き換わる)。
+      rooms.value = [
+        {
+          roomId: room.roomId,
+          name: room.name,
+          ownerUid: room.ownerUid,
+          createdAt: room.createdAt,
+          maxMembers: room.maxMembers,
+          activeMemberCount: null,
+          orgId: null,
+          nodeId: null,
+          nodeAncestorIds: [],
+          talkLock: null,
+          recording: { active: false, startedAt: null },
+          live: { isLive: false, numParticipants: 0 },
+        },
+        ...rooms.value,
+      ]
+      return room
+    } catch (e) {
+      createRoomErrorMessage.value = (e as Error).message
+      throw e
+    } finally {
+      isCreatingRoom.value = false
+    }
+  }
+
+  function clearLastCreatedRoom() {
+    lastCreatedRoom.value = null
+  }
+
+  // [ルーム名] PATCH /admin/rooms/:roomId/name (rooms:manage権限)。
+  // 楽観的更新+失敗時ロールバックは他の設定系操作(setAutoRecording等)と同じ方針。
+  const isUpdatingName = ref(false)
+  const nameErrorMessage = ref<string | null>(null)
+
+  async function updateRoomName(baseUrl: string, roomId: string, name: string) {
+    if (!detail.value || detail.value.roomId !== roomId) return
+    const before = detail.value.name
+    detail.value.name = name
+    isUpdatingName.value = true
+    nameErrorMessage.value = null
+    try {
+      const result = await authedFetch<{ roomId: string; name: string | null }>(
+        baseUrl,
+        `/admin/rooms/${encodeURIComponent(roomId)}/name`,
+        { method: 'PATCH', body: { name } },
+      )
+      if (detail.value && detail.value.roomId === roomId) {
+        detail.value.name = result.name
+      }
+      // 一覧側に同じRoomが読み込まれていれば、こちらも合わせて更新する。
+      rooms.value = rooms.value.map((r) => (r.roomId === roomId ? { ...r, name: result.name } : r))
+    } catch (e) {
+      if (detail.value && detail.value.roomId === roomId) {
+        detail.value.name = before
+      }
+      nameErrorMessage.value = (e as Error).message
+      throw e
+    } finally {
+      isUpdatingName.value = false
+    }
+  }
+
   // [設定] room/:roomId/settings/autoRecording (Firestore) のON/OFF切り替え。
   // token-server側に PATCH /admin/rooms/:roomId/settings/autoRecording の実装が必要
   // (body: { enabled: boolean })。楽観的にUIを更新し、失敗時は元の値へ戻す。
@@ -172,6 +262,11 @@ export const useAdminRoomsStore = defineStore('adminRooms', () => {
     isUpdatingAutoRecording,
     updatingRoleUids,
     roleErrorMessage,
+    isCreatingRoom,
+    createRoomErrorMessage,
+    lastCreatedRoom,
+    isUpdatingName,
+    nameErrorMessage,
     fetchRooms,
     goToNextPage,
     goToFirstPage,
@@ -180,5 +275,8 @@ export const useAdminRoomsStore = defineStore('adminRooms', () => {
     clearDetail,
     setAutoRecording,
     setMemberRole,
+    createRoom,
+    clearLastCreatedRoom,
+    updateRoomName,
   }
 })

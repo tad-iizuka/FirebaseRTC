@@ -7,7 +7,6 @@
     "cancel": "Cancel",
     "confirm": "Confirm",
     "remove": "Remove",
-    "orDivider": "— or —",
     "notConnected": "Not connected",
     "connectedToRoom": "room: {roomId}",
     "loggedInAs": "Logged in as {name}",
@@ -38,8 +37,8 @@
         "description": "A simple push-to-talk voice chat, just like a walkie-talkie: your voice is sent only while you hold the button."
       },
       {
-        "title": "Create or join a room",
-        "description": "Rooms are invite-only. Create your own room, or join one using an invite code you received."
+        "title": "Join a room with an invite code",
+        "description": "Rooms are invite-only. Use the invite code you received from an administrator to join."
       },
       {
         "title": "Press the button to talk",
@@ -52,9 +51,7 @@
     ]
   },
   "roomSelect": {
-    "createRoom": "Create a new room",
-    "creating": "Creating...",
-    "guestCannotCreate": "Guests cannot create rooms. Join an existing room with an invite code instead.",
+    "joinOnlyHint": "Rooms are created by an administrator. Once you receive an invite code, join using it below.",
     "roomIdLabel": "Room ID",
     "roomIdPlaceholder": "Entered by the invited person",
     "inviteCodeLabel": "Invite code",
@@ -62,7 +59,6 @@
     "joinRoom": "Join with invite code",
     "joining": "Joining...",
     "recentRooms": "— Recently used rooms —",
-    "createdRoomLabel": "Room you created",
     "joinedRoomLabel": "Room joined with an invite code"
   },
   "room": {

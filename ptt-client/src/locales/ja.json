@@ -7,7 +7,6 @@
     "cancel": "キャンセル",
     "confirm": "実行する",
     "remove": "削除",
-    "orDivider": "— または —",
     "notConnected": "未接続",
     "connectedToRoom": "room: {roomId}",
     "loggedInAs": "ログイン中: {name}",
@@ -38,8 +37,8 @@
         "description": "トランシーバーのように、押している間だけ声が届くシンプルな音声チャットです。"
       },
       {
-        "title": "ルームを作成・参加",
-        "description": "ルームは招待制です。自分でルームを作成するか、招待コードを受け取って参加しましょう。"
+        "title": "招待コードでルームに参加",
+        "description": "ルームは招待制です。管理者から受け取った招待コードを使って参加しましょう。"
       },
       {
         "title": "ボタンを押して話す",
@@ -52,9 +51,7 @@
     ]
   },
   "roomSelect": {
-    "createRoom": "新しいルームを作成する",
-    "creating": "作成中...",
-    "guestCannotCreate": "ゲストはルームを作成できません。招待コードで既存のルームに参加してください。",
+    "joinOnlyHint": "ルームの作成は管理者が行います。招待コードを受け取ったら、下記から参加してください。",
     "roomIdLabel": "ルームID",
     "roomIdPlaceholder": "招待された側が入力",
     "inviteCodeLabel": "招待コード",
@@ -62,7 +59,6 @@
     "joinRoom": "招待コードで参加する",
     "joining": "参加中...",
     "recentRooms": "— 最近使ったルーム —",
-    "createdRoomLabel": "自分が作成したルーム",
     "joinedRoomLabel": "招待コードで参加したルーム"
   },
   "room": {

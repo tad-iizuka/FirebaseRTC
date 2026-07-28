@@ -1,19 +1,19 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { authedFetch } from '@/lib/api'
-import type {
-  CreateRoomResponse,
-  RecordingStatusResponse,
-  RoomSettingsResponse,
-} from '@/types/api'
+import type { RecordingStatusResponse, RoomSettingsResponse } from '@/types/api'
 
 // [招待制ルーム対応]
 // token-server は「ルームIDを知っていれば誰でも入れる」設計ではなく、
 // invite_only(招待制)になっている。/token を取得する前に、必ず
-//   - POST /rooms            (ルーム作成。呼び出しユーザーがownerになる)
 //   - POST /rooms/:roomId/join  (招待コードを検証してmembersに追加)
-// のいずれかでルームのメンバーになっている必要がある(token-server/routes/rooms.js)。
+// でルームのメンバーになっている必要がある(token-server/routes/rooms.js)。
 // iOS版 PTTRoomManager.swift / Android版 PTTRoomManager.kt と同じ役割。
+//
+// [ルーム作成のadmin-dashboard移管] 以前はここに createRoom() (POST /rooms)
+// があったが、ルーム作成はadmin-dashboard専用の POST /admin/rooms
+// (rooms:create権限)へ移管した。ptt-client側からはルームを作成できない
+// (brushup-plan.md参照)。
 
 export const useRoomStore = defineStore('room', () => {
   const isWorking = ref(false)
@@ -23,6 +23,10 @@ export const useRoomStore = defineStore('room', () => {
   const currentRoomId = ref<string | null>(null)
   /** 自分がowner(作成者)の場合のみセットされる、参加者への共有用招待コード。 */
   const currentInviteCode = ref<string | null>(null)
+  // [ルーム名] admin-dashboardで設定されたルーム名。未設定 or 未取得の場合はnull。
+  // autoRecordingと同じ理由で、/join のレスポンスと GET /recording/status の
+  // 両方から取得できるようにしている(reenter時は後者のみで最新化する)。
+  const currentRoomName = ref<string | null>(null)
 
   // [Phase9: 自動録音]
   // ルームがアクティブになった瞬間(誰かが最初に入室した瞬間)に録音を
@@ -37,43 +41,24 @@ export const useRoomStore = defineStore('room', () => {
     errorMessage.value = null
   }
 
-  async function createRoom(baseUrl: string, maxMembers?: number): Promise<CreateRoomResponse> {
-    isWorking.value = true
-    errorMessage.value = null
-    try {
-      const data = await authedFetch<CreateRoomResponse>(baseUrl, '/rooms', {
-        method: 'POST',
-        body: maxMembers ? { maxMembers } : {},
-      })
-      currentRoomId.value = data.roomId
-      currentInviteCode.value = data.inviteCode
-      // ルーム作成直後はサーバー側のデフォルト値(false)と一致している
-      autoRecording.value = false
-      return data
-    } catch (e) {
-      errorMessage.value = (e as Error).message
-      throw e
-    } finally {
-      isWorking.value = false
-    }
-  }
-
   async function joinRoom(baseUrl: string, roomId: string, inviteCode: string): Promise<void> {
     isWorking.value = true
     errorMessage.value = null
     try {
-      const data = await authedFetch<{ roomId: string; joined: true; autoRecording: boolean }>(
-        baseUrl,
-        `/rooms/${encodeURIComponent(roomId)}/join`,
-        {
-          method: 'POST',
-          body: { inviteCode },
-        },
-      )
+      const data = await authedFetch<{
+        roomId: string
+        joined: true
+        autoRecording: boolean
+        name: string | null
+      }>(baseUrl, `/rooms/${encodeURIComponent(roomId)}/join`, {
+        method: 'POST',
+        body: { inviteCode },
+      })
       currentRoomId.value = roomId
       // 参加者自身が入力した招待コードをそのまま保持し、以後も表示できるようにする
       currentInviteCode.value = inviteCode
       autoRecording.value = data.autoRecording
+      currentRoomName.value = data.name
     } catch (e) {
       errorMessage.value = (e as Error).message
       throw e
@@ -86,15 +71,16 @@ export const useRoomStore = defineStore('room', () => {
   function reenter(roomId: string, inviteCode: string | null) {
     currentRoomId.value = roomId
     currentInviteCode.value = inviteCode
-    // /join を経由しないため、autoRecordingは未取得の状態からスタートする。
+    // /join を経由しないため、autoRecording・ルーム名は未取得の状態からスタートする。
     // fetchAutoRecording() を呼んで最新値を取り直す想定(RoomView#enter参照)。
     autoRecording.value = null
+    currentRoomName.value = null
   }
 
   /**
-   * 現在の autoRecording 設定値をサーバーから取得し直す。
-   * /join を経由しない再入室時や、他のowner/moderatorが設定を変更した
-   * 可能性がある場合の最新化に使う(GET /recording/status に相乗り)。
+   * 現在の autoRecording 設定値・ルーム名をサーバーから取得し直す。
+   * /join を経由しない再入室時や、他のowner/moderatorやadmin-dashboardが
+   * 設定を変更した可能性がある場合の最新化に使う(GET /recording/status に相乗り)。
    */
   async function fetchAutoRecording(baseUrl: string, roomId: string) {
     autoRecordingLoading.value = true
@@ -104,6 +90,7 @@ export const useRoomStore = defineStore('room', () => {
         `/rooms/${encodeURIComponent(roomId)}/recording/status`,
       )
       autoRecording.value = data.autoRecording
+      currentRoomName.value = data.name
     } catch (e) {
       // 取得失敗してもPTT自体の利用は継続できるため、エラーはログ用途に留める
       autoRecordingErrorMessage.value = (e as Error).message
@@ -137,6 +124,7 @@ export const useRoomStore = defineStore('room', () => {
   function leave() {
     currentRoomId.value = null
     currentInviteCode.value = null
+    currentRoomName.value = null
     autoRecording.value = null
     autoRecordingErrorMessage.value = null
   }
@@ -146,11 +134,11 @@ export const useRoomStore = defineStore('room', () => {
     errorMessage,
     currentRoomId,
     currentInviteCode,
+    currentRoomName,
     autoRecording,
     autoRecordingLoading,
     autoRecordingErrorMessage,
     clearError,
-    createRoom,
     joinRoom,
     reenter,
     fetchAutoRecording,

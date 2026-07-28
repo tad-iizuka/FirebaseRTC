@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSettingsStore } from '@/stores/settings'
 import { useAdminRoomsStore } from '@/stores/adminRooms'
@@ -61,6 +61,29 @@ function nextPage() {
 function openRoom(roomId: string) {
   router.push({ name: 'room-detail', params: { roomId } })
 }
+
+// --- [ルーム作成のadmin-dashboard移管] ルーム新規作成フォーム ---
+// rooms:create権限が無い場合は送信時に403となり、rooms.createRoomErrorMessage
+// に反映される(他の画面と同じ「事前チェックせず、失敗して初めてわかる」方針。
+// admin-dashboardの事前権限チェック要否は次アクション項目として別途検討中)。
+const newRoomName = ref('')
+const newRoomMaxMembers = ref('')
+
+async function handleCreateRoom() {
+  if (!newRoomName.value.trim()) return
+  try {
+    const maxMembers = newRoomMaxMembers.value.trim() ? Number(newRoomMaxMembers.value.trim()) : undefined
+    await rooms.createRoom(settings.tokenServerUrl, newRoomName.value.trim(), maxMembers)
+    newRoomName.value = ''
+    newRoomMaxMembers.value = ''
+  } catch {
+    // rooms.createRoomErrorMessage に反映済み
+  }
+}
+
+function dismissCreatedRoom() {
+  rooms.clearLastCreatedRoom()
+}
 </script>
 
 <template>
@@ -68,6 +91,51 @@ function openRoom(roomId: string) {
     <div class="mb-4 flex items-center gap-2">
       <Input v-model="settings.tokenServerUrl" class="max-w-md" />
       <Button variant="secondary" size="sm" class="w-auto" @click="refresh">再読み込み</Button>
+    </div>
+
+    <!-- [ルーム作成のadmin-dashboard移管] -->
+    <div class="mb-5 grid max-w-md gap-2 rounded-sm border border-dashed border-border p-3">
+      <h3 class="text-[11px] font-medium text-muted-foreground">ルームを新規作成</h3>
+      <p class="text-[11px] text-muted-foreground">
+        作成には adminUsers/&#123;uid&#125;.permissions に rooms:create 権限が必要です
+        (付与は「管理者権限」タブから)。
+      </p>
+      <Input v-model="newRoomName" placeholder="ルーム名(例: 〇〇現場 巡回班)" />
+      <Input v-model="newRoomMaxMembers" placeholder="定員(任意, 数値)" />
+      <Button size="sm" class="w-auto" :disabled="rooms.isCreatingRoom" @click="handleCreateRoom">
+        {{ rooms.isCreatingRoom ? '作成中...' : 'ルームを作成' }}
+      </Button>
+      <p v-if="rooms.createRoomErrorMessage" class="text-xs text-destructive">
+        {{ rooms.createRoomErrorMessage }}
+      </p>
+      <div
+        v-if="rooms.lastCreatedRoom"
+        class="mt-1 grid gap-1 rounded-sm border border-dashed border-primary bg-background p-2.5 text-[12px]"
+      >
+        <span
+          >「{{ rooms.lastCreatedRoom.name }}」を作成しました(roomId={{
+            rooms.lastCreatedRoom.roomId
+          }})</span
+        >
+        <span>招待コード(この画面を離れると再表示できません。参加者に共有してください):</span>
+        <span class="text-lg tracking-[0.15em] text-primary">{{ rooms.lastCreatedRoom.inviteCode }}</span>
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            class="text-[11px] text-primary underline-offset-2 hover:underline"
+            @click="openRoom(rooms.lastCreatedRoom.roomId)"
+          >
+            このルームの詳細を開く →
+          </button>
+          <button
+            type="button"
+            class="text-[11px] text-muted-foreground underline-offset-2 hover:underline"
+            @click="dismissCreatedRoom"
+          >
+            閉じる
+          </button>
+        </div>
+      </div>
     </div>
 
     <div v-if="isFiltering" class="mb-4 flex items-center gap-2 text-xs">
@@ -105,6 +173,7 @@ function openRoom(roomId: string) {
       <thead>
         <tr class="border-b border-border text-[10px] uppercase tracking-[0.06em] text-muted-foreground">
           <th class="p-2 text-left"></th>
+          <th class="p-2 text-left">Room名</th>
           <th class="p-2 text-left">Room ID</th>
           <th class="p-2 text-left">Owner UID</th>
           <th class="p-2 text-left">所属(orgId)</th>
@@ -131,6 +200,7 @@ function openRoom(roomId: string) {
               "
             />
           </td>
+          <td class="max-w-[12rem] truncate p-2">{{ room.name ?? '—' }}</td>
           <td class="whitespace-nowrap p-2">{{ room.roomId }}</td>
           <td class="max-w-[10rem] truncate p-2">{{ room.ownerUid }}</td>
           <td class="max-w-[8rem] truncate p-2 text-muted-foreground">{{ room.orgId ?? '—' }}</td>

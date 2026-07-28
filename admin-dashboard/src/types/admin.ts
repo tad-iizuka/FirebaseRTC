@@ -6,6 +6,8 @@
 
 export interface AdminRoomSummary {
   roomId: string
+  // [ルーム名] admin-dashboardから設定・変更できるルーム名。未設定はnull。
+  name: string | null
   ownerUid: string
   createdAt: number | null
   maxMembers: number | null
@@ -57,6 +59,8 @@ export interface RoomOrgContext {
 
 export interface AdminRoomDetail {
   roomId: string
+  // [ルーム名] PATCH /admin/rooms/:roomId/name (rooms:manage権限) で変更できる。
+  name: string | null
   ownerUid: string
   createdAt: number | null
   maxMembers: number | null
@@ -69,6 +73,23 @@ export interface AdminRoomDetail {
   // [設定] rooms/:roomId/settings/autoRecording (Firestore) を表す。
   // 参加者が集まったら自動的に録音を開始するかどうかのルーム単位フラグ。
   settings: { autoRecording: boolean }
+}
+
+// [ルーム作成のadmin-dashboard移管]
+// POST /admin/rooms (rooms:create権限)。ptt-client側のPOST /rooms
+// (旧CreateRoomResponse)を廃止し、ルーム作成はここに一本化した。
+// 呼び出した管理者自身がownerになる(POST /rooms時代と同じ、呼び出し
+// ユーザーがownerになるという設計を踏襲)。招待コードはこのレスポンス
+// でのみ返却され、以降どのAPIからも再取得できない(brushup-plan.md 5.4の
+// 「招待コードの可視範囲」課題と同じ制約)ため、UI側で作成直後に必ず
+// 表示・コピーできるようにする(RoomsListView.vue参照)。
+export interface AdminCreateRoomResponse {
+  roomId: string
+  name: string | null
+  inviteCode: string
+  ownerUid: string
+  createdAt: number | null
+  maxMembers: number | null
 }
 
 // [Phase8] GET /admin/audit-logs

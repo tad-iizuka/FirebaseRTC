@@ -189,6 +189,15 @@ onUnmounted(() => {
   <div>
     <p v-if="banNotice" class="px-5 py-2 text-xs text-destructive">{{ banNotice }}</p>
 
+    <!-- [ルーム名] admin-dashboardで設定された名前。未設定の場合は表示しない
+         (roomIdはStatusRow側で常に表示されるため、名前は補助的な表示)。 -->
+    <h1
+      v-if="roomStore.currentRoomName"
+      class="truncate px-5 pb-0 pt-3 text-[15px] font-semibold"
+    >
+      {{ roomStore.currentRoomName }}
+    </h1>
+
     <StatusRow :kind="connection.statusKind" :message="connection.statusMessage" :room-id="roomId" />
     <GuestStatusBar
       :is-guest="ban.myRole === 'guest'"
