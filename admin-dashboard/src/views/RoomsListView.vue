@@ -117,7 +117,7 @@ function dismissCreatedRoom() {
             rooms.lastCreatedRoom.roomId
           }})</span
         >
-        <span>招待コード(この画面を離れると再表示できません。参加者に共有してください):</span>
+        <span>招待コード(この画面を離れてもRoom詳細画面から常に再確認できます。参加者に共有してください):</span>
         <span class="text-lg tracking-[0.15em] text-primary">{{ rooms.lastCreatedRoom.inviteCode }}</span>
         <div class="flex items-center gap-2">
           <button

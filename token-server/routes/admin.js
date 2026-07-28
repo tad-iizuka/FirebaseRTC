@@ -250,6 +250,60 @@ router.get('/rooms/:roomId', requireFirebaseAuth, requireAdminPermission('rooms:
 });
 
 /**
+ * GET /admin/rooms/:roomId/invite-code
+ *
+ * [招待コードのadmin-dashboard移管]
+ * 招待コードは以前POST /rooms(またはPOST /admin/rooms)作成時の
+ * レスポンスでしか返却されず、以降どのAPIからも再取得できなかった
+ * (brushup-plan.md 5.4「招待コードの可視範囲」)。この課題を解消するため
+ * 常時確認できるようにするが、以下2点をあわせて満たす設計とした。
+ *
+ * (1) 権限: GET /admin/rooms/:roomId(rooms:monitor)とは別に、より強い
+ *     rooms:manage 権限(名称変更・moderator任命等と同じ「管理」層)を
+ *     要求する。rooms:monitor保有者全員に「Roomへの参加権を事実上配布
+ *     できる」権限まで広げないため。
+ * (2) 監査ログ: 招待コードの閲覧自体をlogAdminActionへ記録する。
+ *     GET /admin/rooms/:roomId はRoomDetailView.vueから10秒間隔で
+ *     ポーリングされているため、そちらに招待コードを含めてしまうと
+ *     画面を開いているだけで大量の閲覧ログが記録されてしまう。
+ *     そのため招待コードは専用のこのエンドポイントに切り出し、
+ *     admin-dashboard側は「表示」ボタン押下時などユーザーの明示的な
+ *     操作でのみ呼び出す(GET .../download-urlと同じ「明示的な操作の
+ *     たびに発行・記録する」設計を踏襲)。
+ */
+router.get(
+  '/rooms/:roomId/invite-code',
+  requireFirebaseAuth,
+  requireAdminPermission('rooms:manage'),
+  async (req, res) => {
+    const { roomId } = req.params;
+    if (!isValidRoomId(roomId)) {
+      return res.status(400).json({ error: 'roomId が不正です' });
+    }
+
+    try {
+      const roomRef = db.collection('rooms').doc(roomId);
+      const roomSnap = await roomRef.get();
+      if (!roomSnap.exists) {
+        return res.status(404).json({ error: 'ルームが見つかりません' });
+      }
+      const room = roomSnap.data();
+
+      await logAdminAction({
+        actorUid: req.firebaseUser.uid,
+        action: 'room:invite_code_viewed',
+        targetRoomId: roomId,
+      });
+
+      res.json({ inviteCode: room.inviteCode ?? null });
+    } catch (e) {
+      console.error('[招待コード閲覧エラー]', e.message);
+      res.status(500).json({ error: '招待コードの取得に失敗しました' });
+    }
+  }
+);
+
+/**
  * POST /admin/rooms
  * body: { name: string, maxMembers?: number }
  *

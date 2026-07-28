@@ -98,6 +98,7 @@ export const useAdminRoomsStore = defineStore('adminRooms', () => {
 
   function clearDetail() {
     detail.value = null
+    clearInviteCode()
   }
 
   // --- [ルーム作成のadmin-dashboard移管] ---
@@ -250,6 +251,46 @@ export const useAdminRoomsStore = defineStore('adminRooms', () => {
     }
   }
 
+  // --- [招待コードのadmin-dashboard移管] ---
+  // GET /admin/rooms/:roomId/invite-code(rooms:manage権限)。招待コードの
+  // 閲覧は監査ログに記録されるため(token-server/routes/admin.js参照)、
+  // GET /admin/rooms/:roomId のポーリング(usePolling)には含めず、ユーザーが
+  // 「表示」ボタンを押した時だけ明示的に呼び出す(issueDownloadUrlと同じ設計)。
+  // ルーム切り替え時は clearInviteCode で必ずリセットし、前のRoomの値が
+  // 誤って別Roomの画面に残らないようにする。
+  const inviteCode = ref<string | null>(null)
+  const isRevealingInviteCode = ref(false)
+  const inviteCodeErrorMessage = ref<string | null>(null)
+  const inviteCodeForbidden = ref(false)
+
+  async function revealInviteCode(baseUrl: string, roomId: string) {
+    isRevealingInviteCode.value = true
+    inviteCodeErrorMessage.value = null
+    inviteCodeForbidden.value = false
+    try {
+      const data = await authedFetch<{ inviteCode: string | null }>(
+        baseUrl,
+        `/admin/rooms/${encodeURIComponent(roomId)}/invite-code`,
+      )
+      inviteCode.value = data.inviteCode
+    } catch (e) {
+      if (e instanceof ApiError && e.statusCode === 403) {
+        inviteCodeForbidden.value = true
+      } else {
+        inviteCodeErrorMessage.value = (e as Error).message
+      }
+      throw e
+    } finally {
+      isRevealingInviteCode.value = false
+    }
+  }
+
+  function clearInviteCode() {
+    inviteCode.value = null
+    inviteCodeErrorMessage.value = null
+    inviteCodeForbidden.value = false
+  }
+
   return {
     rooms,
     nextCursor,
@@ -267,6 +308,10 @@ export const useAdminRoomsStore = defineStore('adminRooms', () => {
     lastCreatedRoom,
     isUpdatingName,
     nameErrorMessage,
+    inviteCode,
+    isRevealingInviteCode,
+    inviteCodeErrorMessage,
+    inviteCodeForbidden,
     fetchRooms,
     goToNextPage,
     goToFirstPage,
@@ -278,5 +323,7 @@ export const useAdminRoomsStore = defineStore('adminRooms', () => {
     createRoom,
     clearLastCreatedRoom,
     updateRoomName,
+    revealInviteCode,
+    clearInviteCode,
   }
 })

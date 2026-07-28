@@ -79,10 +79,13 @@ export interface AdminRoomDetail {
 // POST /admin/rooms (rooms:create権限)。ptt-client側のPOST /rooms
 // (旧CreateRoomResponse)を廃止し、ルーム作成はここに一本化した。
 // 呼び出した管理者自身がownerになる(POST /rooms時代と同じ、呼び出し
-// ユーザーがownerになるという設計を踏襲)。招待コードはこのレスポンス
-// でのみ返却され、以降どのAPIからも再取得できない(brushup-plan.md 5.4の
-// 「招待コードの可視範囲」課題と同じ制約)ため、UI側で作成直後に必ず
-// 表示・コピーできるようにする(RoomsListView.vue参照)。
+// ユーザーがownerになるという設計を踏襲)。
+// [招待コードのadmin-dashboard移管] 以前は招待コードがこのレスポンスでしか
+// 返却されず、以降どのAPIからも再取得できなかった(brushup-plan.md 5.4の
+// 「招待コードの可視範囲」課題)。GET /admin/rooms/:roomId(AdminRoomDetail.
+// inviteCode)が常に返すようになったため、この作成直後の表示は「利便性の
+// ための即時表示」であり「唯一の確認手段」ではなくなっている
+// (RoomsListView.vue参照)。
 export interface AdminCreateRoomResponse {
   roomId: string
   name: string | null

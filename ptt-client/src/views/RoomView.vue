@@ -13,7 +13,6 @@ import { useBadgesStore } from '@/stores/badges'
 import Button from '@/components/ui/Button.vue'
 import StatusRow from '@/components/StatusRow.vue'
 import GuestStatusBar from '@/components/GuestStatusBar.vue'
-import InviteBox from '@/components/InviteBox.vue'
 import PttButton from '@/components/PttButton.vue'
 import RecordingBar from '@/components/RecordingBar.vue'
 import ParticipantList from '@/components/ParticipantList.vue'
@@ -220,8 +219,6 @@ onUnmounted(() => {
       @stop="stopRecording"
       @update-auto-recording="toggleAutoRecording"
     />
-    <InviteBox :invite-code="roomStore.currentInviteCode" :room-id="roomId" />
-
     <div class="px-5 pb-0 pt-2">
       <Button variant="secondary" class="w-full" @click="leaveRoom">{{ t('room.leaveRoom') }}</Button>
     </div>

@@ -38,13 +38,20 @@ onMounted(() => {
   // 権限がない場合は403のままリストが空になり、フォーム自体が非表示になる。
   orgs.fetchOrganizations(settings.tokenServerUrl).catch(() => {})
 })
-watch(roomId, load)
+watch(roomId, () => {
+  // [招待コードのadmin-dashboard移管] loadは10秒ポーリングにも使われる共通関数
+  // のため、ここでは分けて「別Roomへ切り替わった時だけ」リセットする
+  // (ポーリングのたびにリセットすると表示中のコードがちらつくため)。
+  rooms.clearInviteCode()
+  load()
+})
 // [Phase8] 詳細・録音履歴とも10秒ごとに再取得する。
 usePolling(load)
 
 onUnmounted(() => {
   recordings.clear()
   badges.clearRoomBadges()
+  rooms.clearInviteCode()
 })
 
 function back() {
@@ -190,6 +197,36 @@ async function saveName() {
     // rooms.nameErrorMessage に反映済み
   }
 }
+
+// --- [招待コードのadmin-dashboard移管] ---
+// 以前はptt-clientの入室後画面(InviteBox.vue)に表示していたが、それは
+// 「入室に使ったコードをその場で覚えている」だけの表示で、以降は誰も
+// 確認できなかった(brushup-plan.md 5.4「招待コードの可視範囲」参照)。
+// GET /admin/rooms/:roomId/invite-code(rooms:manage権限)で常に確認できる
+// ようにしたが、閲覧自体が監査ログに記録される(token-server側)ため、
+// 画面を開いただけの10秒ポーリングでは呼ばず、「表示」ボタン押下時にだけ
+// 明示的に呼び出す(録音のダウンロードURL発行と同じ設計)。
+async function revealInviteCode() {
+  try {
+    await rooms.revealInviteCode(settings.tokenServerUrl, roomId.value)
+  } catch {
+    // rooms.inviteCodeErrorMessage / inviteCodeForbidden に反映済み
+  }
+}
+
+const inviteCodeCopied = ref(false)
+async function copyInviteCode() {
+  if (!rooms.inviteCode) return
+  try {
+    await navigator.clipboard.writeText(rooms.inviteCode)
+    inviteCodeCopied.value = true
+    setTimeout(() => {
+      inviteCodeCopied.value = false
+    }, 1500)
+  } catch {
+    // クリップボードAPI非対応環境では無視(表示自体は見えているためコピー不可でも致命的ではない)
+  }
+}
 </script>
 
 <template>
@@ -224,6 +261,41 @@ async function saveName() {
       </div>
       <p v-if="rooms.nameErrorMessage" class="mb-2 text-[11px] text-destructive">
         {{ rooms.nameErrorMessage }}
+      </p>
+
+      <!-- [招待コードのadmin-dashboard移管] 「表示」を押すたびに監査ログへ記録される
+           (token-server/routes/admin.js GET .../invite-code)ため、常時表示ではなく
+           明示的な操作でのみ取得する。 -->
+      <div class="mb-4 flex flex-wrap items-center gap-2 text-xs">
+        <span class="text-muted-foreground">招待コード</span>
+        <span v-if="rooms.inviteCode" class="text-lg tracking-[0.15em] text-primary">{{
+          rooms.inviteCode
+        }}</span>
+        <span v-else-if="rooms.inviteCodeForbidden" class="text-muted-foreground">
+          確認するには rooms:manage 権限が必要です
+        </span>
+        <Button
+          v-else
+          size="sm"
+          variant="secondary"
+          class="h-7 w-auto px-2 text-[11px]"
+          :disabled="rooms.isRevealingInviteCode"
+          @click="revealInviteCode"
+        >
+          {{ rooms.isRevealingInviteCode ? '取得中...' : '招待コードを表示' }}
+        </Button>
+        <Button
+          v-if="rooms.inviteCode"
+          size="sm"
+          variant="secondary"
+          class="h-7 w-auto px-2 text-[11px]"
+          @click="copyInviteCode"
+        >
+          {{ inviteCodeCopied ? 'コピーしました' : 'コピー' }}
+        </Button>
+      </div>
+      <p v-if="rooms.inviteCodeErrorMessage" class="mb-2 text-[11px] text-destructive">
+        {{ rooms.inviteCodeErrorMessage }}
       </p>
 
       <div class="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-muted-foreground">
