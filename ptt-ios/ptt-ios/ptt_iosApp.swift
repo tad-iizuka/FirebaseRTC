@@ -20,10 +20,12 @@ struct ptt_iosApp: App {
         // Xcodeプロジェクトに追加しておく必要がある(リポジトリには含めない)。
         FirebaseApp.configure()
 
-        // LiveKit SDKはデフォルトでAVAudioSessionを自動管理し、Room接続時や
-        // マイク発行時にアプリの設定を上書きしてしまう。CallKit(PTTCallKitManager)と
-        // 連携させるため、自動管理を無効化し、セッション設定・音声エンジンの
-        // 起動可否を常にアプリ/CallKit側で明示的に制御する。
+        // LiveKit SDKはデフォルトでAVAudioSessionを自動管理するが、Bluetoothヘッドセットの
+        // マイクを優先させる設定(.allowBluetooth等)を明示的に固定したいため、自動管理を無効化し
+        // アプリ側でカテゴリ・エンジンの利用可否を制御する。
+        // [CallKit統合を撤回(2026-07-30)] 以前はここでCXProviderのdidActivateを待つために
+        // エンジンを.noneのまま起動していたが、CallKit連携自体を撤回したため、
+        // 通常通り起動時から.defaultにしてセッションをアクティブ化する。
         AudioManager.shared.audioSession.isAutomaticConfigurationEnabled = false
 
         do {
@@ -33,10 +35,8 @@ struct ptt_iosApp: App {
                 mode: .voiceChat,
                 options: [.allowBluetooth, .allowBluetoothA2DP, .defaultToSpeaker]
             )
-            // setActive(true)はここでは呼ばない。CallKit自身がCXProviderの
-            // didActivate(_:)でオーディオセッションをアクティブ化するため
-            // (LiveKit公式のCallKit統合パターンに準拠)。
-            try AudioManager.shared.setEngineAvailability(.none)
+            try session.setActive(true)
+            try AudioManager.shared.setEngineAvailability(.default)
         } catch {
             print(error)
         }

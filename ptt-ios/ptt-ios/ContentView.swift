@@ -54,9 +54,6 @@ struct ContentView: View {
     /// [Phase9 バックグラウンド動作] ロック画面/常駐通知/ヘッドセットボタンからの
     /// 送話操作を仲介する。connectionへはattach(to:)経由でweak参照するのみ。
     @StateObject private var backgroundControl = PTTBackgroundControlManager()
-    /// [CallKit統合] Elecom LBT-HS11等、HFP接続のBluetoothヘッドセットの物理ボタンを
-    /// 「通話」としてOSに認識させることで拾うための仕組み。詳細はPTTCallKitManager.swift冒頭コメント参照。
-    @StateObject private var callKitManager = PTTCallKitManager()
 
     @State private var tokenServerURL: String = "https://ptt-token-server-rnn4fqay3a-an.a.run.app"
     @State private var livekitURL: String = "wss://ubunifu-talk-wy19xst3.livekit.cloud"
@@ -127,8 +124,6 @@ struct ContentView: View {
         .onAppear {
             // [Phase9] 1回だけ実行すればよい(attach内部でも二重呼び出しをガードしている)。
             backgroundControl.attach(to: connection)
-            // [CallKit統合] 同様に1回だけ実行すればよい(attach内部で二重呼び出しをガード済み)。
-            callKitManager.attach(to: connection)
         }
         .onChange(of: auth.currentUser?.uid, initial: true) { _, newUid in
             savedRooms.load(forUid: newUid)

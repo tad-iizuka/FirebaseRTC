@@ -3,11 +3,16 @@
 //  ptt-ios
 //
 //  [診断用] Bluetoothヘッドセット(Elecom LBT-HS11)のボタンがどのアプリに渡っているか
-//  切り分けるため、LiveKit接続前後・送話開始/終了・CallKitのアクティブ化タイミングで
-//  AVAudioSessionの実際の設定値をログに出す。PTTConnectionManager.swift・
-//  PTTBackgroundControlManager.swift・PTTCallKitManager.swift・ptt_iosApp.swiftの
-//  複数箇所から呼ばれるため、依存関係をわかりやすくするために単独ファイルへ切り出した。
-//  原因が完全に特定できたら、このファイルごと削除してよい。
+//  切り分けるため、LiveKit接続前後・送話開始/終了のタイミングでAVAudioSessionの
+//  実際の設定値をログに出す。PTTConnectionManager.swift・PTTBackgroundControlManager.swift・
+//  ptt_iosApp.swiftの複数箇所から呼ばれる想定で、依存関係をわかりやすくするために
+//  単独ファイルへ切り出した。
+//
+//  [CallKit統合を撤回(2026-07-30)] 原因はHFP接続のBluetoothヘッドセットの物理ボタンが
+//  CallKit経由でないと信号が届かないこと、と特定済み(PTTCallKitManager.swiftで対応した
+//  実績あり)。ただしCallKit統合はアプリの自動前面化という副作用があったため一旦撤回した。
+//  現在このファイルはどこからも呼ばれていない未使用コードだが、CallKit再検討時に
+//  再利用できるよう残してある。
 //
 
 import Foundation
