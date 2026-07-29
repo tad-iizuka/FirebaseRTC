@@ -239,7 +239,7 @@ struct ContentView: View {
                 .font(.system(size: 11, weight: .regular, design: .monospaced))
                 .foregroundColor(.pttMuted)
             Spacer()
-            ConnectionStatusIcon(status: connection.status)
+            ConnectionStatusIcon(status: connection.status, roomName: currentRoomName)
             LoginStatusIcon(
                 photoURL: auth.currentUser?.photoURL,
                 displayName: auth.currentUser != nil ? headerDisplayName : nil,

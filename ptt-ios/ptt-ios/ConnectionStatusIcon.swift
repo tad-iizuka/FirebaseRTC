@@ -15,6 +15,11 @@ import SwiftUI
 
 struct ConnectionStatusIcon: View {
     let status: ConnectionStatus
+    // [表示アイコンの文字] admin-dashboardで設定されたルーム名(ContentView.currentRoomName)。
+    // nilでない場合はこちらの頭文字を優先し、未設定/未取得(nil)の場合のみ
+    // roomId(ConnectionStatusから取れるルームID)の頭文字にフォールバックする。
+    // Web版 ConnectionStatusIcon.vue の roomName prop の移植。
+    var roomName: String? = nil
 
     // Web版の `animate-pulse`(Tailwind)に相当。reconnecting中だけ不透明度を往復させる。
     @State private var pulse = false
@@ -41,7 +46,7 @@ struct ConnectionStatusIcon: View {
 
     // サロゲートペア対策で先頭の Character をそのまま使う(Web版の配列展開と同じ意図)。
     private var initial: String {
-        guard let roomId, let first = roomId.first else { return "" }
+        guard let source = roomName ?? roomId, let first = source.first else { return "" }
         return String(first).uppercased()
     }
 
