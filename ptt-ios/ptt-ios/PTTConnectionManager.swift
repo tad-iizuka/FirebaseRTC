@@ -72,6 +72,13 @@ final class PTTConnectionManager: NSObject, ObservableObject {
     private var talkRequestToken = 0
     /// 送話ロック保持中、失効(サーバー側TTL)前に延長し続けるための繰り返しタスク。
     private var talkHeartbeatTask: Task<Void, Never>?
+    /// [CallKit連携] keep-aliveトラック(マイクをmuted状態でpublishし、Egressの
+    /// 「最低1トラック」要件を満たすためのもの)を、この接続で既にpublish済みかどうか。
+    /// CallKitのdidActivateは1回の接続中に複数回発火しうる(PTTボタン押下のたびに
+    /// CXEndCallAction→CXStartCallActionで「通話」を再申告するため)ため、
+    /// 二重publishを避けるガードとして使う。connect()の開始時とdisconnect()で
+    /// falseにリセットする。
+    private var keepAliveTrackPublished = false
     /// サーバー側 LOCK_TTL_MS(15秒, token-server/routes/talk.js) より
     /// 十分短い間隔で延長する。Web版のTALK_LOCK_HEARTBEAT_MSと同じ値。
     private static let talkLockHeartbeatNanoseconds: UInt64 = 5_000_000_000
@@ -94,6 +101,7 @@ final class PTTConnectionManager: NSObject, ObservableObject {
         currentTalkerUid = nil
         isRecording = false
         recordingStartedAt = nil
+        keepAliveTrackPublished = false
 
         Task {
             do {
@@ -105,9 +113,21 @@ final class PTTConnectionManager: NSObject, ObservableObject {
 
                 try await newRoom.connect(url: livekitURL, token: token)
 
-                // PTTのため、接続直後はマイクを無効化しておく
-                // (トラックは作られるが送信されない = ボタンを押すまで無音)
-                try await newRoom.localParticipant.setMicrophone(enabled: false)
+                // [CallKit連携・訂正] 以前はここで即座にkeep-aliveトラック
+                // (マイクをmuted状態でpublish。Egress起動に必要な「最低1トラック」
+                // 要件を満たすためのもの。token-server/routes/recording.js参照)を
+                // publishしていたが、ptt_iosApp.swiftが起動時に
+                // AudioManager.shared.setEngineAvailability(.none) でエンジンを
+                // 明示的に利用不可にしており、CallKitのdidActivateで
+                // .default に戻すまでその状態が続く。つまりこの時点(connect直後)は
+                // まだエンジンが利用不可であり、ここでマイクトラックのpublishを
+                // 試みると、エンジン未準備の状態での処理となり不安定になる
+                // (リモート参加者のsubscribe処理との競合として観測されていた
+                // 事象の実体はこれだった)。
+                // そのためkeep-aliveトラックのpublishはここでは行わず、
+                // PTTCallKitManager.didActivate 側でエンジンが .default に
+                // なった後に publishKeepAliveAudioTrackIfNeeded() を呼んでもらう
+                // 形に変更した。
 
                 // 接続時点で既に誰かが発話ロックを保持していた場合や、既に録音中だった場合に
                 // 備え、room.metadataから初期状態を読み込む(メタデータ更新デリゲートは
@@ -141,6 +161,33 @@ final class PTTConnectionManager: NSObject, ObservableObject {
         }
     }
 
+    /// [CallKit連携] `PTTCallKitManager` の `provider(_:didActivate:)` から、
+    /// `AudioManager.shared.setEngineAvailability(.default)` 成功後に呼ばれる。
+    /// エンジンが利用可能になって初めて、keep-aliveトラック
+    /// (マイクをmuted状態でpublish。Egress起動に必要な「最低1トラック」要件を
+    /// 満たすためのもの。token-server/routes/recording.js参照)をpublishする。
+    ///
+    /// 以前は`connect()`内で接続直後にこれを行っていたが、その時点では
+    /// エンジンがまだ`.none`(利用不可)であり、ここが不安定さの原因だった。
+    ///
+    /// - 既にpublish済みの接続では何もしない(CallKitのdidActivateは
+    ///   PTTボタン押下のたびに複数回発火しうるため)。
+    /// - 現在PTTで送話中(isSending)の場合も何もしない
+    ///   (ここでenabled: falseを呼ぶと送話中のマイクをミュートしてしまう)。
+    func publishKeepAliveAudioTrackIfNeeded() {
+        guard let room, case .connected = status else { return }
+        guard !keepAliveTrackPublished, !isSending else { return }
+
+        Task {
+            do {
+                try await room.localParticipant.setMicrophone(enabled: false)
+                keepAliveTrackPublished = true
+            } catch {
+                appendLog(String(format: NSLocalizedString("keep-aliveトラックのpublishに失敗しました: %@", comment: "Keep-alive track publish failure"), error.localizedDescription))
+            }
+        }
+    }
+
     func disconnect() {
         guard let room else { return }
         pttHeld = false
@@ -159,6 +206,7 @@ final class PTTConnectionManager: NSObject, ObservableObject {
             currentTalkerUid = nil
             isRecording = false
             recordingStartedAt = nil
+            keepAliveTrackPublished = false
             status = .disconnected
             appendLog(String(localized: "切断しました"))
         }

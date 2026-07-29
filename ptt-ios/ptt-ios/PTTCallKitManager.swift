@@ -176,6 +176,14 @@ extension PTTCallKitManager: CXProviderDelegate {
                 options: [.allowBluetooth, .allowBluetoothA2DP, .defaultToSpeaker]
             )
             try AudioManager.shared.setEngineAvailability(.default)
+            // [訂正] エンジンが実際に利用可能になったのはここが最初のタイミングなので、
+            // keep-aliveトラック(マイクをmuted状態でpublish。Egress起動に必要な
+            // 「最低1トラック」要件対応)のpublishもここで行う。以前は
+            // PTTConnectionManager.connect() が接続直後・エンジンがまだ.noneの状態で
+            // 行っており、これが不安定さの原因だった。
+            Task { @MainActor in
+                self.connection?.publishKeepAliveAudioTrackIfNeeded()
+            }
         } catch {
             print("PTTCallKitManager didActivate configuration error: \(error)")
         }
