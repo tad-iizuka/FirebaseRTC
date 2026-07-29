@@ -2,6 +2,7 @@
 import { useI18n } from 'vue-i18n'
 import ConnectionStatusIcon from '@/components/ConnectionStatusIcon.vue'
 import LoginStatusIcon from '@/components/LoginStatusIcon.vue'
+import SettingsIcon from '@/components/SettingsIcon.vue'
 import type { ConnectionStatusKind } from '@/stores/connection'
 
 const { t } = useI18n()
@@ -24,6 +25,7 @@ const emit = defineEmits<{ signOut: [] }>()
     <span class="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">{{ t('header.appName') }}</span>
     <div class="flex items-center gap-2">
       <ConnectionStatusIcon :status-kind="connectionStatusKind" :room-id="roomId" :room-name="roomName" />
+      <SettingsIcon />
       <LoginStatusIcon
         :photo-url="photoUrl"
         :display-name="userName"

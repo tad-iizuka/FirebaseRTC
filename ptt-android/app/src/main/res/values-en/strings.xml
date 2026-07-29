@@ -26,6 +26,18 @@
     <string name="auth_sign_in_as_guest">Join as guest</string>
     <string name="auth_guest_hint">No registration required as a guest, but your messages and participation history are not deleted.</string>
 
+    <!-- settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_server_section">Server connection</string>
+    <string name="settings_preset_production">Production (default)</string>
+    <string name="settings_preset_custom">Custom</string>
+    <string name="settings_invalid_token_server_url">Enter a URL starting with https://</string>
+    <string name="settings_invalid_livekit_url">Enter a URL starting with wss://</string>
+    <string name="settings_reset_to_default">Reset to default</string>
+    <string name="settings_effect_hint">Changes take effect on the next connection.</string>
+    <string name="settings_current_server">Server: %1$s</string>
+    <string name="common_confirm">Confirm</string>
+
     <!-- onboarding -->
     <string name="onboarding_skip">Skip</string>
     <string name="onboarding_back">Back</string>

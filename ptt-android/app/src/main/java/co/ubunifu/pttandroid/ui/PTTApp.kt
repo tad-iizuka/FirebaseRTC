@@ -102,6 +102,8 @@ import co.ubunifu.pttandroid.report.PTTReportStore
 import co.ubunifu.pttandroid.room.PTTRoomManager
 import co.ubunifu.pttandroid.room.PTTSavedRoomsStore
 import co.ubunifu.pttandroid.room.SavedRoom
+import co.ubunifu.pttandroid.settings.PTTServerPreset
+import co.ubunifu.pttandroid.settings.PTTSettingsStore
 import co.ubunifu.pttandroid.ui.theme.PTTColors
 import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
@@ -134,6 +136,7 @@ fun PTTApp(
     reportStore: PTTReportStore,
     badgesStore: PTTBadgesStore,
     onboardingStore: PTTOnboardingStore,
+    settingsStore: PTTSettingsStore,
     onRequestGoogleSignIn: () -> Unit,
 ) {
     // [オンボーディング] 初回起動時はサインイン前でもこの画面を最優先で表示する
@@ -187,8 +190,24 @@ fun PTTApp(
     // 自分以外のuidが入っている間はPTTボタンを無効化する。
     val currentTalkerUid by connectionManager.currentTalkerUid.collectAsState()
 
-    var tokenServerUrl by remember { mutableStateOf("https://ptt-token-server-rnn4fqay3a-an.a.run.app") }
-    var livekitUrl by remember { mutableStateOf("wss://ubunifu-talk-wy19xst3.livekit.cloud") }
+    // [2026-07-29] 接続先(tokenServerUrl/livekitUrl)は設定画面(歯車アイコン)へ移設した。
+    // 従来は@Stateとして保持し永続化もしていなかったが、PTTSettingsStore(SharedPreferences)
+    // から都度導出する形に変更した。プリセット/カスタム値が変わるたびに再計算されるよう、
+    // presetIdをcollectAsStateで購読してから読む(単なるgetterプロパティの直接参照では
+    // 値が変わっても再コンポーズされないため)。
+    val settingsPresetId by settingsStore.presetId.collectAsState()
+    val settingsCustomTokenServerUrl by settingsStore.customTokenServerUrl.collectAsState()
+    val settingsCustomLivekitUrl by settingsStore.customLivekitUrl.collectAsState()
+    val tokenServerUrl = if (settingsPresetId == PTTServerPreset.CUSTOM) {
+        settingsCustomTokenServerUrl
+    } else {
+        PTTSettingsStore.PRODUCTION_TOKEN_SERVER_URL
+    }
+    val livekitUrl = if (settingsPresetId == PTTServerPreset.CUSTOM) {
+        settingsCustomLivekitUrl
+    } else {
+        PTTSettingsStore.PRODUCTION_LIVEKIT_URL
+    }
     var joinRoomId by remember { mutableStateOf("") }
     var joinInviteCode by remember { mutableStateOf("") }
     var chatInput by remember { mutableStateOf("") }
@@ -447,6 +466,7 @@ fun PTTApp(
             isSignedIn = currentUser != null,
             status = status,
             roomName = currentRoomName,
+            settingsStore = settingsStore,
             onSignOut = { leaveRoom(); authManager.signOut() },
         )
 
@@ -458,6 +478,7 @@ fun PTTApp(
         when {
             currentUser == null -> AuthSection(
                 errorMessage = authError,
+                tokenServerUrl = tokenServerUrl,
                 onSignIn = onRequestGoogleSignIn,
                 onSignInAsGuest = { scope.launch { authManager.signInAsGuest() } },
             )
@@ -567,9 +588,6 @@ fun PTTApp(
 
             else -> RoomSelectionSection(
                 tokenServerUrl = tokenServerUrl,
-                onTokenServerUrlChange = { tokenServerUrl = it },
-                livekitUrl = livekitUrl,
-                onLivekitUrlChange = { livekitUrl = it },
                 isWorking = roomWorking,
                 errorMessage = roomError,
                 savedRooms = savedRooms,
@@ -712,6 +730,7 @@ private fun HeaderRow(
     isSignedIn: Boolean,
     status: ConnectionStatus,
     roomName: String?,
+    settingsStore: PTTSettingsStore,
     onSignOut: () -> Unit,
 ) {
     Row(
@@ -722,6 +741,8 @@ private fun HeaderRow(
         Text(stringResource(R.string.header_app_name), fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Muted)
         Row(verticalAlignment = Alignment.CenterVertically) {
             ConnectionStatusIcon(status, roomName = roomName)
+            Spacer(Modifier.width(8.dp))
+            SettingsIcon(settingsStore = settingsStore)
             Spacer(Modifier.width(8.dp))
             LoginStatusIcon(
                 photoUrl = photoUrl,
@@ -735,8 +756,21 @@ private fun HeaderRow(
 }
 
 @Composable
-private fun AuthSection(errorMessage: String?, onSignIn: () -> Unit, onSignInAsGuest: () -> Unit) {
+private fun AuthSection(
+    errorMessage: String?,
+    tokenServerUrl: String,
+    onSignIn: () -> Unit,
+    onSignInAsGuest: () -> Unit,
+) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // [2026-07-29] 設定画面(歯車アイコン)への移設に伴い、ここには
+        // 接続先を確認したい場合だけ見える控えめなテキストのみ残す。
+        Text(
+            stringResource(R.string.settings_current_server, tokenServerUrl),
+            fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Muted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
         Button(
             onClick = onSignIn,
             modifier = Modifier.fillMaxWidth(),
@@ -976,9 +1010,6 @@ private fun RecordingSection(
 @Composable
 private fun RoomSelectionSection(
     tokenServerUrl: String,
-    onTokenServerUrlChange: (String) -> Unit,
-    livekitUrl: String,
-    onLivekitUrlChange: (String) -> Unit,
     isWorking: Boolean,
     errorMessage: String?,
     savedRooms: List<SavedRoom>,
@@ -991,19 +1022,13 @@ private fun RoomSelectionSection(
     onRemoveSaved: (String) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        OutlinedTextField(
-            value = tokenServerUrl,
-            onValueChange = onTokenServerUrlChange,
-            label = { Text(stringResource(R.string.auth_token_server_url), fontFamily = Mono, fontSize = 10.sp) },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-        )
-        OutlinedTextField(
-            value = livekitUrl,
-            onValueChange = onLivekitUrlChange,
-            label = { Text(stringResource(R.string.auth_livekit_url), fontFamily = Mono, fontSize = 10.sp) },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
+        // [2026-07-29] トークンサーバーURL/LiveKit URLの入力フィールドは設定画面(歯車アイコン)へ
+        // 移設した。普段は意識させず、接続先を確認したい場合だけここで一目で分かるようにする。
+        Text(
+            stringResource(R.string.settings_current_server, tokenServerUrl),
+            fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Muted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
 
         // [ルーム作成のadmin-dashboard移管] ルーム作成はadmin-dashboard専用の

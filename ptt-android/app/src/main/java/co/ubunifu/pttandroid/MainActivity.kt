@@ -48,6 +48,7 @@ import co.ubunifu.pttandroid.recording.PTTRecordingStore
 import co.ubunifu.pttandroid.report.PTTReportStore
 import co.ubunifu.pttandroid.room.PTTRoomManager
 import co.ubunifu.pttandroid.room.PTTSavedRoomsStore
+import co.ubunifu.pttandroid.settings.PTTSettingsStore
 import co.ubunifu.pttandroid.ui.PTTApp
 import kotlinx.coroutines.launch
 
@@ -132,6 +133,9 @@ class MainActivity : ComponentActivity() {
             // [オンボーディング] 初回起動時のスワイプ形式チュートリアルの完了状態
             // (SharedPreferencesベース。Web版のonboarding.ts/iOS版のPTTOnboardingStore.swiftと同じ設計)。
             val onboardingStore = remember { PTTOnboardingStore(applicationContext) }
+            // [設定画面] サーバー接続先(トークンサーバーURL/LiveKit URL)の永続化ストア。
+            // Web版stores/settings.ts・iOS版PTTSettingsStore.swiftと同じ設計(2026-07-29)。
+            val settingsStore = remember { PTTSettingsStore(applicationContext) }
 
             LaunchedEffect(Unit) {
                 if (!micPermissionGranted.value) {
@@ -161,6 +165,7 @@ class MainActivity : ComponentActivity() {
                             reportStore = reportStore,
                             badgesStore = badgesStore,
                             onboardingStore = onboardingStore,
+                            settingsStore = settingsStore,
                             onRequestGoogleSignIn = { signInLauncher.launch(authManager.signInIntent()) },
                         )
                         }

@@ -51,12 +51,13 @@ struct ContentView: View {
     /// [Phase13 バッジ表示UI] Web版ParticipantList.vueの移植。GET /:roomId/badges をポーリングする。
     @StateObject private var badges = PTTBadgeStore()
     @StateObject private var onboarding = PTTOnboardingStore()
+    /// [設定画面] トークンサーバーURL/LiveKit URLの接続先設定。従来は@Stateで
+    /// 保持し永続化もしていなかったが、UserDefaults永続化+プリセット選択方式に変更した。
+    @StateObject private var settings = PTTSettingsStore()
     /// [Phase9 バックグラウンド動作] ロック画面/常駐通知/ヘッドセットボタンからの
     /// 送話操作を仲介する。connectionへはattach(to:)経由でweak参照するのみ。
     @StateObject private var backgroundControl = PTTBackgroundControlManager()
 
-    @State private var tokenServerURL: String = "https://ptt-token-server-rnn4fqay3a-an.a.run.app"
-    @State private var livekitURL: String = "wss://ubunifu-talk-wy19xst3.livekit.cloud"
     @State private var joinRoomId: String = ""
     @State private var joinInviteCode: String = ""
     @State private var chatInputText: String = ""
@@ -183,6 +184,15 @@ struct ContentView: View {
     /// 未サインイン時の画面。Web版のauthSectionに相当。
     private var authSection: some View {
         VStack(spacing: 14) {
+            // [2026-07-29] 設定画面(歯車アイコン)への移設に伴い、ここには
+            // 接続先を確認したい場合だけ見える控えめなテキストのみ残す。
+            Text(String(format: NSLocalizedString("接続先: %@", comment: "Current server hint"), settings.tokenServerURL))
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.pttMuted)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
             Button {
                 Task { await auth.signInWithGoogle() }
             } label: {
@@ -240,6 +250,7 @@ struct ContentView: View {
                 .foregroundColor(.pttMuted)
             Spacer()
             ConnectionStatusIcon(status: connection.status, roomName: currentRoomName)
+            PTTSettingsIcon(settings: settings)
             LoginStatusIcon(
                 photoURL: auth.currentUser?.photoURL,
                 displayName: auth.currentUser != nil ? headerDisplayName : nil,
@@ -314,8 +325,14 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            field(label: "トークンサーバーURL", text: $tokenServerURL)
-            field(label: "LiveKit URL (wss://)", text: $livekitURL)
+            // [2026-07-29] トークンサーバーURL/LiveKit URLの入力フィールドは設定画面(歯車アイコン)へ移設した。
+            // 普段は意識させず、接続先を確認したい場合だけここで一目で分かるようにする。
+            Text(String(format: NSLocalizedString("接続先: %@", comment: "Current server hint"), settings.tokenServerURL))
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.pttMuted)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
             // [ルーム作成のadmin-dashboard移管] ルーム作成はadmin-dashboard専用の
             // POST /admin/rooms(rooms:create権限)へ一本化した。ptt-iosは常に
@@ -464,7 +481,7 @@ struct ContentView: View {
         Task {
             do {
                 let idToken = try await auth.fetchIDToken()
-                try await ban.updateNickname(tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId, displayName: trimmed)
+                try await ban.updateNickname(tokenServerURL: settings.tokenServerURL, idToken: idToken, roomId: roomId, displayName: trimmed)
             } catch {
                 // ban.nicknameErrorMessage に理由がセットされているのでUIには既に反映済み
             }
@@ -552,7 +569,7 @@ struct ContentView: View {
         Task {
             do {
                 let idToken = try await auth.fetchIDToken()
-                try await recording.startRecording(tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId)
+                try await recording.startRecording(tokenServerURL: settings.tokenServerURL, idToken: idToken, roomId: roomId)
             } catch {
                 // recording.errorMessage に理由がセットされているのでUIには既に反映済み
             }
@@ -564,7 +581,7 @@ struct ContentView: View {
         Task {
             do {
                 let idToken = try await auth.fetchIDToken()
-                try await recording.stopRecording(tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId)
+                try await recording.stopRecording(tokenServerURL: settings.tokenServerURL, idToken: idToken, roomId: roomId)
             } catch {
                 // recording.errorMessage に理由がセットされているのでUIには既に反映済み
             }
@@ -583,7 +600,7 @@ struct ContentView: View {
         Task {
             do {
                 let idToken = try await auth.fetchIDToken()
-                try await report.submitReport(tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId, reportedUid: target.uid, reason: reason)
+                try await report.submitReport(tokenServerURL: settings.tokenServerURL, idToken: idToken, roomId: roomId, reportedUid: target.uid, reason: reason)
             } catch {
                 // report.errorMessage に理由がセットされているのでUIには既に反映済み
             }
@@ -659,7 +676,7 @@ struct ContentView: View {
         Task {
             do {
                 let idToken = try await auth.fetchIDToken()
-                let name = try await roomManager.joinRoom(tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId, inviteCode: inviteCode)
+                let name = try await roomManager.joinRoom(tokenServerURL: settings.tokenServerURL, idToken: idToken, roomId: roomId, inviteCode: inviteCode)
                 currentRoomName = name
                 savedRooms.upsert(roomId: roomId, label: name ?? String(localized: "招待コードで参加したルーム"), inviteCode: inviteCode)
                 enterRoom(roomId)
@@ -686,13 +703,13 @@ struct ContentView: View {
         chat.start(roomId: roomId)
         ban.start(roomId: roomId, uid: auth.currentUser?.uid ?? "")
         badges.start(
-            tokenServerURL: tokenServerURL,
+            tokenServerURL: settings.tokenServerURL,
             roomId: roomId,
             idTokenProvider: { try await auth.fetchIDToken() }
         )
         connection.connect(
-            tokenServerURL: tokenServerURL,
-            livekitURL: livekitURL,
+            tokenServerURL: settings.tokenServerURL,
+            livekitURL: settings.livekitURL,
             room: roomId,
             idTokenProvider: { try await auth.fetchIDToken() }
         )
@@ -702,7 +719,7 @@ struct ContentView: View {
         Task {
             let idToken = try? await auth.fetchIDToken()
             guard let idToken, activeRoomId == roomId else { return }
-            if let name = await roomManager.fetchRoomName(tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId) {
+            if let name = await roomManager.fetchRoomName(tokenServerURL: settings.tokenServerURL, idToken: idToken, roomId: roomId) {
                 currentRoomName = name
             }
         }
@@ -731,7 +748,7 @@ struct ContentView: View {
         Task {
             do {
                 let idToken = try await auth.fetchIDToken()
-                try await ban.banParticipant(tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId, targetUid: target.uid)
+                try await ban.banParticipant(tokenServerURL: settings.tokenServerURL, idToken: idToken, roomId: roomId, targetUid: target.uid)
             } catch {
                 // ban.errorMessage に理由がセットされているのでUIには既に反映済み
             }
@@ -964,7 +981,7 @@ struct ContentView: View {
         Task {
             do {
                 let idToken = try await auth.fetchIDToken()
-                try await chat.sendMessage(tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId, text: text)
+                try await chat.sendMessage(tokenServerURL: settings.tokenServerURL, idToken: idToken, roomId: roomId, text: text)
             } catch {
                 // chat.errorMessage に理由がセットされているのでUIには既に反映済み。
                 // 失敗時は入力内容を戻し、打ち直させずに再送しやすくする。
@@ -1040,7 +1057,7 @@ struct ContentView: View {
         do {
             let idToken = try await auth.fetchIDToken()
             let urlString = try await chat.getThumbnailURL(
-                tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId, messageId: messageId
+                tokenServerURL: settings.tokenServerURL, idToken: idToken, roomId: roomId, messageId: messageId
             )
             guard let url = URL(string: urlString) else { return }
             let (data, _) = try await URLSession.shared.data(from: url)
@@ -1059,7 +1076,7 @@ struct ContentView: View {
             do {
                 let idToken = try await auth.fetchIDToken()
                 let urlString = try await chat.getAttachmentURL(
-                    tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId, messageId: messageId
+                    tokenServerURL: settings.tokenServerURL, idToken: idToken, roomId: roomId, messageId: messageId
                 )
                 if let url = URL(string: urlString) {
                     await UIApplication.shared.open(url)
@@ -1113,7 +1130,7 @@ struct ContentView: View {
             do {
                 let idToken = try await auth.fetchIDToken()
                 try await chat.sendAttachment(
-                    tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId,
+                    tokenServerURL: settings.tokenServerURL, idToken: idToken, roomId: roomId,
                     fileData: data, fileName: fileName, contentType: contentType
                 )
             } catch {

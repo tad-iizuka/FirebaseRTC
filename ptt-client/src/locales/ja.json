@@ -25,6 +25,17 @@
     "signInAsGuest": "ゲストとして参加",
     "guestHint": "ゲストは登録不要ですが、送信内容や参加履歴は削除されず保持されます。"
   },
+  "settings": {
+    "title": "設定",
+    "serverSection": "サーバー接続",
+    "presetProduction": "本番(デフォルト)",
+    "presetCustom": "カスタム",
+    "invalidTokenServerUrl": "https:// から始まるURLを入力してください",
+    "invalidLivekitUrl": "wss:// から始まるURLを入力してください",
+    "resetToDefault": "デフォルトに戻す",
+    "effectHint": "変更は次回の接続から反映されます。",
+    "currentServer": "接続先: {url}"
+  },
   "onboarding": {
     "skip": "スキップ",
     "back": "戻る",

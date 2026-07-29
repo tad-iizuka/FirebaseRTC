@@ -25,6 +25,17 @@
     "signInAsGuest": "Join as guest",
     "guestHint": "No registration required as a guest, but your messages and participation history are not deleted."
   },
+  "settings": {
+    "title": "Settings",
+    "serverSection": "Server connection",
+    "presetProduction": "Production (default)",
+    "presetCustom": "Custom",
+    "invalidTokenServerUrl": "Enter a URL starting with https://",
+    "invalidLivekitUrl": "Enter a URL starting with wss://",
+    "resetToDefault": "Reset to default",
+    "effectHint": "Changes take effect on the next connection.",
+    "currentServer": "Server: {url}"
+  },
   "onboarding": {
     "skip": "Skip",
     "back": "Back",

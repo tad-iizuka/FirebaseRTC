@@ -37,6 +37,20 @@
     <string name="auth_sign_in_as_guest">ゲストとして参加</string>
     <string name="auth_guest_hint">ゲストは登録不要ですが、送信内容や参加履歴は削除されず保持されます。</string>
 
+    <!-- settings -->
+    <!-- [2026-07-29] サーバーURL入力フィールドを設定画面へ移設した際に追加。
+         Web版locales/ja.jsonのsettings.*・iOS版Localizable.xcstringsと同じ文言。 -->
+    <string name="settings_title">設定</string>
+    <string name="settings_server_section">サーバー接続</string>
+    <string name="settings_preset_production">本番(デフォルト)</string>
+    <string name="settings_preset_custom">カスタム</string>
+    <string name="settings_invalid_token_server_url">https:// から始まるURLを入力してください</string>
+    <string name="settings_invalid_livekit_url">wss:// から始まるURLを入力してください</string>
+    <string name="settings_reset_to_default">デフォルトに戻す</string>
+    <string name="settings_effect_hint">変更は次回の接続から反映されます。</string>
+    <string name="settings_current_server">接続先: %1$s</string>
+    <string name="common_confirm">実行する</string>
+
     <!-- onboarding -->
     <string name="onboarding_skip">スキップ</string>
     <string name="onboarding_back">戻る</string>
