@@ -31,6 +31,7 @@
 import Foundation
 import Combine
 import LiveKit
+import AVFAudio
 
 @MainActor
 final class PTTConnectionManager: NSObject, ObservableObject {
