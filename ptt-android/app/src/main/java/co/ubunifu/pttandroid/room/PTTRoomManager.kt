@@ -101,4 +101,41 @@ class PTTRoomManager(
                 _isWorking.value = false
             }
         }
+
+    /**
+     * [ルーム名の再取得]
+     * 保存済みルームから再入室する場合(/joinを経由しない)、ルーム名は
+     * joinRoom()のレスポンスからは取得できない。iOS版(fetchRoomName)・
+     * Web版(roomStore.fetchAutoRecording)と同じく、GET /recording/status
+     * (token-server/routes/recording.js)に相乗りする形でルーム名だけ取り直す。
+     * 取得に失敗してもPTT自体の利用は妨げないため、例外は握りつぶしnullを返す
+     * (呼び出し元でエラー表示等はしない)。
+     */
+    suspend fun fetchRoomName(tokenServerUrl: String, idToken: String, roomId: String): String? =
+        withContext(Dispatchers.IO) {
+            try {
+                val encodedRoomId = java.net.URLEncoder.encode(roomId, "UTF-8")
+                val request = Request.Builder()
+                    .url("${tokenServerUrl.trimEnd('/')}/rooms/$encodedRoomId/recording/status")
+                    .addHeader("Authorization", "Bearer $idToken")
+                    .get()
+                    .build()
+
+                client.newCall(request).execute().use { response ->
+                    val text = response.body?.string()
+                    if (response.code != 200 || text == null) {
+                        null
+                    } else {
+                        val json = JSONObject(text)
+                        if (json.has("name") && !json.isNull("name")) {
+                            json.getString("name").takeIf { it.isNotEmpty() }
+                        } else {
+                            null
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                null
+            }
+        }
 }

@@ -290,6 +290,19 @@ fun PTTApp(
             roomNameParam = roomId,
             idTokenProvider = { authManager.fetchIdToken() },
         )
+        // [ルーム名の再取得] 保存済みルームからの再入室(/joinを経由しない)や、
+        // 入室後にadmin-dashboard側で名前が変更された場合にも対応できるよう、
+        // 入室のたびに最新値を取り直す(iOS版ContentView.enterRoom()・Web版
+        // RoomView.vueのenter()が毎回fetchAutoRecordingを呼ぶのと同じ方針)。
+        // 新規参加(joinRoom())側で既に取得済みの場合も再取得するが、失敗しても
+        // 既存の値を上書きしない(nullを返した場合はcurrentRoomNameを変更しない)。
+        scope.launch {
+            val idToken = try { authManager.fetchIdToken() } catch (e: Exception) { null }
+            if (idToken == null || activeRoomId != roomId) return@launch
+            roomManager.fetchRoomName(tokenServerUrl, idToken, roomId)?.let { name ->
+                currentRoomName = name
+            }
+        }
     }
 
     fun enterRoom(roomId: String) {
@@ -433,6 +446,7 @@ fun PTTApp(
             photoUrl = currentUser?.photoUrl?.toString(),
             isSignedIn = currentUser != null,
             status = status,
+            roomName = currentRoomName,
             onSignOut = { leaveRoom(); authManager.signOut() },
         )
 
@@ -697,6 +711,7 @@ private fun HeaderRow(
     photoUrl: String?,
     isSignedIn: Boolean,
     status: ConnectionStatus,
+    roomName: String?,
     onSignOut: () -> Unit,
 ) {
     Row(
@@ -706,7 +721,7 @@ private fun HeaderRow(
     ) {
         Text(stringResource(R.string.header_app_name), fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Muted)
         Row(verticalAlignment = Alignment.CenterVertically) {
-            ConnectionStatusIcon(status)
+            ConnectionStatusIcon(status, roomName = roomName)
             Spacer(Modifier.width(8.dp))
             LoginStatusIcon(
                 photoUrl = photoUrl,

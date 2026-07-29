@@ -77,7 +77,15 @@ private val IconBadgeSize = 28.dp
  * Web版ConnectionStatusIcon.vueの isLive/isReconnecting/initial ロジックをそのまま踏襲する。
  */
 @Composable
-fun ConnectionStatusIcon(status: ConnectionStatus, modifier: Modifier = Modifier) {
+fun ConnectionStatusIcon(
+    status: ConnectionStatus,
+    modifier: Modifier = Modifier,
+    // [表示アイコンの文字] admin-dashboardで設定されたルーム名(PTTApp.ktのcurrentRoomName)。
+    // nullでない場合はこちらの頭文字を優先し、未設定/未取得(null)の場合のみ
+    // roomId(ConnectionStatusから取れるルームID)の頭文字にフォールバックする。
+    // Web版 ConnectionStatusIcon.vue の roomName prop の移植。
+    roomName: String? = null,
+) {
     val isLive = status is ConnectionStatus.Connected || status is ConnectionStatus.Reconnecting
     val isReconnecting = status is ConnectionStatus.Reconnecting
     val roomId = when (status) {
@@ -87,7 +95,7 @@ fun ConnectionStatusIcon(status: ConnectionStatus, modifier: Modifier = Modifier
     }
     // サロゲートペアを考慮し、StringのcodePointベースで先頭1文字を取る
     // (Web版の `[...roomId][0]` と同じ意図)。
-    val initial = roomId?.let { id ->
+    val initial = (roomName ?: roomId)?.let { id ->
         if (id.isEmpty()) "" else id.substring(0, Character.charCount(id.codePointAt(0))).uppercase()
     } ?: ""
 
