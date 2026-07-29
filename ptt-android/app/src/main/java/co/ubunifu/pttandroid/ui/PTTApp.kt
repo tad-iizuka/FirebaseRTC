@@ -426,8 +426,13 @@ fun PTTApp(
             .padding(16.dp),
     ) {
         HeaderRow(
-            currentUserName = authManager.displayName,
-            channelLabel = channelLabel(status),
+            // [表示名の優先順位] Web版App.vueのheaderDisplayNameと同じ: ルーム内で変更した
+            // ニックネーム(myDisplayName)があればそれを優先し、無ければFirebase Authの値
+            // (authManager.displayName、内部でdisplayName→emailの順にフォールバック済み)を使う。
+            currentUserName = myDisplayName ?: authManager.displayName,
+            photoUrl = currentUser?.photoUrl?.toString(),
+            isSignedIn = currentUser != null,
+            status = status,
             onSignOut = { leaveRoom(); authManager.signOut() },
         )
 
@@ -678,37 +683,38 @@ fun PTTApp(
     }
 }
 
+/**
+ * [アイコン化]
+ * Web版(AppHeader.vue)と同じ構成に合わせ、従来ここにテキストで直書きしていた
+ * 「room: {roomId} / 未接続」「{userName} + サインアウト」を、丸型28dpの
+ * 接続状態アイコン(ConnectionStatusIcon)・ログイン状態アイコン(LoginStatusIcon)に
+ * 置き換えた。詳細な接続状態(ルーム名を含むテキスト)は入室後、引き続き
+ * StatusRow(この下で別途表示)がWeb版RoomView.vue内のStatusRowと同じ役割を担う。
+ */
 @Composable
-private fun channelLabel(status: ConnectionStatus): String = when (status) {
-    is ConnectionStatus.Connected -> "room: ${status.room}"
-    is ConnectionStatus.Reconnecting -> "room: ${status.room}"
-    else -> stringResource(R.string.common_not_connected)
-}
-
-@Composable
-private fun HeaderRow(currentUserName: String?, channelLabel: String, onSignOut: () -> Unit) {
+private fun HeaderRow(
+    currentUserName: String?,
+    photoUrl: String?,
+    isSignedIn: Boolean,
+    status: ConnectionStatus,
+    onSignOut: () -> Unit,
+) {
     Row(
         Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("PTT CLIENT", fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Muted)
-        if (currentUserName != null) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(currentUserName, fontFamily = Mono, fontSize = 12.sp)
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    stringResource(R.string.header_sign_out),
-                    fontFamily = Mono,
-                    fontSize = 11.sp,
-                    color = PTTColors.Muted,
-                    modifier = Modifier.pointerInput(Unit) {
-                        detectTapGestures(onTap = { onSignOut() })
-                    },
-                )
-            }
+        Text(stringResource(R.string.header_app_name), fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Muted)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            ConnectionStatusIcon(status)
+            Spacer(Modifier.width(8.dp))
+            LoginStatusIcon(
+                photoUrl = photoUrl,
+                displayName = currentUserName,
+                isSignedIn = isSignedIn,
+                onSignOut = onSignOut,
+            )
         }
-        Text(channelLabel, fontFamily = Mono, fontSize = 13.sp)
     }
     Spacer(Modifier.height(12.dp))
 }

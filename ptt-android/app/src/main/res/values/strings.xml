@@ -22,9 +22,13 @@
     <string name="common_cancel">キャンセル</string>
     <string name="common_remove">削除</string>
     <string name="common_not_connected">未接続</string>
+    <string name="common_connected_to_room">room: %1$s</string>
+    <string name="common_logged_in_as">ログイン中: %1$s</string>
+    <string name="common_not_logged_in">未ログイン</string>
 
     <!-- header -->
     <string name="header_sign_out">サインアウト</string>
+    <string name="header_app_name">PTT CLIENT</string>
 
     <!-- auth -->
     <string name="auth_token_server_url">トークンサーバーURL</string>

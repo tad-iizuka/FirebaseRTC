@@ -229,27 +229,26 @@ struct ContentView: View {
 
     // MARK: - Header
 
+    // [接続状態・ログイン状態のアイコン化]
+    // Web版(ptt-client/src/components/AppHeader.vue)に合わせ、以前ここにあった
+    // 「表示名テキスト + サインアウトテキストボタン + room: xxxx / 未接続テキスト」を
+    // ConnectionStatusIcon・LoginStatusIcon の2つの丸アイコンに置き換えた。
     private var header: some View {
-        HStack {
+        HStack(spacing: 10) {
             Text("PTT CLIENT")
                 .font(.system(size: 11, weight: .regular, design: .monospaced))
                 .foregroundColor(.pttMuted)
             Spacer()
-            if auth.currentUser != nil {
-                Text(headerDisplayName)
-                    .font(.system(size: 12, design: .monospaced))
-                    .lineLimit(1)
-                Button("サインアウト") {
+            ConnectionStatusIcon(status: connection.status)
+            LoginStatusIcon(
+                photoURL: auth.currentUser?.photoURL,
+                displayName: auth.currentUser != nil ? headerDisplayName : nil,
+                isSignedIn: auth.currentUser != nil,
+                onSignOut: {
                     leaveRoom()
                     auth.signOut()
                 }
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundColor(.pttMuted)
-                .padding(.leading, 8)
-            }
-            Spacer()
-            Text(channelLabel)
-                .font(.system(size: 13, design: .monospaced))
+            )
         }
         .padding(14)
     }
@@ -263,14 +262,6 @@ struct ContentView: View {
             return ban.myDisplayName ?? String(localized: "ゲスト")
         }
         return ""
-    }
-
-    private var channelLabel: String {
-        switch connection.status {
-        case .connected(let room): return "room: \(room)"
-        case .reconnecting(let room): return "room: \(room)"
-        default: return String(localized: "未接続")
-        }
     }
 
     // MARK: - Status

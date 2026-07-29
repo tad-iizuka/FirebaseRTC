@@ -1300,6 +1300,28 @@
           }
         }
       }
+    },
+    "ログイン中: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Logged in as %@"
+          }
+        }
+      }
+    },
+    "未ログイン": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not logged in"
+          }
+        }
+      }
     }
   },
   "version": "1.1"
