@@ -8,20 +8,27 @@
 //  継続できる(Android版と異なり、iOSにはこれに相当するForegroundServiceの概念は不要)。
 //
 //  一方、画面上のPTTボタンはアプリが前面にある間しか押せないため、バックグラウンド中に
-//  「送話を開始/終了する」操作を行う手段が別途必要になる。このクラスはその手段を3つ提供する:
+//  「送話を開始/終了する」操作を行う手段が別途必要になる。このクラスはその手段を提供する:
 //
 //    1. MPRemoteCommandCenter経由のロック画面/コントロールセンターの再生系コントロール
 //       (Now Playing風UI)。play=送話開始、pause=送話終了として割り当てる
 //    2. Bluetoothヘッドセット等の物理ボタン(シングルクリック)も同じMPRemoteCommandCenter経由で
 //       play/pauseコマンドとして届くため、1と同じ経路で扱える
-//    3. アプリがバックグラウンドにいる間だけ表示する常駐通知(UNNotification)。
-//       「送話開始」「送話終了」の2アクションを持ち、タップで PTTConnectionManager を操作する
 //
 //  Androidの物理ボタン実装(PTTForegroundService.kt)とは異なり、iOSのMPRemoteCommandCenterは
 //  ボタンのdown/upを個別に受け取れず「1回の操作」としてしか通知されないため、
 //  画面上のPTTボタンと同じ「押している間だけ送話」(hold-to-talk)は再現できない。
 //  そのため、いずれの操作手段も「タップ(1回操作)でトグル」という統一UXにしている
 //  (Android側もヘッドセット物理ボタン以外は同じ考え方)。
+//
+//  [常駐通知(UNNotification)を廃止した経緯]
+//  当初はNow Playingウィジェットに加えて「送話開始/送話終了」アクション付きの常駐通知も
+//  併設していたが、以下の理由により廃止し、Now Playingウィジェットへ一本化した。
+//    - 誰かが送話を開始/終了するたびに内容を更新する設計だったため、interruptionLevelを
+//      .passiveにしてもロック画面の通知一覧に残り続け、Now Playingウィジェットと機能が
+//      完全に重複する形でユーザーの目に触れ続けてしまっていた
+//    - 送話開始/終了の操作自体はNow Playingウィジェットの再生/一時停止で既に行えており、
+//      常駐通知側のアクションボタンは同じ操作を別の見た目で提供しているだけだった
 //
 //  [制約・注意]
 //  - 実機での動作検証(ロック画面からの操作・長時間バックグラウンド時の接続維持・
@@ -34,24 +41,13 @@
 import Foundation
 import Combine
 import MediaPlayer
-import UserNotifications
-import UIKit
 import AVFoundation
-
-private enum PTTNotificationActionId: String {
-    case start = "PTT_TALK_START"
-    case stop = "PTT_TALK_STOP"
-}
 
 @MainActor
 final class PTTBackgroundControlManager: NSObject, ObservableObject {
 
-    private static let notificationCategoryId = "PTT_TALK_CONTROL"
-    private static let notificationRequestId = "ptt.background.status"
-
     private weak var connection: PTTConnectionManager?
     private var cancellables = Set<AnyCancellable>()
-    private var isAppInBackground = false
 
     /// ContentView.swift から一度だけ呼ぶ。connection は @StateObject として
     /// ContentView側が生存管理するため、ここではweak参照のみ保持する。
@@ -59,11 +55,8 @@ final class PTTBackgroundControlManager: NSObject, ObservableObject {
         guard self.connection == nil else { return }
         self.connection = connection
 
-        UNUserNotificationCenter.current().delegate = self
-        configureNotificationCategory()
         configureRemoteCommands()
         observeConnectionState()
-        observeAppLifecycle()
         observeAudioInterruptions()
     }
 
@@ -123,137 +116,17 @@ final class PTTBackgroundControlManager: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - 接続状態の購読 → Now Playing情報・常駐通知の更新
+    // MARK: - 接続状態の購読 → Now Playing情報の更新
 
     private func observeConnectionState() {
         guard let connection else { return }
         connection.$status
-            .combineLatest(connection.$isSending, connection.$currentTalkerUid)
+            .combineLatest(connection.$isSending)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] status, isSending, talkerUid in
-                self?.handleStateChange(status: status, isSending: isSending, talkerUid: talkerUid)
+            .sink { [weak self] status, isSending in
+                self?.updateNowPlayingInfo(status: status, isSending: isSending)
             }
             .store(in: &cancellables)
-    }
-
-    private func handleStateChange(status: ConnectionStatus, isSending: Bool, talkerUid: String?) {
-        updateNowPlayingInfo(status: status, isSending: isSending)
-
-        // 前面表示中は画面上のPTTボタンで操作できるため、常駐通知は不要(出しっぱなしにしない)。
-        guard isAppInBackground else {
-            removePersistentNotification()
-            return
-        }
-
-        switch status {
-        case .connected, .reconnecting:
-            postOrUpdatePersistentNotification(status: status, isSending: isSending, talkerUid: talkerUid)
-        case .disconnected, .connecting, .error:
-            removePersistentNotification()
-        }
-    }
-
-    // MARK: - アプリのフォアグラウンド/バックグラウンド遷移
-
-    private func observeAppLifecycle() {
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(appDidEnterBackground),
-            name: UIApplication.didEnterBackgroundNotification, object: nil
-        )
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(appWillEnterForeground),
-            name: UIApplication.willEnterForegroundNotification, object: nil
-        )
-    }
-
-    @objc private func appDidEnterBackground() {
-        isAppInBackground = true
-        guard let connection else { return }
-        switch connection.status {
-        case .connected, .reconnecting:
-            requestNotificationAuthorizationIfNeeded { [weak self] granted in
-                guard granted, let self, let connection = self.connection else { return }
-                self.postOrUpdatePersistentNotification(
-                    status: connection.status, isSending: connection.isSending, talkerUid: connection.currentTalkerUid
-                )
-            }
-        case .disconnected, .connecting, .error:
-            break
-        }
-    }
-
-    @objc private func appWillEnterForeground() {
-        isAppInBackground = false
-        removePersistentNotification()
-    }
-
-    // MARK: - 常駐通知(送話開始/終了アクション付き)
-
-    private func configureNotificationCategory() {
-        let startAction = UNNotificationAction(
-            identifier: PTTNotificationActionId.start.rawValue,
-            title: String(localized: "送話開始"),
-            options: []
-        )
-        let stopAction = UNNotificationAction(
-            identifier: PTTNotificationActionId.stop.rawValue,
-            title: String(localized: "送話終了"),
-            options: []
-        )
-        let category = UNNotificationCategory(
-            identifier: Self.notificationCategoryId,
-            actions: [startAction, stopAction],
-            intentIdentifiers: [],
-            options: []
-        )
-        UNUserNotificationCenter.current().setNotificationCategories([category])
-    }
-
-    private func requestNotificationAuthorizationIfNeeded(completion: @escaping (Bool) -> Void) {
-        let center = UNUserNotificationCenter.current()
-        center.getNotificationSettings { settings in
-            switch settings.authorizationStatus {
-            case .authorized, .provisional:
-                DispatchQueue.main.async { completion(true) }
-            case .notDetermined:
-                center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
-                    DispatchQueue.main.async { completion(granted) }
-                }
-            case .denied, .ephemeral:
-                DispatchQueue.main.async { completion(false) }
-            @unknown default:
-                DispatchQueue.main.async { completion(false) }
-            }
-        }
-    }
-
-    private func postOrUpdatePersistentNotification(status: ConnectionStatus, isSending: Bool, talkerUid: String?) {
-        let content = UNMutableNotificationContent()
-        switch status {
-        case .connected(let room):
-            content.title = String(format: NSLocalizedString("接続中: %@", comment: "Background notification title, connected"), room)
-        case .reconnecting(let room):
-            content.title = String(format: NSLocalizedString("再接続中: %@", comment: "Background notification title, reconnecting"), room)
-        case .disconnected, .connecting, .error:
-            content.title = String(localized: "PTT接続中")
-        }
-        if isSending {
-            content.body = String(localized: "送話中")
-        } else if talkerUid != nil {
-            content.body = String(localized: "他の参加者が送話中")
-        } else {
-            content.body = String(localized: "待機中")
-        }
-        content.categoryIdentifier = Self.notificationCategoryId
-        content.sound = nil
-
-        let request = UNNotificationRequest(identifier: Self.notificationRequestId, content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request)
-    }
-
-    private func removePersistentNotification() {
-        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [Self.notificationRequestId])
-        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [Self.notificationRequestId])
     }
 
     // MARK: - オーディオ割り込み(電話着信等)
@@ -285,39 +158,5 @@ final class PTTBackgroundControlManager: NSObject, ObservableObject {
         @unknown default:
             break
         }
-    }
-}
-
-// MARK: - UNUserNotificationCenterDelegate(通知アクションのタップをPTTConnectionManagerへ橋渡し)
-
-extension PTTBackgroundControlManager: UNUserNotificationCenterDelegate {
-
-    nonisolated func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        didReceive response: UNNotificationResponse,
-        withCompletionHandler completionHandler: @escaping () -> Void
-    ) {
-        let actionId = response.actionIdentifier
-        Task { @MainActor in
-            switch actionId {
-            case PTTNotificationActionId.start.rawValue:
-                self.connection?.startTalking()
-            case PTTNotificationActionId.stop.rawValue:
-                self.connection?.stopTalking()
-            default:
-                break
-            }
-            completionHandler()
-        }
-    }
-
-    // アプリがバックグラウンドの間に届く常駐通知は、更新のたびにバナー/サウンドとしても
-    // 表示してよい(ここではsoundを設定していないため実質バナー表示のみ)。
-    nonisolated func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        willPresent notification: UNNotification,
-        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
-    ) {
-        completionHandler([.banner, .sound])
     }
 }
