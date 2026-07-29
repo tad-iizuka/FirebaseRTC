@@ -7,6 +7,9 @@ import type { ConnectionStatusKind } from '@/stores/connection'
 const props = defineProps<{
   statusKind: ConnectionStatusKind
   roomId: string | null
+  // [表示アイコンの文字] admin-dashboardで設定されたルーム名。nullでない場合は
+  // こちらの頭文字を優先し、未設定/未取得(null)の場合のみroomIdの頭文字にフォールバックする。
+  roomName?: string | null
 }>()
 
 const { t } = useI18n()
@@ -19,9 +22,12 @@ const isLive = computed(() => props.statusKind === 'connected' || props.statusKi
 const isReconnecting = computed(() => props.statusKind === 'reconnecting')
 
 const initial = computed(() => {
-	if (!props.roomId) return ''
+	// room:nameが設定されていればそちらの頭文字を優先し、
+	// 未設定/未取得(null)の場合のみroomIdの頭文字にフォールバックする。
+	const source = props.roomName ?? props.roomId
+	if (!source) return ''
 	// サロゲートペア対策で配列展開してから先頭1文字を取る
-	return [...props.roomId][0]?.toUpperCase() ?? ''
+	return [...source][0]?.toUpperCase() ?? ''
 })
 
 const label = computed(() =>

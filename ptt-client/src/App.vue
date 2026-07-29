@@ -5,6 +5,7 @@ import { useBanStore } from '@/stores/ban'
 import { useSavedRoomsStore } from '@/stores/savedRooms'
 import { useConnectionStore } from '@/stores/connection'
 import { useOnboardingStore } from '@/stores/onboarding'
+import { useRoomStore } from '@/stores/room'
 import AppHeader from '@/components/AppHeader.vue'
 import AuthView from '@/views/AuthView.vue'
 import OnboardingFlow from '@/components/OnboardingFlow.vue'
@@ -14,6 +15,7 @@ const ban = useBanStore()
 const savedRooms = useSavedRoomsStore()
 const connection = useConnectionStore()
 const onboarding = useOnboardingStore()
+const roomStore = useRoomStore()
 
 // [ヘッダーの表示名]
 // ゲストがルーム内で変更したニックネーム(ban.myDisplayName、rooms/{roomId}/members/{uid}の
@@ -51,6 +53,7 @@ async function handleSignOut() {
 					:is-signed-in="!!auth.currentUser"
 					:connection-status-kind="connection.statusKind"
 					:room-id="connection.roomName"
+					:room-name="roomStore.currentRoomName"
 					@sign-out="handleSignOut"
 				/>
 				<AuthView v-if="!auth.currentUser" />
