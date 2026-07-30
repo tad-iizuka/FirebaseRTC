@@ -11,8 +11,10 @@
 //  [CallKit統合を撤回(2026-07-30)] 原因はHFP接続のBluetoothヘッドセットの物理ボタンが
 //  CallKit経由でないと信号が届かないこと、と特定済み(PTTCallKitManager.swiftで対応した
 //  実績あり)。ただしCallKit統合はアプリの自動前面化という副作用があったため一旦撤回した。
-//  現在このファイルはどこからも呼ばれていない未使用コードだが、CallKit再検討時に
-//  再利用できるよう残してある。
+//
+//  [再利用(2026-07-30)] Web→iOS初回送話が届かない不具合の診断のため、
+//  PTTConnectionManager.swift の connect() から再びこの関数を呼ぶようにした
+//  (再生エンジンの事前ウォームアップ前後でAVAudioSessionの状態を比較するため)。
 //
 
 import Foundation

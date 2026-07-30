@@ -77,6 +77,10 @@ final class PTTConnectionManager: NSObject, ObservableObject {
     /// publishKeepAliveAudioTrackIfNeeded()の冪等性ガードとして使う。
     /// connect()の開始時とdisconnect()でfalseにリセットする。
     private var keepAliveTrackPublished = false
+    /// [音声エンジン事前ウォームアップ] AudioManager.shared.startLocalRecording()で
+    /// ADMの録音を明示的に開始済みかどうか。disconnect()時にtrueであれば
+    /// stopLocalRecording()で後始末する。詳細はconnect()内のコメント参照。
+    private var localRecordingWarmupActive = false
     /// サーバー側 LOCK_TTL_MS(15秒, token-server/routes/talk.js) より
     /// 十分短い間隔で延長する。Web版のTALK_LOCK_HEARTBEAT_MSと同じ値。
     private static let talkLockHeartbeatNanoseconds: UInt64 = 5_000_000_000
@@ -110,6 +114,45 @@ final class PTTConnectionManager: NSObject, ObservableObject {
                 room = newRoom
 
                 try await newRoom.connect(url: livekitURL, token: token)
+                logCurrentAudioSession(context: "room_connected(before_warmup)")
+
+                // [音声エンジン事前ウォームアップ・経緯]
+                // 実機での症状(PTTボタンを押すまでWeb→iOSの音声が一切聞こえず、ボタンを押した
+                // 瞬間に溜まっていた音声が再生される)から、「音声エンジンがRoom接続時点では
+                // 起動しておらず、ローカルのマイク入力を開始した時に初めて起動する」実装に
+                // なっていると判断した。以下2つのAPIを順に試したが、実機診断ログにより
+                // どちらも実際にはエンジンを起動していないことが判明した。
+                //   1. setRecordingAlwaysPreparedMode(true): async throwsであり@MainActor上での
+                //      awaitがハング(疑い)を引き起こし撤回
+                //   2. acquireSessionRequirement(.playbackOnly / .playbackAndRecording):
+                //      SDKソース確認の結果、これは`audioSession.acquire(requirement:)`という
+                //      「要求の登録」のみを行うAPIで、ADM(Audio Device Module)を直接起動する
+                //      ものではないと判明。実機ログでも、この呼び出し直後に
+                //      `AudioManager.shared.isEngineRunning`が`false`のままであることを確認した
+                //      (Bluetooth HFPではなく本体スピーカー/マイクでも同一症状のため、
+                //      Bluetooth固有の問題という仮説も棄却した)
+                // これらを踏まえ、SDKソースで`AudioManager.shared.startLocalRecording()`
+                // (`RTC.audioDeviceModule.initAndStartRecording()`を直接呼ぶ、同期`throws`関数)
+                // を確認した。ドキュメントに「Roomや接続なしでもマイク入力を開始できる」と
+                // 明記されている通り、LiveKitのRoom/トラックpublish(=SDP再ネゴシエーション)とは
+                // 完全に独立してADMを直接起動できるAPIであり、`acquireSessionRequirement`とは
+                // 異なり実際に`isEngineRunning`をtrueにする効果を持つ想定である。これを採用する。
+                //
+                // 音声を実際に外部へ送信するわけではない(トラックがpublishされていないため)。
+                // 後でPTTボタンが押されてsetMicrophone(enabled: true)が呼ばれた際、内部で
+                // 二重にrecordingを開始しようとする可能性があるが、WebRTCのADM実装は通常
+                // start/stopを冪等(既に開始中なら無害)に扱うため許容する。disconnect()で
+                // stopLocalRecording()を呼び後始末する。失敗してもRoom接続自体は継続してよい
+                // (あくまで再生開始を早めるための最適化)ため、独立したdo/catchで握りつぶす。
+                do {
+                    try AudioManager.shared.startLocalRecording()
+                    localRecordingWarmupActive = true
+                    appendLog(String(localized: "[診断] 音声エンジンの事前ウォームアップ(startLocalRecording)を開始しました"))
+                } catch {
+                    appendLog(String(format: NSLocalizedString("音声エンジンの事前ウォームアップに失敗しました(接続は継続): %@", comment: "Engine warmup failure (non-fatal)"), error.localizedDescription))
+                }
+                logCurrentAudioSession(context: "room_connected(after_warmup)")
+                appendLog(String(format: NSLocalizedString("[診断] isEngineRunning=%@", comment: "Engine running diagnostic"), AudioManager.shared.isEngineRunning ? "true" : "false"))
 
                 // [CallKit統合を撤回(2026-07-30)] 以前はCallKit(PTTCallKitManager)の
                 // didActivateがエンジンを.defaultに戻すまで待つ必要があり、connect直後に
@@ -194,6 +237,10 @@ final class PTTConnectionManager: NSObject, ObservableObject {
             isRecording = false
             recordingStartedAt = nil
             keepAliveTrackPublished = false
+            if localRecordingWarmupActive {
+                try? AudioManager.shared.stopLocalRecording()
+                localRecordingWarmupActive = false
+            }
             status = .disconnected
             appendLog(String(localized: "切断しました"))
         }
@@ -231,7 +278,11 @@ final class PTTConnectionManager: NSObject, ObservableObject {
             }
 
             do {
+                appendLog(String(format: NSLocalizedString("[診断] マイク有効化開始 isEngineRunning(前)=%@", comment: "Mic enable start diagnostic"), AudioManager.shared.isEngineRunning ? "true" : "false"))
+                let micEnableStart = Date()
                 try await room.localParticipant.setMicrophone(enabled: true)
+                let micEnableElapsed = Date().timeIntervalSince(micEnableStart)
+                appendLog(String(format: NSLocalizedString("[診断] マイク有効化完了 所要%.2f秒 isEngineRunning(後)=%@", comment: "Mic enable complete diagnostic"), micEnableElapsed, AudioManager.shared.isEngineRunning ? "true" : "false"))
                 self.isSending = true
                 self.startTalkHeartbeat()
             } catch {
@@ -408,12 +459,17 @@ final class PTTConnectionManager: NSObject, ObservableObject {
 
     // MARK: - Log
 
+    /// [2026-07-30] 以前はlogLines(アプリ内のログ画面)にのみ追記しており、
+    /// Xcodeコンソール/実機ログには出力されていなかった。診断ログ([診断]プレフィックス)を
+    /// コンソール貼り付けだけで確認できるよう、print()も併せて行うようにした。
     private func appendLog(_ line: String) {
         let timestamp = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
-        logLines.append("[\(timestamp)] \(line)")
+        let formatted = "[\(timestamp)] \(line)"
+        logLines.append(formatted)
         if logLines.count > 200 {
             logLines.removeFirst(logLines.count - 200)
         }
+        print("📋\(formatted)")
     }
 }
 
@@ -431,6 +487,10 @@ extension PTTConnectionManager: RoomDelegate {
                 self.isRecording = false
                 self.recordingStartedAt = nil
                 self.room = nil
+                if self.localRecordingWarmupActive {
+                    try? AudioManager.shared.stopLocalRecording()
+                    self.localRecordingWarmupActive = false
+                }
                 if case .error = self.status {
                     // エラーによる切断は表示を残す
                 } else {
