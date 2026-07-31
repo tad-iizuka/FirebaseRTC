@@ -495,17 +495,34 @@ admin-dashboardの権限モデルへの「団体管理者（特定orgId配下の
 実コード（`middleware/requireAdmin.js`・`routes/organizations.js`）を
 確認した上で決定しており、design memo単体の想定から一部修正を加えている）
 
-**1. 階層構造の確定**
+**1. 階層構造の確定（再帰的スコープモデルを維持）**
+
+固定された名前付きの階層（Company admin / Branch group等）を列挙するのでは
+なく、「あるuidが、あるnodeIdをscopeとして持つ」という**1種類の関係**を
+木の任意の深さに対して適用する、当初合意した再帰的スコープモデルを
+そのまま採用する。固定されているのは以下の2点のみで、それ以外は
+すべて`scopeNodeIds`の値次第で任意の深さ・組み合わせを表現できる。
 
 ```
-root（既存のadminUsers権限モデル。特定の許可文字列を持つ者。今回の
-      文脈では'organizations:manage'権限の保持者をrootとして扱う）
-  └─ Company admin（organizations/{orgId}/members/{uid}、
-                     orgRole:'admin'、scopeNodeIds未指定）
-       └─ scope限定admin（同上、scopeNodeIds指定あり。Branch等の
-                           特定node配下のみ管理。旧称「group」）
-            └─ staff（orgRole:'staff'）
+root（既存のadminUsers権限モデル。木構造の外側にある別ロジック。
+      今回の文脈では'organizations:manage'権限の保持者をrootとして扱う）
+  └─ org内admin（organizations/{orgId}/members/{uid}、orgRole:'admin'。
+       scopeNodeIds未指定 = org木全体を管理
+       scopeNodeIds: [nodeId, ...] = 指定node(木の任意の深さ、Branch/Site
+         問わず)とその配下を管理。複数指定で兼務も表現できる）
+       └─ staff（orgRole:'staff'。管理権限を持たない末端）
 ```
+
+「Company admin」「Branch group」という呼び方は、あくまで
+`scopeNodeIds`が空(org全体)か、特定node(Branch相当)を指しているかの
+**代表的な2ケースの説明**であり、モデル上は固定の層ではない。例えば
+`scopeNodeIds: ['siteA1']`のようにSite単位を直接指すことも、
+`scopeNodeIds: ['branchA', 'branchB']`のように複数nodeを跨いで兼務する
+ことも、同じ`scopeNodeIds`という1つの仕組みでカバーされる。「祖先の
+scopeは子孫のscopeを包含する」というoverride関係も、名前付きの層をまたぐ
+特別な規約としてではなく、次項の`ancestorIds`包含判定から自然に導かれる
+（scopeNodeIdsにBranchAを持つuidは、その配下のSiteA1に対する判定でも
+SiteA1の`ancestorIds`にBranchAが含まれるため許可される）。
 
 当初「rootを木の頂点ノードとして`node_admins`という新設コレクションに
 統合する」案も検討したが、既存の`adminUsers`権限モデル
@@ -513,7 +530,7 @@ root（既存のadminUsers権限モデル。特定の許可文字列を持つ者
 `admins:manage`/`organizations:manage`/`rooms:monitor`等の権限文字列配列
 （現状10種）であることを実コードで確認した。これを踏まえ、rootは既存の
 権限モデルへの素直な参照（`organizations:manage`権限の保持）とし、
-それ以外（Company admin以下）のみを新設の再帰スコープモデルで表現する、
+それ以外（org内admin以下）のみを再帰的スコープモデルで表現する、
 という切り分けに確定した。
 
 **2. データモデル**
@@ -560,10 +577,13 @@ Phase11の`routes/organizations.js`で、node作成時に`ancestorIds`
 
 **4. override規約**
 
-上位は下位に対し常時override可能（root→Company admin→scope限定admin）。
-監査ログは必須。通知は当面「ログのみ、即時通知はしない」（Phase14の
-プッシュ通知基盤待ち。将来的に`organizations/{orgId}`側へ通知要否設定を
-団体管理者が持てるようにする余地を残す）。
+rootは常時org内admin(scope問わず)をoverride可能。org内adminどうしは、
+`ancestorIds`の包含関係により、広いscope(浅いnode、または未指定=org全体)
+を持つadminが、狭いscope(その配下のnode)を持つadminをoverride可能
+（固定の層数ではなく、scopeの包含関係のみで決まる）。監査ログは必須。
+通知は当面「ログのみ、即時通知はしない」（Phase14のプッシュ通知基盤待ち。
+将来的に`organizations/{orgId}`側へ通知要否設定を団体管理者が持てるように
+する余地を残す）。
 
 **5. 監査ログスキーマ**
 
