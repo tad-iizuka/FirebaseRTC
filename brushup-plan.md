@@ -489,6 +489,116 @@ Firestoreルール・admin-dashboardの権限モデル拡張）はいずれも�
 > バックグラウンド動作・通報/録音UIのiOS/Android未実装）については、前版の記述が
 > 実コードと一致していることを確認した。
 
+二十四訂: 2026-07-31（`phase11-org-roster-design.md`（案C）を踏まえ、
+admin-dashboardの権限モデルへの「団体管理者（特定orgId配下のみ管理）」
+スコープの追加方法について検討し、以下の通り合意した。`token-server`の
+実コード（`middleware/requireAdmin.js`・`routes/organizations.js`）を
+確認した上で決定しており、design memo単体の想定から一部修正を加えている）
+
+**1. 階層構造の確定**
+
+```
+root（既存のadminUsers権限モデル。特定の許可文字列を持つ者。今回の
+      文脈では'organizations:manage'権限の保持者をrootとして扱う）
+  └─ Company admin（organizations/{orgId}/members/{uid}、
+                     orgRole:'admin'、scopeNodeIds未指定）
+       └─ scope限定admin（同上、scopeNodeIds指定あり。Branch等の
+                           特定node配下のみ管理。旧称「group」）
+            └─ staff（orgRole:'staff'）
+```
+
+当初「rootを木の頂点ノードとして`node_admins`という新設コレクションに
+統合する」案も検討したが、既存の`adminUsers`権限モデル
+（`middleware/requireAdmin.js`）は単一のrootフラグではなく、
+`admins:manage`/`organizations:manage`/`rooms:monitor`等の権限文字列配列
+（現状10種）であることを実コードで確認した。これを踏まえ、rootは既存の
+権限モデルへの素直な参照（`organizations:manage`権限の保持）とし、
+それ以外（Company admin以下）のみを新設の再帰スコープモデルで表現する、
+という切り分けに確定した。
+
+**2. データモデル**
+
+当初検討した独立コレクション`node_admins`は不採用。既存の
+`organizations/{orgId}/members/{uid}`（ロースター、`phase11-org-roster-
+design.md`で提案済み・未実装）を拡張する形に統一した。
+
+```
+organizations/{orgId}/members/{uid}
+  orgRole: 'admin' | 'staff'
+  scopeNodeIds?: string[]   // 省略/空配列 = Company全体管理
+                            // 1件以上 = 列挙node配下の兼務管理（同列。
+                            // 兼務する階層間で権限・付与者を分ける
+                            // 運用上の必要性は薄いと判断し、
+                            // grantedAt/grantedByはドキュメント単位で
+                            // 単一のまま持たせない）
+  grantedAt: timestamp
+  grantedBy: uid
+```
+
+**3. 祖先判定は既存の`ancestorIds`を流用（新規実装不要）**
+
+Phase11の`routes/organizations.js`で、node作成時に`ancestorIds`
+（非正規化された祖先ID配列）が既に計算・保存されていることを確認した
+（`ancestorIds = [...(parent.ancestorIds || []), parentNodeId]`。
+`PATCH /admin/rooms/:roomId/org-assignment`でもRoom側に
+`nodeAncestorIds`として同様に複製されている）。そのため、scope限定admin
+の判定は「parentNodeIdを逐次辿るループ」を新設する必要がなく、既存の
+`node.ancestorIds`（+自身のnodeId）と`scopeNodeIds`の共通要素の有無で
+判定できる。
+
+```
+権限判定(uid, orgId, 対象nodeId):
+  1. adminUsers の permissions に 'organizations:manage' が含まれるか
+     → Yes ならroot、無条件許可
+  2. organizations/{orgId}/members/{uid} を読む
+  3. orgRole !== 'admin' → 不許可
+  4. scopeNodeIds が空/未指定 → 許可（Company全体admin）
+  5. scopeNodeIds が指定されている場合：
+     対象nodeIdの ancestorIds（+自身）と scopeNodeIds の
+     共通要素があれば許可、なければ不許可
+```
+
+**4. override規約**
+
+上位は下位に対し常時override可能（root→Company admin→scope限定admin）。
+監査ログは必須。通知は当面「ログのみ、即時通知はしない」（Phase14の
+プッシュ通知基盤待ち。将来的に`organizations/{orgId}`側へ通知要否設定を
+団体管理者が持てるようにする余地を残す）。
+
+**5. 監査ログスキーマ**
+
+新規コレクションは作らず、既存の`auditLogs`（`lib/auditLog.js`・
+`logAdminAction()`、`actorUid`/`action`/`targetRoomId`/`targetUid`/
+`detail`/`createdAt`/`expireAt`という既存スキーマ、TTL 400日）を拡張する
+形で統合する。
+
+- `action`：既存の"namespace:verb"命名規則（`room:ban`等）に合わせ、
+  `org:member_grant` / `org:member_revoke` / `org:member_view` /
+  `org:member_edit`を新設
+- `detail`（既存の自由形式フィールド）に以下を格納し、トップレベル
+  スキーマは変更しない（既存の`AuditLogsView.vue`・`adminAuditLogs.ts`
+  への影響を避ける）：
+  - `orgId`, `targetNodeId?`
+  - `actorType`: 'root' | 'org_admin_full' | 'org_admin_scoped'
+    （`scopeNodeIds`の有無で機械的に判別）
+  - `actorScopeNodeId?`: scope限定adminの場合、一致したnodeId
+  - `isOverride`: boolean。`organizations/{orgId}/members/{actorUid}`に
+    admin登録が無ければ常にtrue（機械的に判定）
+- `action: 'org:member_view'`は、招待コード再取得に加えて名簿一覧の
+  閲覧も対象に含める
+
+**6. 未決事項（次アクションへ）**
+
+- 最初の団体管理者の代理登録フロー（鶏卵問題）の正式API化
+- `GET /admin/me`の実装（`managedOrgIds`等、団体管理者UIの成立要件として
+  保留から昇格）
+- 通知設定（`organizations/{orgId}`側の要否フィールド）の具体的な
+  フィールド名・デフォルト値
+- `phase11-org-roster-design.md`自体のリポジトリ反映（引き続き未反映。
+  設計メモの段階）
+- Site単位以下の粒度（招待コードの「Site限定閲覧」）は今回もスコープ外の
+  まま。Branch単位の`scopeNodeIds`で当面代替する方針を維持
+
 ---
 
 ## 0. README.mdが定義するビジョンの要点（前提の再確認）
@@ -969,17 +1079,27 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
   （ユーザー確認済み、2026-07-25）。**Phase12（役割と機能の整理）で
   role別に何を一般メンバーへ公開してよいかを棚卸しする際、合わせて
   検討する**
-- **ユーザー×団体の所属関係 → 設計方針を合意（2026-07-30、二十二訂）**：
+- **ユーザー×団体の所属関係 → 設計方針を合意（2026-07-30、二十二訂）、
+  admin-dashboard権限モデルへのスコープ追加方法も確定（2026-07-31、
+  二十四訂）**：
   十三訂でPhase11実装時に明示的に着手対象外としていた本論点について、
   MLBの球団・選手の関係（一時的なつながり、トレード・フリーエージェント
   あり）を例えに検討し、別ドキュメント`phase11-org-roster-design.md`
   として設計をまとめた。所属情報は追加するが**Room入室の権限判定には
   使わない**（引き続き`rooms/{roomId}/members/{uid}`のroleのみで判定する）
   「任意のロースター層」（案C）を採用することでユーザーと合意している。
-  データモデル案（`organizations/{orgId}/members/{uid}`）・団体管理者の
-  登録動線・一般警備士の参加動線までは具体化したが、**実装はまだ行って
-  いない**。admin-dashboardの権限モデルへのスコープ付き権限追加（Phase12）
-  が前提として必要なため、次アクションとして残す（詳細はPhase12・
+  **（二十四訂で追加確定）** データモデルは当初案の`orgRole: 'admin' |
+  'staff'`の2値から、`scopeNodeIds?: string[]`（Branch等の特定node配下
+  限定の兼務管理を表現）を追加する形に拡張した。権限判定は
+  「root（`adminUsers`の`organizations:manage`権限）→ Company admin
+  （`scopeNodeIds`未指定）→ scope限定admin（`scopeNodeIds`指定）→
+  staff」という4層構造とし、祖先判定はPhase11で既に実装済みの
+  `ancestorIds`（非正規化配列）をそのまま流用する（新規の祖先辿りロジック
+  は不要）。監査ログも既存の`auditLogs`/`logAdminAction()`を拡張する形で
+  統合することを確定した。詳細は二十四訂本文を参照。**実装（Firestore
+  スキーマの反映・API・admin-dashboard UI）はまだ行っていない**。次アクション
+  として、最初の団体管理者の代理登録フロー（鶏卵問題）のAPI設計・
+  `GET /admin/me`の実装が残っている（詳細はPhase12・
   `phase11-org-roster-design.md`参照）
 - **Room作成と組織階層への紐付けの分離（2026-07-26、確定）**：Phase11
   実装時の検討により、Room作成時に組織階層(orgId/nodeId)へ自動で紐付ける
@@ -1032,7 +1152,7 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
 
 ---
 
-## 6. 次アクションの提案（2026-07-31 二十三訂で更新）
+## 6. 次アクションの提案（2026-07-31 二十四訂で更新）
 
 旧item 5「十八訂の変更のリポジトリへの反映確認」は、`git show`によるコミット
 `d802de0`の直接検証をもって完了したため「6.1」item 13へ移動した。item 1は
@@ -1041,7 +1161,10 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
 うち(d)「常駐通知の頻発」と(e)「CallKit撤回のリポジトリ反映確認」を
 `git show`での直接検証（コミット`c8d05cf`・`f7388aa`）により解消し、
 新たに発見した音声再生遅延バグの修正（コミット`544b853`）の実機検証を
-item 1に追加した。残る項目は以下の5件。
+item 1に追加した。二十四訂では、item 5のうち「admin-dashboardの権限モデル
+へのスコープ追加方法」の設計（4層構造・データモデル・監査ログスキーマ）が
+決着したため、item 5を実装着手前の残課題のみに絞り込んだ。残る項目は
+以下の5件。
 
 1. **バックグラウンド動作・音声再生の実機検証**：iOSはCallKit撤回版
    （常駐通知撤去済み、二十三訂で反映確認済み）でのビルド確認・実機再検証
@@ -1078,18 +1201,25 @@ item 1に追加した。残る項目は以下の5件。
    - 招待コードの可視範囲。`rooms:monitor`権限保有者に「Roomへの参加権を
      事実上配布できる」権限まで広げることになるため、対象権限の絞り込み・
      監査ログ記録の要否と合わせて検討する（論点6、5.4参照）
-5. **組織ロースター層の詳細設計・実装着手**：
+5. **組織ロースター層の実装着手**：
    `phase11-org-roster-design.md`で合意した案C（`organizations/{orgId}/
-   members/{uid}`によるRoom roleとは独立した所属管理）について、以下を
-   詰めた上で実装に着手する。**（2026-07-31、二十三訂で確認）** 同ドキュメント
-   はリポジトリには未反映（`git log`で無履歴を確認）で、依然として設計メモの
-   段階にある。
-   - admin-dashboardの権限モデルへの「団体管理者（特定orgId配下のみ管理）」
-     スコープの追加方法（Phase12のitem4と合わせて検討）
+   members/{uid}`によるRoom roleとは独立した所属管理）について、
+   admin-dashboardの権限モデルへのスコープ追加方法（4層構造・
+   `scopeNodeIds`によるデータモデル・`ancestorIds`流用の祖先判定・
+   監査ログスキーマ）は**2026-07-31、二十四訂で設計決着済み**。
+   同ドキュメント自体は引き続きリポジトリ未反映（設計メモの段階）。
+   残っているのは以下。
    - 最初の団体管理者をサイト管理者が代理登録するフローのAPI設計
-   - `orgRole`の粒度（`admin`/`staff`の2値で足りるか）
+     （鶏卵問題。付与操作自体は「root(`organizations:manage`) OR
+     対象orgの既存admin」という判定式で両ケースをカバーできる想定だが、
+     API・UI設計は未着手）
+   - `GET /admin/me`の実装（`managedOrgIds`等。団体管理者UIの成立要件と
+     して保留から昇格済み、二十四訂参照）
+   - `organizations/{orgId}`側の通知要否設定フィールドの具体的な定義
+     （当面はログのみ・即時通知はPhase14待ちという運用で合意済み）
    - 実装後、5.4「招待コードの可視範囲」（論点6）の解決策として
-     「対象Site配下のstaffに限定した閲覧権限」が設計可能かを再検討する
+     「対象Branch配下のstaffに限定した閲覧権限」が`scopeNodeIds`を使って
+     設計可能かを再検討する（Site単位の粒度は不要と判断済み、二十四訂参照）
 
 ### 6.1 完了済みアクション（アーカイブ）
 
