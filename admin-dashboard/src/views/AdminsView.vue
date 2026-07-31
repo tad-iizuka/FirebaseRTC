@@ -52,7 +52,7 @@ async function revoke() {
 <template>
   <div class="p-5">
     <p v-if="adminUsers.isForbidden" class="text-xs text-destructive">
-      管理者権限がありません(adminUsers/&#123;uid&#125;.permissions に admins:manage が必要です)。
+      管理者権限がありません。
     </p>
     <p v-else-if="adminUsers.errorMessage" class="text-xs text-destructive">{{ adminUsers.errorMessage }}</p>
     <p

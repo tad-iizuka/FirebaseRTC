@@ -603,6 +603,31 @@ router.get('/audit-logs', requireFirebaseAuth, requireAdminPermission('audit:rea
 });
 
 /**
+ * GET /admin/me
+ *
+ * [2026-07-31 追加、item3(論点5)対応]
+ * サインインしてさえいれば誰でも呼べる(特定の管理者権限を要求しない)。
+ * 目的は「自分が何の権限を持っているか」をクライアント側が把握できるように
+ * すること。admin-dashboard はこのレスポンスの permissions が空配列の場合、
+ * NavTabs 自体を出さず汎用的な「権限がありません」画面を表示する
+ * (adminUsers/{uid} が未作成の場合も同様に空配列として扱う)。
+ *
+ * 権限の中身(どの文字列がどの操作に対応するか)は返さない。あくまで
+ * 「自分に付与されている権限の一覧」のみを返すため、これ自体が新たな
+ * 権限体系の開示にはならない(付与されていない他人の権限体系は分からない)。
+ */
+router.get('/me', requireFirebaseAuth, async (req, res) => {
+  try {
+    const doc = await db.collection('adminUsers').doc(req.firebaseUser.uid).get();
+    const permissions = doc.exists ? doc.data().permissions || [] : [];
+    res.json({ uid: req.firebaseUser.uid, email: req.firebaseUser.email || null, permissions });
+  } catch (e) {
+    console.error('[GET /admin/me エラー]', e.message);
+    res.status(500).json({ error: '取得に失敗しました' });
+  }
+});
+
+/**
  * GET /admin/admins
  * adminUsers 全件一覧。admins:manage 権限が必要。
  */

@@ -116,7 +116,7 @@ async function saveDisplayConfig() {
     </p>
 
     <p v-if="store.isForbidden" class="text-xs text-destructive">
-      管理者権限がありません(adminUsers/&#123;uid&#125;.permissions に badges:monitor が必要です)。
+      管理者権限がありません。
     </p>
     <p v-else-if="store.errorMessage" class="text-xs text-destructive">
       バッジ一覧の取得に失敗しました: {{ store.errorMessage }}

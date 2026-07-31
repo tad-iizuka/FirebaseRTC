@@ -9,6 +9,7 @@ import {
   signOut as firebaseSignOut,
 } from 'firebase/auth'
 import { firebaseAuth } from '@/lib/firebase'
+import { authedFetch } from '@/lib/api'
 
 export const useAuthStore = defineStore('auth', () => {
   const currentUser = ref<User | null>(firebaseAuth.currentUser)
@@ -16,13 +17,44 @@ export const useAuthStore = defineStore('auth', () => {
   const errorMessage = ref<string | null>(null)
   let initialized = false
 
+  // [2026-07-31 追加、item3(論点5)対応]
+  // サインイン済みでも「権限を1つも持っていない」場合はNavTabs自体を
+  // 出さないためのゲート。以前は auth.currentUser の有無だけで画面を
+  // 出し分けており、任意のGoogleアカウントでサインインするだけで
+  // メニュー構成が見えてしまっていた(詳細はbrushup-plan.md 二十六訂参照)。
+  const permissions = ref<string[] | null>(null) // null = 未取得
+  const isLoadingPermissions = ref(false)
+
   /** main.tsから一度だけ呼ぶ。以後 currentUser は自動的に追従する。 */
   function init() {
     if (initialized) return
     initialized = true
     onAuthStateChanged(firebaseAuth, (user) => {
       currentUser.value = user
+      if (!user) {
+        // サインアウト時は権限情報も破棄する(別アカウントでの再サインイン時に
+        // 古い権限が一瞬でも見えることを防ぐ)
+        permissions.value = null
+      }
     })
+  }
+
+  /**
+   * GET /admin/me を呼び、自分の権限一覧を取得する。
+   * サインイン成功直後にApp.vue側から呼ばれる想定。
+   * adminUsers/{uid} が未作成(＝無権限)の場合はサーバー側が空配列を返す。
+   */
+  async function fetchPermissions(baseUrl: string) {
+    isLoadingPermissions.value = true
+    try {
+      const data = await authedFetch<{ permissions: string[] }>(baseUrl, '/admin/me')
+      permissions.value = data.permissions
+    } catch {
+      // 取得自体に失敗した場合も「権限なし」として安全側に倒す
+      permissions.value = []
+    } finally {
+      isLoadingPermissions.value = false
+    }
   }
 
   async function signInWithGoogle() {
@@ -62,10 +94,13 @@ export const useAuthStore = defineStore('auth', () => {
     currentUser,
     isSigningIn,
     errorMessage,
+    permissions,
+    isLoadingPermissions,
     init,
     signInWithGoogle,
     signInWithApple,
     signOut,
     clearError,
+    fetchPermissions,
   }
 })

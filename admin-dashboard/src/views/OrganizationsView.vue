@@ -137,10 +137,7 @@ async function saveRetentionDays() {
     <div>
       <h2 class="mb-2 text-[12px] font-medium">団体</h2>
 
-      <p v-if="orgs.isForbidden" class="text-xs text-destructive">
-        管理者権限がありません(adminUsers/&#123;uid&#125;.permissions に
-        organizations:monitor が必要です)。
-      </p>
+      <p v-if="orgs.isForbidden" class="text-xs text-destructive">管理者権限がありません。</p>
       <p v-else-if="orgs.errorMessage" class="text-xs text-destructive">
         団体一覧の取得に失敗しました: {{ orgs.errorMessage }}
       </p>

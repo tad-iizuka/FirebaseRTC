@@ -97,8 +97,7 @@ function dismissCreatedRoom() {
     <div class="mb-5 grid max-w-md gap-2 rounded-sm border border-dashed border-border p-3">
       <h3 class="text-[11px] font-medium text-muted-foreground">ルームを新規作成</h3>
       <p class="text-[11px] text-muted-foreground">
-        作成には adminUsers/&#123;uid&#125;.permissions に rooms:create 権限が必要です
-        (付与は「管理者権限」タブから)。
+        作成には rooms:create 権限が必要です(付与は「管理者権限」タブから)。
       </p>
       <Input v-model="newRoomName" placeholder="ルーム名(例: 〇〇現場 巡回班)" />
       <Input v-model="newRoomMaxMembers" placeholder="定員(任意, 数値)" />
@@ -151,7 +150,7 @@ function dismissCreatedRoom() {
     </div>
 
     <p v-if="rooms.isForbidden" class="text-xs text-destructive">
-      管理者権限がありません(adminUsers/&#123;uid&#125;.permissions に rooms:monitor が必要です)。
+      管理者権限がありません。
     </p>
     <p v-else-if="rooms.errorMessage" class="text-xs text-destructive">
       ルーム一覧の取得に失敗しました: {{ rooms.errorMessage }}

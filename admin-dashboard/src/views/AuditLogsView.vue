@@ -32,7 +32,7 @@ function nextPage() {
     </div>
 
     <p v-if="auditLogs.isForbidden" class="text-xs text-destructive">
-      管理者権限がありません(adminUsers/&#123;uid&#125;.permissions に audit:read が必要です)。
+      管理者権限がありません。
     </p>
     <p v-else-if="auditLogs.errorMessage" class="text-xs text-destructive">
       監査ログの取得に失敗しました: {{ auditLogs.errorMessage }}

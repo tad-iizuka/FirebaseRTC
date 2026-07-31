@@ -165,6 +165,7 @@ PDFの3種類、1件あたり100MBまで。アップロードはtoken-serverを�
 
 | Method | Path | 認証 | 説明 |
 |---|---|---|---|
+| GET | `/admin/me` | 必須(権限は問わない) | 自分自身の権限一覧を取得 **[2026-07-31、item3対応]** |
 | GET | `/admin/rooms` | 必須(`rooms:monitor`) | 複数ルーム横断の一覧監視 |
 | GET | `/admin/rooms/:roomId` | 必須(`rooms:monitor`) | ルーム詳細監視 |
 | GET | `/admin/audit-logs` | 必須(`audit:read`) | 監査ログ一覧(roomId/actorUidで絞込可) **[Phase8]** |
@@ -186,6 +187,15 @@ PDFの3種類、1件あたり100MBまで。アップロードはtoken-serverを�
 できないようガードしている(自己昇格・権限エスカレーション防止)。
 `admins:manage`の付与は`dev-tools/grant-admin-permission.js`経由の手動運用に
 固定している。
+
+**`GET /admin/me`【2026-07-31追加、brushup-plan.md item3(論点5)対応】:**
+特定の管理者権限を要求せず、サインインしてさえいれば誰でも呼べる。目的は
+「自分が何の権限を持っているか」をクライアント側が把握できるようにし、
+admin-dashboardが権限を1つも持たないユーザーに対してNavTabs自体を出さない
+ようにするため(以前は`auth.currentUser`の有無だけで画面を出し分けており、
+任意のGoogleアカウントでサインインするだけで管理画面のメニュー構成が
+見えてしまっていた)。`adminUsers/{uid}`が未作成の場合も含め、常に配列
+(空配列もありうる)を返す。他人の権限体系を開示するものではない。
 
 ---
 
