@@ -39,6 +39,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import co.ubunifu.pttandroid.auth.PTTAuthManager
 import co.ubunifu.pttandroid.badges.PTTBadgesStore
+import co.ubunifu.pttandroid.orgcontext.PTTOrgContextStore
 import co.ubunifu.pttandroid.ban.PTTBanStore
 import co.ubunifu.pttandroid.chat.PTTChatStore
 import co.ubunifu.pttandroid.connection.PTTConnectionManager
@@ -130,6 +131,9 @@ class MainActivity : ComponentActivity() {
             // [Phase13・次アクションitem3] 参加者一覧のバッジ表示(ポーリング)。
             // Web版(stores/badges.ts)の移植(iOS版は本項目item3としてまだ未実装)。
             val badgesStore = remember { PTTBadgesStore(applicationContext) }
+            // [パンくず表示] 組織階層のパンくずをRoom詳細画面に表示する。
+            // Web版(stores/orgContext.ts)・iOS版(PTTOrgContextStore.swift)の移植。
+            val orgContextStore = remember { PTTOrgContextStore(applicationContext) }
             // [オンボーディング] 初回起動時のスワイプ形式チュートリアルの完了状態
             // (SharedPreferencesベース。Web版のonboarding.ts/iOS版のPTTOnboardingStore.swiftと同じ設計)。
             val onboardingStore = remember { PTTOnboardingStore(applicationContext) }
@@ -164,6 +168,7 @@ class MainActivity : ComponentActivity() {
                             recordingStore = recordingStore,
                             reportStore = reportStore,
                             badgesStore = badgesStore,
+                            orgContextStore = orgContextStore,
                             onboardingStore = onboardingStore,
                             settingsStore = settingsStore,
                             onRequestGoogleSignIn = { signInLauncher.launch(authManager.signInIntent()) },

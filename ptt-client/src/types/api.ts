@@ -159,3 +159,18 @@ export interface RoomBadgesResponse {
   roomId: string
   members: Record<string, RoomMemberBadges>
 }
+
+// [Phase12→パンくず実装] GET /rooms/:roomId/org-context のレスポンス
+// (lib/orgContext.jsのresolveOrgContext()参照)。無所属Roomはエラーではなく
+// orgId: null + breadcrumb: [] を返す。
+export interface OrgBreadcrumbNode {
+  nodeId: string
+  name: string
+  depth: number
+}
+
+export interface OrgContextResponse {
+  orgId: string | null
+  orgName: string | null
+  breadcrumb: OrgBreadcrumbNode[]
+}

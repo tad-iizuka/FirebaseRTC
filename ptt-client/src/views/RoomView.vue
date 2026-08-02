@@ -10,9 +10,11 @@ import { useChatStore } from '@/stores/chat'
 import { useConnectionStore, type ParticipantInfo } from '@/stores/connection'
 import { useRecordingStore } from '@/stores/recording'
 import { useBadgesStore } from '@/stores/badges'
+import { useOrgContextStore } from '@/stores/orgContext'
 import Button from '@/components/ui/Button.vue'
 import StatusRow from '@/components/StatusRow.vue'
 import GuestStatusBar from '@/components/GuestStatusBar.vue'
+import OrgBreadcrumb from '@/components/OrgBreadcrumb.vue'
 import PttButton from '@/components/PttButton.vue'
 import RecordingBar from '@/components/RecordingBar.vue'
 import ParticipantList from '@/components/ParticipantList.vue'
@@ -33,6 +35,7 @@ const chat = useChatStore()
 const connection = useConnectionStore()
 const recording = useRecordingStore()
 const badges = useBadgesStore()
+const orgContext = useOrgContextStore()
 
 const roomId = computed(() => String(route.params.roomId))
 const banTarget = ref<ParticipantInfo | null>(null)
@@ -63,7 +66,9 @@ async function enter() {
   // [Phase9] /join を経由しない再入室や、入室後に他のowner/moderatorが
   // 設定を変更した場合にも対応できるよう、入室のたびに最新値を取り直す。
   roomStore.fetchAutoRecording(settings.tokenServerUrl, roomId.value)
-  // [Phase13] 参加者一覧のバッジ表示(ポーリング)。
+  // [パンくず表示] 変化頻度が低いため入室時に1回だけ取得する(badges.startの
+  // ようなポーリングはしない。stores/orgContext.ts参照)。
+  orgContext.fetchOnce(settings.tokenServerUrl, roomId.value)
   badges.start(settings.tokenServerUrl, roomId.value)
   await connection.connect({
     tokenServerUrlValue: settings.tokenServerUrl,
@@ -77,6 +82,7 @@ async function leaveRoom() {
   chat.stop()
   ban.stop()
   badges.stop()
+  orgContext.reset()
   roomStore.leave()
   router.push({ name: 'room-select' })
 }
@@ -181,6 +187,7 @@ onUnmounted(() => {
   chat.stop()
   ban.stop()
   badges.stop()
+  orgContext.reset()
 })
 </script>
 
@@ -196,6 +203,7 @@ onUnmounted(() => {
     >
       {{ roomStore.currentRoomName }}
     </h1>
+    <OrgBreadcrumb :org-name="orgContext.orgName" :breadcrumb="orgContext.breadcrumb" />
 
     <StatusRow :kind="connection.statusKind" :message="connection.statusMessage" :room-id="roomId" />
     <GuestStatusBar

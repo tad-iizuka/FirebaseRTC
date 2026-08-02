@@ -50,6 +50,7 @@ struct ContentView: View {
     @StateObject private var report = PTTReportStore()
     /// [Phase13 バッジ表示UI] Web版ParticipantList.vueの移植。GET /:roomId/badges をポーリングする。
     @StateObject private var badges = PTTBadgeStore()
+    @StateObject private var orgContext = PTTOrgContextStore()
     @StateObject private var onboarding = PTTOnboardingStore()
     /// [Phase9 バックグラウンド動作] ロック画面/常駐通知/ヘッドセットボタンからの
     /// 送話操作を仲介する。connectionへはattach(to:)経由でweak参照するのみ。
@@ -603,6 +604,27 @@ struct ContentView: View {
                 .padding(.horizontal, 14)
                 .padding(.top, 10)
         }
+        orgBreadcrumbRow
+    }
+
+    /// [パンくず表示] Web版RoomView.vueの`<OrgBreadcrumb>`に相当。
+    /// 無所属Room(orgName == nil)は何も表示しない(roomNameHeaderと同じ方針)。
+    @ViewBuilder
+    private var orgBreadcrumbRow: some View {
+        if let orgName = orgContext.orgName {
+            HStack(spacing: 4) {
+                Text(orgName)
+                ForEach(orgContext.breadcrumb) { node in
+                    Text("›")
+                    Text(node.name)
+                }
+            }
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundColor(.pttMuted)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.bottom, 2)
+        }
     }
 
     /// 入室後: 退出ボタン。Web版のleaveRoomBtnに相当。
@@ -690,6 +712,13 @@ struct ContentView: View {
             roomId: roomId,
             idTokenProvider: { try await auth.fetchIDToken() }
         )
+        // [パンくず表示] 変化頻度が低いため入室時に1回だけ取得する(badges.startの
+        // ようなポーリングはしない。PTTOrgContextStore参照)。
+        orgContext.fetchOnce(
+            tokenServerURL: tokenServerURL,
+            roomId: roomId,
+            idTokenProvider: { try await auth.fetchIDToken() }
+        )
         connection.connect(
             tokenServerURL: tokenServerURL,
             livekitURL: livekitURL,
@@ -713,6 +742,7 @@ struct ContentView: View {
         chat.stop()
         ban.stop()
         badges.stop()
+        orgContext.reset()
         activeRoomId = nil
         currentRoomName = nil
         joinRoomId = ""

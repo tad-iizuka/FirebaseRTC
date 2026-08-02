@@ -23,7 +23,7 @@ const emit = defineEmits<{
     <div class="flex min-h-[22px] flex-wrap gap-1.5">
       <Badge v-if="participants.length === 0">{{ t('participants.none') }}</Badge>
       <Badge v-for="p in participants" :key="p.identity" :variant="p.muted ? 'default' : 'live'">
-        <span v-if="topBadges[p.identity]" :title="topBadges[p.identity]!.name">{{ topBadges[p.identity]!.icon }}</span>
+        <span v-if="topBadges[p.identity]" :title="topBadges[p.identity]!.name" :aria-label="topBadges[p.identity]!.name" role="img">{{ topBadges[p.identity]!.icon }}</span>
         <span>{{ p.name }}</span>
         <button type="button" class="opacity-70 underline hover:opacity-100" @click="emit('report', p)">
           {{ t('participants.report') }}

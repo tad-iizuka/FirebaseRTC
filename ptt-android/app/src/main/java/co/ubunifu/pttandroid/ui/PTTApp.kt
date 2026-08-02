@@ -87,6 +87,8 @@ import androidx.compose.ui.unit.sp
 import co.ubunifu.pttandroid.R
 import co.ubunifu.pttandroid.auth.PTTAuthManager
 import co.ubunifu.pttandroid.badges.PTTBadgesStore
+import co.ubunifu.pttandroid.orgcontext.OrgContext
+import co.ubunifu.pttandroid.orgcontext.PTTOrgContextStore
 import co.ubunifu.pttandroid.ban.PTTBanStore
 import co.ubunifu.pttandroid.ban.PTTRoomPermissions
 import co.ubunifu.pttandroid.chat.PTTChatStore
@@ -135,6 +137,7 @@ fun PTTApp(
     recordingStore: PTTRecordingStore,
     reportStore: PTTReportStore,
     badgesStore: PTTBadgesStore,
+    orgContextStore: PTTOrgContextStore,
     onboardingStore: PTTOnboardingStore,
     settingsStore: PTTSettingsStore,
     onRequestGoogleSignIn: () -> Unit,
@@ -186,6 +189,8 @@ fun PTTApp(
     val reportError by reportStore.errorMessage.collectAsState()
     // [Phase13・次アクションitem3] 参加者一覧のバッジ表示(ポーリング)。
     val badgesByUid by badgesStore.byUid.collectAsState()
+    // [パンくず表示] 組織階層。入室時に1回だけ取得(ポーリングしない)。
+    val orgContext by orgContextStore.context_.collectAsState()
     // [送話ロック連携] サーバー(routes/talk.js)がRoom Metadataに書き込むcurrentTalker(uid)。
     // 自分以外のuidが入っている間はPTTボタンを無効化する。
     val currentTalkerUid by connectionManager.currentTalkerUid.collectAsState()
@@ -303,6 +308,9 @@ fun PTTApp(
         banStore.start(roomId, uid)
         // [Phase13・次アクションitem3] 参加者一覧のバッジ表示(ポーリング)。
         badgesStore.start(scope, tokenServerUrl, roomId) { authManager.fetchIdToken() }
+        // [パンくず表示] 変化頻度が低いため入室時に1回だけ取得する
+        // (badgesStore.startのようなポーリングはしない。PTTOrgContextStore参照)。
+        orgContextStore.fetchOnce(scope, tokenServerUrl, roomId) { authManager.fetchIdToken() }
         connectionManager.connect(
             tokenServerUrl = tokenServerUrl,
             livekitUrl = livekitUrl,
@@ -336,6 +344,7 @@ fun PTTApp(
         chatStore.stop()
         banStore.stop()
         badgesStore.stop()
+        orgContextStore.stop()
         activeRoomId = null
         currentInviteCode = null
         currentRoomName = null
@@ -499,6 +508,7 @@ fun PTTApp(
                     )
                     Spacer(Modifier.height(4.dp))
                 }
+                OrgBreadcrumbRow(orgContext)
                 StatusRow(status)
                 GuestStatusBar(
                     isGuest = myRole == "guest",
@@ -788,6 +798,24 @@ private fun AuthSection(
     }
 }
 
+/**
+ * [パンくず表示] Web版RoomView.vueの`<OrgBreadcrumb>`・iOS版orgBreadcrumbRowに相当。
+ * 無所属Room(orgName == null)は何も表示しない(roomNameのnullチェックと同じ方針)。
+ */
+@Composable
+private fun OrgBreadcrumbRow(orgContext: OrgContext) {
+    val orgName = orgContext.orgName ?: return
+    val text = buildString {
+        append(orgName)
+        orgContext.breadcrumb.forEach { node ->
+            append(" › ")
+            append(node.name)
+        }
+    }
+    Text(text, fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Muted)
+    Spacer(Modifier.height(4.dp))
+}
+
 @Composable
 private fun StatusRow(status: ConnectionStatus) {
     val (color, text) = when (status) {
@@ -816,9 +844,17 @@ private fun StatusRow(status: ConnectionStatus) {
 /**
  * [Phase10: Guestロール 5.1]
  * Web版(GuestStatusBar.vue)の移植。「自分自身がGuestとして参加していること」の表示と、
- * ニックネーム変更を担う。他の参加者がGuestかどうかはクライアントからは判定できない
- * (firestore.rulesにより自分自身のmembersドキュメントしか読めないため)。
- * そのため、ここでは自分自身の状態のみを扱う。
+ * ニックネーム変更を担う。このコンポーネント自体はfirestore.rulesの制約により
+ * 自分自身のmembersドキュメントしか読めないため、他参加者がGuestかどうかの判定は
+ * 持たない(ここでは自分自身の状態のみを扱う)。
+ *
+ * [5.4「他参加者のGuest判定手段の欠如」について] 上記の制約は今も変わらないが、
+ * 別経路(Phase13のバッジ表示、OrgBreadcrumbRow付近のtopBadges参照)で、Guestには
+ * 常に「Guest」役割バッジ(🔰)が合成され、GET /:roomId/badges 経由でroom
+ * メンバーなら誰でも参照できるようになった(token-server/lib/badges.js の
+ * GUEST_ROLE_BADGE参照)。結果として、参加者一覧のバッジアイコン表示が
+ * 副次的に「他参加者のGuest判定手段」を提供しており、5.4の懸念は実質的に
+ * 解消されている(brushup-plan.md参照)。
  */
 @Composable
 private fun GuestStatusBar(
