@@ -60,6 +60,45 @@ export const useAdminOrganizationsStore = defineStore('adminOrganizations', () =
     }
   }
 
+  /**
+   * [2026-08-02追加] 団体単体取得(GET /admin/organizations/:orgId)。
+   * `organizations:monitor`を持たないscope限定adminが、自分の管理する
+   * 団体(`managedOrgIds`)を一覧APIを経由せずに取得するための入口。
+   * 取得結果は`organizations`配列へupsertする(一覧取得が403で
+   * 空のままでも、この団体だけは表示できるようにするため)。
+   */
+  async function fetchOrganizationById(baseUrl: string, orgId: string) {
+    const org = await authedFetch<AdminOrganization>(baseUrl, `/admin/organizations/${encodeURIComponent(orgId)}`)
+    const idx = organizations.value.findIndex((o) => o.orgId === orgId)
+    if (idx === -1) {
+      organizations.value = [...organizations.value, org]
+    } else {
+      organizations.value = organizations.value.map((o) => (o.orgId === orgId ? org : o))
+    }
+    return org
+  }
+
+  /**
+   * [2026-08-02追加] `auth.managedOrgIds`のうち、まだ`organizations`に
+   * 載っていない団体だけをまとめて取得する。`fetchOrganizations`が403で
+   * 終わった場合(=organizations:monitorを持たないscope限定admin)でも、
+   * こちらは団体ごとに独立して判定されるため失敗しない
+   * (自分が名簿登録されている団体である以上、`canReadOrg`側で許可される)。
+   * 個々の取得失敗は握りつぶす(1つの団体の取得失敗で他の表示まで
+   * 巻き込まないため)。
+   */
+  async function fetchManagedOrganizations(baseUrl: string, orgIds: string[]) {
+    const known = new Set(organizations.value.map((o) => o.orgId))
+    const missing = orgIds.filter((id) => !known.has(id))
+    await Promise.all(
+      missing.map((orgId) =>
+        fetchOrganizationById(baseUrl, orgId).catch((e) => {
+          console.error(`[組織階層] 団体単体取得失敗 orgId=${orgId}`, e)
+        }),
+      ),
+    )
+  }
+
   async function fetchNodes(baseUrl: string, orgId: string) {
     isLoadingNodes.value = true
     nodesErrorMessage.value = null
@@ -314,6 +353,8 @@ export const useAdminOrganizationsStore = defineStore('adminOrganizations', () =
     isMutatingMember,
     memberMutationErrorMessage,
     fetchOrganizations,
+    fetchOrganizationById,
+    fetchManagedOrganizations,
     fetchNodes,
     createOrganization,
     createNode,
