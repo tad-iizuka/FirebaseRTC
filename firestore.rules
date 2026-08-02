@@ -92,6 +92,17 @@ service cloud.firestore {
         // 理由は親(organizations)と同じ。
         allow read, write: if false;
       }
+
+      match /members/{uid} {
+        // [組織ロースター層、実装着手 2026-08-01] 所属(orgRole/scopeNodeIds)。
+        // 理由は親(organizations)と同じ: 「自分がこのorgId配下の何らかの
+        // roomのメンバーであるか」をrules内で判定する手段がないのと同様、
+        // 「自分がこのorgId配下の名簿にadmin/staffとして登録されているか」
+        // も判定できない。token-server(Admin SDK経由、
+        // GET/POST/PATCH/DELETE /admin/organizations/:orgId/members*)に
+        // 一本化する。
+        allow read, write: if false;
+      }
     }
 
     match /reports/{reportId} {

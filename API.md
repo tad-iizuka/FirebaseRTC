@@ -128,9 +128,45 @@ PDFの3種類、1件あたり100MBまで。アップロードはtoken-serverを�
 | POST | `/admin/organizations/:orgId/nodes` | 必須(`organizations:manage`) | 階層nodeを作成 |
 | PATCH | `/admin/organizations/:orgId` | 必須(`organizations:manage`) | 添付ファイル保持日数を更新 **[Phase16]** |
 | PATCH | `/admin/rooms/:roomId/org-assignment` | 必須(`organizations:manage`) | Roomを団体/nodeへ割り当て、または無所属へ戻す |
+| GET | `/admin/organizations/:orgId/members` | 動的(下記参照) | 団体の名簿(所属)一覧 **[組織ロースター層、実装着手2026-08-01]** |
+| POST | `/admin/organizations/:orgId/members/:targetUid` | 動的(下記参照) | 名簿への新規登録(所属付与) **[同上]** |
+| PATCH | `/admin/organizations/:orgId/members/:targetUid` | 動的(下記参照) | 名簿エントリのrole/scope変更 **[同上]** |
+| DELETE | `/admin/organizations/:orgId/members/:targetUid` | 動的(下記参照) | 名簿からの除名(所属剥奪) **[同上]** |
 
 組織階層は`organizations`と任意深さの`nodes`で表す。Roomの組織所属は任意であり、
 作成時には自動割り当てされない。
+
+**組織ロースター(所属)API【実装着手 2026-08-01、`phase11-org-roster-
+design.md`(案C)・`brushup-plan.md` 二十四訂で確定した設計】:**
+`organizations/{orgId}/members/{uid}`(`orgRole: 'admin' | 'staff'`、
+`scopeNodeIds`)を管理する。所属はアクセス制御の軸にせず、Roomへ入れるか・
+何ができるかはこれまで通りRoom role(owner/moderator/member/guest)だけで
+決まる。
+
+上記4エンドポイントは固定の`adminUsers`権限(`requireAdminPermission`)
+ではなく、`lib/orgRoster.js#resolveRosterAccess`による動的判定を使う。
+
+- **root**：`adminUsers/{uid}.permissions`に`organizations:manage`を持つ
+  ユーザー。対象のorgId・scopeを問わず常に許可される
+- **団体全体admin**：`organizations/{orgId}/members/{uid}`に
+  `orgRole: 'admin'`, `scopeNodeIds`未指定/空で登録されているユーザー。
+  当該org配下は無条件に許可される
+- **scope限定admin**：`scopeNodeIds`が指定されているユーザー。対象の
+  node(またはnode配下)がそのscopeに含まれる場合のみ許可される
+  (既存の`ancestorIds`による祖先判定を流用。祖先nodeへの操作は不許可、
+  兄弟nodeへの操作も不許可)
+- 上記いずれにも該当しない場合は403
+
+**最初の団体管理者の代理登録(鶏卵問題)について**：専用の代理登録APIは
+用意していない。`POST /admin/organizations/:orgId/members/:targetUid`は、
+まだ誰も管理者登録されていない団体に対しても、root(`organizations:manage`
+保持者)であればそのまま呼べる(上記の判定式が「root OR 対象orgの既存
+admin」であるため)。対象uidはFirebase Authに存在する(先にMember登録
+済みの)必要があり、存在しない場合は404を返す。
+
+**PATCHでのscope拡大防止**：役割/scopeの変更時は、変更前・変更後の
+両方のscopeをactorがカバーしていることを要求する(自分の管理範囲を
+超えるscopeへ書き換える抜け道を塞ぐため)。
 
 ---
 
@@ -196,6 +232,12 @@ admin-dashboardが権限を1つも持たないユーザーに対してNavTabs自
 任意のGoogleアカウントでサインインするだけで管理画面のメニュー構成が
 見えてしまっていた)。`adminUsers/{uid}`が未作成の場合も含め、常に配列
 (空配列もありうる)を返す。他人の権限体系を開示するものではない。
+
+レスポンスは`{ uid, email, permissions, managedOrgIds }`。
+`managedOrgIds`【2026-08-01追加、item5(組織ロースター層)対応】は自分が
+`orgRole: 'admin'`として名簿登録されている団体の`orgId`一覧
+(scopeNodeIdsの有無・中身は含まない)。root(`organizations:manage`
+保持者)であっても、自分自身が名簿に登録されていなければ含まれない。
 
 ---
 

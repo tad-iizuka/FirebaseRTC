@@ -116,6 +116,9 @@ function onSelectOrg(orgId: string) {
   selectOrg(orgId)
   const org = orgs.organizations.find((o) => o.orgId === orgId)
   retentionDaysInput.value = String(org?.attachmentRetentionDays ?? '')
+  if (!orgs.membersByOrgId.has(orgId)) {
+    orgs.fetchMembers(settings.tokenServerUrl, orgId).catch(() => {})
+  }
 }
 
 async function saveRetentionDays() {
@@ -127,6 +130,84 @@ async function saveRetentionDays() {
     await orgs.updateAttachmentRetentionDays(settings.tokenServerUrl, selectedOrgId.value, days)
   } catch {
     // retentionErrorMessageに反映済み
+  }
+}
+
+// --- [組織ロースター層、実装着手 2026-08-01] 名簿(所属)管理 ---
+// phase11-org-roster-design.md(案C): 所属はアクセス制御の軸にしない。
+// ここで付与/編集/剥奪するのはあくまで「団体管理者(admin)/所属staff」の
+// 名簿であり、Room roleとは別軸(既存のRoomsListView/RoomDetailViewの
+// role管理には一切影響しない)。
+
+const selectedMembers = computed(() => {
+  if (!selectedOrgId.value) return []
+  return orgs.membersByOrgId.get(selectedOrgId.value) ?? []
+})
+
+function nodeName(nodeId: string): string {
+  return selectedNodes.value.find((n) => n.nodeId === nodeId)?.name ?? nodeId
+}
+
+const newMemberUid = ref('')
+const newMemberRole = ref<'admin' | 'staff'>('staff')
+const newMemberScopeNodeIds = ref<string[]>([])
+
+async function grantMember() {
+  if (!selectedOrgId.value || !newMemberUid.value.trim()) return
+  try {
+    await orgs.grantMember(
+      settings.tokenServerUrl,
+      selectedOrgId.value,
+      newMemberUid.value.trim(),
+      newMemberRole.value,
+      newMemberRole.value === 'admin' ? newMemberScopeNodeIds.value : [],
+    )
+    newMemberUid.value = ''
+    newMemberRole.value = 'staff'
+    newMemberScopeNodeIds.value = []
+  } catch {
+    // memberMutationErrorMessageに反映済み
+  }
+}
+
+// 編集中の行(uid)だけscope選択UIを開く。同時に複数行を編集させない
+// (誤操作防止。AdminsView.vue等と違い、ここは1行ごとの状態を持つ複雑な
+// フォームのため単純なグローバルref2本(uid/permission)では表現しづらい)。
+const editingUid = ref<string | null>(null)
+const editRole = ref<'admin' | 'staff'>('staff')
+const editScopeNodeIds = ref<string[]>([])
+
+function startEdit(member: (typeof selectedMembers.value)[number]) {
+  editingUid.value = member.uid
+  editRole.value = member.orgRole
+  editScopeNodeIds.value = [...member.scopeNodeIds]
+}
+function cancelEdit() {
+  editingUid.value = null
+}
+async function saveEdit() {
+  if (!selectedOrgId.value || !editingUid.value) return
+  try {
+    await orgs.editMember(
+      settings.tokenServerUrl,
+      selectedOrgId.value,
+      editingUid.value,
+      editRole.value,
+      editRole.value === 'admin' ? editScopeNodeIds.value : [],
+    )
+    editingUid.value = null
+  } catch {
+    // memberMutationErrorMessageに反映済み(編集フォームは開いたままにする)
+  }
+}
+
+async function revokeMember(uid: string) {
+  if (!selectedOrgId.value) return
+  try {
+    await orgs.revokeMember(settings.tokenServerUrl, selectedOrgId.value, uid)
+    if (editingUid.value === uid) editingUid.value = null
+  } catch {
+    // memberMutationErrorMessageに反映済み
   }
 }
 </script>
@@ -281,6 +362,139 @@ async function saveRetentionDays() {
           </Button>
           <p v-if="orgs.createErrorMessage" class="text-xs text-destructive">{{ orgs.createErrorMessage }}</p>
         </div>
+
+        <!-- [組織ロースター層、実装着手 2026-08-01] 名簿(所属)管理 -->
+        <h3 class="mb-2 mt-5 text-[11px] font-medium text-muted-foreground">
+          名簿(所属)
+          <span class="font-normal normal-case tracking-normal">
+            — この団体のadmin/staff。Roomへの参加権限(role)には影響しません
+          </span>
+        </h3>
+
+        <p v-if="orgs.isMembersForbidden" class="text-xs text-destructive">
+          この団体の名簿を閲覧する権限がありません(rootまたはこの団体のadminのみ)。
+        </p>
+        <p v-else-if="orgs.membersErrorMessage" class="text-xs text-destructive">
+          名簿の取得に失敗しました: {{ orgs.membersErrorMessage }}
+        </p>
+        <template v-else>
+          <p
+            v-if="orgs.isLoadingMembers && selectedMembers.length === 0"
+            class="text-xs text-muted-foreground"
+          >
+            読み込み中...
+          </p>
+          <p
+            v-else-if="!orgs.isLoadingMembers && selectedMembers.length === 0"
+            class="text-xs text-muted-foreground"
+          >
+            — 名簿は空です —
+          </p>
+
+          <ul class="mb-3 grid gap-1">
+            <li
+              v-for="member in selectedMembers"
+              :key="member.uid"
+              class="rounded-sm border border-border px-2 py-1.5 text-xs"
+            >
+              <div v-if="editingUid !== member.uid" class="flex items-center justify-between gap-2">
+                <div class="min-w-0">
+                  <div class="flex items-center gap-1.5">
+                    <span class="truncate font-mono">{{ member.uid }}</span>
+                    <Badge :variant="member.orgRole === 'admin' ? 'accent' : 'default'">
+                      {{ member.orgRole === 'admin' ? 'admin' : 'staff' }}
+                    </Badge>
+                  </div>
+                  <div v-if="member.orgRole === 'admin'" class="mt-0.5 text-[11px] text-muted-foreground">
+                    <span v-if="member.scopeNodeIds.length === 0">団体全体を管理</span>
+                    <span v-else>scope: {{ member.scopeNodeIds.map(nodeName).join(', ') }}</span>
+                  </div>
+                </div>
+                <div class="flex shrink-0 gap-2">
+                  <button
+                    type="button"
+                    class="text-[11px] text-primary underline-offset-2 hover:underline"
+                    @click="startEdit(member)"
+                  >
+                    編集
+                  </button>
+                  <button
+                    type="button"
+                    class="text-[11px] text-destructive underline-offset-2 hover:underline"
+                    @click="revokeMember(member.uid)"
+                  >
+                    除名
+                  </button>
+                </div>
+              </div>
+
+              <!-- 編集フォーム(この行のみ展開) -->
+              <div v-else class="grid gap-2">
+                <div class="flex items-center gap-1.5">
+                  <span class="truncate font-mono">{{ member.uid }}</span>
+                </div>
+                <select
+                  v-model="editRole"
+                  class="h-9 rounded-sm border border-input bg-background px-2 font-mono text-xs text-foreground outline-none focus:border-primary"
+                >
+                  <option value="staff">staff(管理権限なし)</option>
+                  <option value="admin">admin(scope管理者)</option>
+                </select>
+                <select
+                  v-if="editRole === 'admin'"
+                  v-model="editScopeNodeIds"
+                  multiple
+                  class="h-24 rounded-sm border border-input bg-background px-2 py-1 font-mono text-[11px] text-foreground outline-none focus:border-primary"
+                >
+                  <option v-for="node in orderedNodes" :key="node.nodeId" :value="node.nodeId">
+                    {{ '　'.repeat(node.depth) }}{{ node.name }}
+                  </option>
+                </select>
+                <p v-if="editRole === 'admin' && editScopeNodeIds.length === 0" class="text-[11px] text-muted-foreground">
+                  未選択のまま保存すると「団体全体を管理」になります(Ctrl/Cmd+クリックで複数選択可)。
+                </p>
+                <div class="flex gap-2">
+                  <Button size="sm" class="w-auto" :disabled="orgs.isMutatingMember" @click="saveEdit">
+                    {{ orgs.isMutatingMember ? '保存中...' : '保存' }}
+                  </Button>
+                  <Button size="sm" variant="secondary" class="w-auto" @click="cancelEdit">キャンセル</Button>
+                </div>
+              </div>
+            </li>
+          </ul>
+
+          <h4 class="mb-2 text-[11px] font-medium text-muted-foreground">名簿へ新規登録</h4>
+          <div class="grid max-w-md gap-2">
+            <Input v-model="newMemberUid" placeholder="対象のuid(先にMember登録済みである必要があります)" />
+            <select
+              v-model="newMemberRole"
+              class="h-10 rounded-sm border border-input bg-background px-3 font-mono text-sm text-foreground outline-none focus:border-primary"
+            >
+              <option value="staff">staff(管理権限なし)</option>
+              <option value="admin">admin(scope管理者)</option>
+            </select>
+            <select
+              v-if="newMemberRole === 'admin'"
+              v-model="newMemberScopeNodeIds"
+              multiple
+              class="h-24 rounded-sm border border-input bg-background px-3 py-1.5 font-mono text-xs text-foreground outline-none focus:border-primary"
+            >
+              <option v-for="node in orderedNodes" :key="node.nodeId" :value="node.nodeId">
+                {{ '　'.repeat(node.depth) }}{{ node.name }}
+              </option>
+            </select>
+            <p v-if="newMemberRole === 'admin'" class="text-[11px] text-muted-foreground">
+              未選択のまま登録すると「団体全体を管理」になります(Ctrl/Cmd+クリックで複数選択可)。
+              あなた自身の管理範囲を超えるscopeは登録できません。
+            </p>
+            <Button size="sm" class="w-auto" :disabled="orgs.isMutatingMember || !newMemberUid.trim()" @click="grantMember">
+              {{ orgs.isMutatingMember ? '登録中...' : '名簿へ登録' }}
+            </Button>
+            <p v-if="orgs.memberMutationErrorMessage" class="text-xs text-destructive">
+              {{ orgs.memberMutationErrorMessage }}
+            </p>
+          </div>
+        </template>
       </template>
     </div>
   </div>

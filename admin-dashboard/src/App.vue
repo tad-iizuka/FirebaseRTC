@@ -36,8 +36,17 @@ watch(
       <!-- [2026-07-31 追加] サインインはできても権限が1つも無い場合は、
            NavTabs自体を出さずここで止める。個々の画面のAPI呼び出しが
            403で弾かれることに変わりはないが、メニュー構成自体を
-           無関係な第三者に見せないための事前ゲート。 -->
-      <div v-else-if="(auth.permissions?.length ?? 0) === 0" class="grid gap-2 p-5">
+           無関係な第三者に見せないための事前ゲート。
+           [2026-08-01 追加、item5(組織ロースター層)対応] 団体管理者
+           (organizations/{orgId}/members経由のorgRole:'admin')は
+           adminUsersのサイト全体権限(permissions)を1つも持たない場合が
+           あるため、managedOrgIdsも合わせて見る(組織タブの名簿画面には
+           入れるが、他タブは各画面のAPI呼び出しが403を返すだけで
+           従来通り)。 -->
+      <div
+        v-else-if="(auth.permissions?.length ?? 0) === 0 && auth.managedOrgIds.length === 0"
+        class="grid gap-2 p-5"
+      >
         <p class="text-[13px] text-foreground">この管理画面を利用する権限がありません。</p>
         <p class="text-[12px] text-muted-foreground">
           利用が必要な場合は、システムの運営担当者にお問い合わせください。

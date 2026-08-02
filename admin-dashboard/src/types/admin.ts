@@ -182,6 +182,25 @@ export interface RoomOrgAssignment {
   nodeAncestorIds: string[]
 }
 
+// [組織ロースター層、実装着手 2026-08-01]
+// GET/POST/PATCH/DELETE /admin/organizations/:orgId/members(/:targetUid)
+// token-server/lib/orgRoster.js#resolveRosterAccess による動的権限判定。
+// (organizations:monitor/manageとは別軸のため、adminUsers権限とは連動しない)
+
+export type OrgRole = 'admin' | 'staff'
+
+export interface OrgMember {
+  uid: string
+  orgRole: OrgRole
+  scopeNodeIds: string[]
+  grantedAt: number | null
+  grantedBy: string
+}
+
+export interface OrgMemberListResponse {
+  members: OrgMember[]
+}
+
 // [Phase13] GET/POST/PATCH /admin/badges*, GET/PATCH /admin/config/badge-display,
 // GET/POST/DELETE /admin/rooms/:roomId/badges* (badges:monitor / badges:manage)
 // 団体スコープを持たない全体共通マスタ(brushup-plan.md 6.1 item14で確定)。

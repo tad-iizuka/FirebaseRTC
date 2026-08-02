@@ -6,6 +6,9 @@ import type {
   AdminOrganizationListResponse,
   AdminOrgNode,
   AdminOrgNodeListResponse,
+  OrgMember,
+  OrgMemberListResponse,
+  OrgRole,
   RoomOrgAssignment,
 } from '@/types/admin'
 
@@ -171,6 +174,125 @@ export const useAdminOrganizationsStore = defineStore('adminOrganizations', () =
     }
   }
 
+  /**
+   * [組織ロースター層、実装着手 2026-08-01]
+   * organizations/{orgId}/members のラッパー。token-server側の権限判定
+   * (root / 団体全体admin / scope限定admin)は動的なため、他のセクション
+   * (organizations一覧のorganizations:monitor等)と違い、ここでは
+   * isForbiddenの単一フラグではなく、呼び出しごとのエラーメッセージで
+   * 表現する(scope超過(403)とネットワークエラーを厳密に区別する必要が
+   * 薄いため。UsersView.vue等の既存パターンと揃えている)。
+   */
+  const membersByOrgId = ref<Map<string, OrgMember[]>>(new Map())
+  const isLoadingMembers = ref(false)
+  const membersErrorMessage = ref<string | null>(null)
+  const isMembersForbidden = ref(false)
+
+  const isMutatingMember = ref(false)
+  const memberMutationErrorMessage = ref<string | null>(null)
+
+  async function fetchMembers(baseUrl: string, orgId: string) {
+    isLoadingMembers.value = true
+    membersErrorMessage.value = null
+    isMembersForbidden.value = false
+    try {
+      const data = await authedFetch<OrgMemberListResponse>(
+        baseUrl,
+        `/admin/organizations/${encodeURIComponent(orgId)}/members`,
+      )
+      membersByOrgId.value.set(orgId, data.members)
+    } catch (e) {
+      if (e instanceof ApiError && e.statusCode === 403) {
+        isMembersForbidden.value = true
+      } else {
+        membersErrorMessage.value = (e as Error).message
+      }
+      throw e
+    } finally {
+      isLoadingMembers.value = false
+    }
+  }
+
+  /** 名簿への新規登録(所属付与)。POST /admin/organizations/:orgId/members/:targetUid */
+  async function grantMember(
+    baseUrl: string,
+    orgId: string,
+    targetUid: string,
+    orgRole: OrgRole,
+    scopeNodeIds: string[],
+  ) {
+    isMutatingMember.value = true
+    memberMutationErrorMessage.value = null
+    try {
+      const member = await authedFetch<OrgMember>(
+        baseUrl,
+        `/admin/organizations/${encodeURIComponent(orgId)}/members/${encodeURIComponent(targetUid)}`,
+        { method: 'POST', body: { orgRole, scopeNodeIds: orgRole === 'admin' ? scopeNodeIds : undefined } },
+      )
+      const existing = membersByOrgId.value.get(orgId) || []
+      membersByOrgId.value.set(orgId, [...existing, member])
+      return member
+    } catch (e) {
+      memberMutationErrorMessage.value = (e as Error).message
+      throw e
+    } finally {
+      isMutatingMember.value = false
+    }
+  }
+
+  /** role/scopeの変更。PATCH /admin/organizations/:orgId/members/:targetUid */
+  async function editMember(
+    baseUrl: string,
+    orgId: string,
+    targetUid: string,
+    orgRole: OrgRole,
+    scopeNodeIds: string[],
+  ) {
+    isMutatingMember.value = true
+    memberMutationErrorMessage.value = null
+    try {
+      const updated = await authedFetch<{ uid: string; orgRole: OrgRole; scopeNodeIds: string[] }>(
+        baseUrl,
+        `/admin/organizations/${encodeURIComponent(orgId)}/members/${encodeURIComponent(targetUid)}`,
+        { method: 'PATCH', body: { orgRole, scopeNodeIds: orgRole === 'admin' ? scopeNodeIds : undefined } },
+      )
+      const existing = membersByOrgId.value.get(orgId) || []
+      membersByOrgId.value.set(
+        orgId,
+        existing.map((m) => (m.uid === targetUid ? { ...m, orgRole: updated.orgRole, scopeNodeIds: updated.scopeNodeIds } : m)),
+      )
+      return updated
+    } catch (e) {
+      memberMutationErrorMessage.value = (e as Error).message
+      throw e
+    } finally {
+      isMutatingMember.value = false
+    }
+  }
+
+  /** 名簿からの除名(所属剥奪)。DELETE /admin/organizations/:orgId/members/:targetUid */
+  async function revokeMember(baseUrl: string, orgId: string, targetUid: string) {
+    isMutatingMember.value = true
+    memberMutationErrorMessage.value = null
+    try {
+      await authedFetch<{ uid: string; revoked: boolean }>(
+        baseUrl,
+        `/admin/organizations/${encodeURIComponent(orgId)}/members/${encodeURIComponent(targetUid)}`,
+        { method: 'DELETE' },
+      )
+      const existing = membersByOrgId.value.get(orgId) || []
+      membersByOrgId.value.set(
+        orgId,
+        existing.filter((m) => m.uid !== targetUid),
+      )
+    } catch (e) {
+      memberMutationErrorMessage.value = (e as Error).message
+      throw e
+    } finally {
+      isMutatingMember.value = false
+    }
+  }
+
   return {
     organizations,
     isLoadingOrganizations,
@@ -185,11 +307,21 @@ export const useAdminOrganizationsStore = defineStore('adminOrganizations', () =
     assignErrorMessage,
     isUpdatingRetention,
     retentionErrorMessage,
+    membersByOrgId,
+    isLoadingMembers,
+    membersErrorMessage,
+    isMembersForbidden,
+    isMutatingMember,
+    memberMutationErrorMessage,
     fetchOrganizations,
     fetchNodes,
     createOrganization,
     createNode,
     assignRoomOrg,
     updateAttachmentRetentionDays,
+    fetchMembers,
+    grantMember,
+    editMember,
+    revokeMember,
   }
 })

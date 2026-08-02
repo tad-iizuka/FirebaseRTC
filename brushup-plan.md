@@ -954,6 +954,89 @@ blocking functionまで必要か）は、次アクションitem3の対応方針�
 
 ---
 
+三十三訂: 2026-08-01（「6. 次アクションの提案」item 5「組織ロースター層の
+実装着手」に着手した。二十四訂で確定した設計（`phase11-org-roster-design.md`
+案C、再帰的スコープモデル）をそのままバックエンド・フロントエンド双方に
+実装した。ユーザーからアップロードされた`FirebaseRTC.zip`に対して行い、
+更新版ZIPとして返却した。リポジトリへの実際のコミット・反映は本ドキュメント
+作成時点では未確認のため、他の訂と同様に次アクションとして残す。）
+
+**実装内容（バックエンド）：**
+
+- **`token-server/lib/orgRoster.js`（新規）**：権限判定を一元化する
+  `resolveRosterAccess(uid, orgId, targetScopeNodeIds)`。root
+  （`adminUsers/{uid}.permissions`に`organizations:manage`）・団体全体admin
+  （`scopeNodeIds`未指定/空）・scope限定admin（既存の`ancestorIds`を流用した
+  祖先判定）の3種を判定し、`{ allowed, actorType, actorScopeNodeId,
+  isOverride }`を返す。`isOverride`は「actorが当該orgのadmin名簿に
+  登録されているか」だけで機械的に決まる、という二十四訂の定義通りに実装した
+- **`token-server/routes/organizations.js`**：
+  `GET/POST/PATCH/DELETE /admin/organizations/:orgId/members(/:targetUid)`
+  を追加。POST（新規登録）とPATCH（役割/scope変更）を分離し、
+  PATCHは変更前・変更後の両方のscopeをactorがカバーしていることを要求する
+  （自分の権限が及ばないscopeへの書き換えを防止）。POSTは対象uidが
+  Firebase Authに存在する（先にMember登録済みの）ことを確認してから
+  書き込む。scopeNodeIdsは対象orgId配下に実在するnodeであることも検証する
+- **最初の団体管理者の代理登録（鶏卵問題）**：専用の代理登録APIは作らず、
+  `resolveRosterAccess`が「root OR 対象orgの既存admin」という判定式である
+  ことをそのまま利用した。まだ誰も管理者登録されていない団体でも、
+  rootであれば`POST .../members/:targetUid`をそのまま呼べる
+- **`GET /admin/me`の拡張**：レスポンスに`managedOrgIds`（自分が
+  `orgRole: 'admin'`として登録されている団体のorgId一覧）を追加。
+  `organizations/{orgId}/members/{uid}`に非正規化した`uid`フィールドを
+  持たせ、`collectionGroup('members')`クエリで絞り込む
+  （`rooms/{roomId}/members`と同名コレクションだが、`orgRole`フィールドの
+  有無で自然に区別される）
+- **`firestore.rules`・`firestore.indexes.json`**：`members`
+  サブコレクションのクライアント直接アクセス拒否、上記collectionGroup
+  クエリ用の複合インデックスを追加
+- **監査ログ**：`org:member_grant`/`org:member_revoke`/`org:member_view`/
+  `org:member_edit`を追加。`detail`に`orgId`・`targetNodeId`・
+  `actorType`・`actorScopeNodeId`・`isOverride`を格納する
+- 通知要否設定フィールド（organizations/{orgId}側）は、二十四訂で
+  「当面はログのみ・即時通知はPhase14待ち」と合意済みのため、今回は
+  何も実装していない（フィールド自体を追加していない）
+
+**実装内容（フロントエンド、admin-dashboard）：**
+
+- **`stores/adminOrganizations.ts`**：`membersByOrgId`・
+  `fetchMembers`/`grantMember`/`editMember`/`revokeMember`を追加
+- **`stores/auth.ts`・`App.vue`**：`GET /admin/me`の`managedOrgIds`を
+  保持するようにし、`App.vue`のNavTabs表示ゲート条件に
+  `managedOrgIds.length === 0`も追加した（サイト全体の`adminUsers`権限を
+  1つも持たない、団体スコープのみのadminが締め出されないようにするため）
+- **`views/OrganizationsView.vue`**：選択中の団体の詳細ペインに「名簿
+  （所属）」セクションを追加。一覧表示・新規登録フォーム（uid/role/
+  scopeNodeIds、複数node選択のmultiple select）・行ごとのインライン編集
+  （role/scope変更）・除名ボタンを実装した
+- **動作確認：** `vue-tsc -b`（型チェック）・`eslint .`・`vite build`
+  （本番ビルド）のいずれもエラーなく完走することを確認した。
+  権限判定ロジック（`resolveRosterAccess`）はFirestoreをモックした
+  簡易テストで、root/団体全体admin/scope限定adminの許可・祖先nodeへの
+  操作拒否・兄弟nodeへの操作拒否・団体全体scopeの付与拒否（scope限定admin
+  からの）が設計通りに判定されることを確認した。実際の画面表示・
+  エミュレータ/本番Firestoreに対する実機動作確認は行っていない
+  （次アクションとして残す）
+
+**意図的にスコープ外・未完了として残したもの：**
+
+- **scope限定admin自身によるadmin-dashboardでの団体選択**：
+  `OrganizationsView.vue`の左ペイン（団体一覧）は`GET /admin/organizations`
+  （`organizations:monitor`権限が必要）に依存しており、サイト全体権限を
+  持たない団体スコープのみのadminは、自分が管理する団体をこの一覧から
+  選べない。`managedOrgIds`をもとに個別の団体を取得する手段（例:
+  `GET /admin/organizations/:orgId`単体取得エンドポイント）が未整備なため、
+  現状ではroot・`organizations:monitor`保有者のみがこの名簿UIを実際に使える。
+  次アクションとして残す
+- `brushup-plan.md`本体・`DATA_MODEL.md`・`API.md`への反映は今回のドキュメント
+  更新に含めた（`phase11-org-roster-design.md`自体の更新は不要、二十四訂で
+  既に確定済みのため）
+- staffの「今どのSiteに配置されているか」といった、名簿を使った横断的な
+  ビュー機能（phase11-org-roster-design.md 6.2で触れられている将来機能）は
+  未着手。今回はデータモデルとCRUD APIの土台のみ
+
+---
+
 ## 0. README.mdが定義するビジョンの要点（前提の再確認）
 
 | 項目 | README.mdの定義 |
@@ -1567,25 +1650,36 @@ item 1の残り全項目についてユーザーから実機検証結果の報�
    権限」という選択肢が設計可能になるため、item5の実装着手・完了を前提
    条件とする。item5とは別項目として残すが、実質的な着手順序としては
    item5が先行する
-5. **組織ロースター層の実装着手**：
+5. **組織ロースター層の実装着手** 🚧 **一部実装済み（2026-08-01、三十三訂）**：
    `phase11-org-roster-design.md`で合意した案C（`organizations/{orgId}/
    members/{uid}`によるRoom roleとは独立した所属管理）について、
    admin-dashboardの権限モデルへのスコープ追加方法（4層構造・
    `scopeNodeIds`によるデータモデル・`ancestorIds`流用の祖先判定・
-   監査ログスキーマ）は**2026-07-31、二十四訂で設計決着済み**。
-   同ドキュメント自体は引き続きリポジトリ未反映（設計メモの段階）。
+   監査ログスキーマ）は**2026-07-31、二十四訂で設計決着済み**であり、
+   **2026-08-01、三十三訂でバックエンド（`lib/orgRoster.js`・
+   `routes/organizations.js`のCRUD API・`GET /admin/me`拡張・
+   `firestore.rules`/インデックス・監査ログ）とフロントエンド
+   （`stores/adminOrganizations.ts`・`stores/auth.ts`・`App.vue`・
+   `OrganizationsView.vue`の名簿管理UI）を実装した**。
+   `vue-tsc -b`/`eslint`/`vite build`は通過済み、権限判定ロジックは
+   モックによる簡易テストで確認済みだが、**実機（ブラウザ・エミュレータ/
+   本番Firestore）での動作確認は未実施**。
+   最初の団体管理者の代理登録（鶏卵問題）は専用APIを作らず、
+   「root OR 対象orgの既存admin」という判定式をそのまま利用する形で
+   解決した（詳細は三十三訂本文参照）。
+   `phase11-org-roster-design.md`自体は二十四訂の時点で設計決着済みの
+   まま更新していない（内容に変更はないため）。
    残っているのは以下。
-   - 最初の団体管理者をサイト管理者が代理登録するフローのAPI設計
-     （鶏卵問題。付与操作自体は「root(`organizations:manage`) OR
-     対象orgの既存admin」という判定式で両ケースをカバーできる想定だが、
-     API・UI設計は未着手）
-   - `GET /admin/me`の拡張（`managedOrgIds`の追加。**（2026-07-31追記）**
-     エンドポイント自体は三十二訂でitem3(論点5)対応として先行実装済み
-     （`uid`/`email`/`permissions`を返す）。ロースター層実装時にこの
-     レスポンスへ`managedOrgIds`を追加する形で拡張する想定で、新規
-     エンドポイントを別途作る必要はない）
-   - `organizations/{orgId}`側の通知要否設定フィールドの具体的な定義
-     （当面はログのみ・即時通知はPhase14待ちという運用で合意済み）
+   - **実機動作確認**（ブラウザでのサインイン・名簿の付与/編集/剥奪・
+     `firestore.rules`/インデックスのデプロイ含む）
+   - **scope限定adminによるadmin-dashboardでの団体選択**：
+     `OrganizationsView.vue`の団体一覧は`GET /admin/organizations`
+     （`organizations:monitor`権限）に依存しており、サイト全体権限を
+     持たない団体スコープのみのadminは自分の管理団体を一覧から選べない。
+     `managedOrgIds`をもとに個別団体を取得する手段（例:
+     `GET /admin/organizations/:orgId`単体取得）が必要
+   - リポジトリへの実際のコミット・反映の確認（六訂・八訂等と同じ
+     `git show`等による直接検証）
    - 完了後、item4（招待コードの可視範囲）に着手する
 
 ### 6.1 完了済みアクション（アーカイブ）

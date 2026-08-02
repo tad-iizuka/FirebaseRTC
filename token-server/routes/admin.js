@@ -615,12 +615,34 @@ router.get('/audit-logs', requireFirebaseAuth, requireAdminPermission('audit:rea
  * 権限の中身(どの文字列がどの操作に対応するか)は返さない。あくまで
  * 「自分に付与されている権限の一覧」のみを返すため、これ自体が新たな
  * 権限体系の開示にはならない(付与されていない他人の権限体系は分からない)。
+ *
+ * [2026-08-01 追加、item5(組織ロースター層)対応]
+ * managedOrgIds: 自分が orgRole: 'admin' として登録されている団体の
+ * orgId一覧(scopeNodeIdsの有無・中身は含めない。「団体全体管理者」か
+ * 「scope限定管理者」かの区別はUI側が個別に
+ * `GET /admin/organizations/:orgId/members` を呼んで判別する)。
+ * サイト全体のrootユーザー('organizations:manage'保持者)であっても、
+ * 自分自身がorganizations/{orgId}/members に登録されていなければ
+ * ここには含まれない(root権限自体は既存のpermissionsで表現されており、
+ * managedOrgIdsは「明示的に名簿登録されている団体」だけを表すため)。
+ * routes/organizations.js が名簿登録時に書き込む非正規化フィールド
+ * `uid`(ドキュメントIDと同値)をcollectionGroupクエリの絞り込み条件に
+ * 使う(lib/attachments.jsのexpiresAtと同じ考え方)。
  */
 router.get('/me', requireFirebaseAuth, async (req, res) => {
+  const uid = req.firebaseUser.uid;
   try {
-    const doc = await db.collection('adminUsers').doc(req.firebaseUser.uid).get();
+    const doc = await db.collection('adminUsers').doc(uid).get();
     const permissions = doc.exists ? doc.data().permissions || [] : [];
-    res.json({ uid: req.firebaseUser.uid, email: req.firebaseUser.email || null, permissions });
+
+    const membershipSnap = await db
+      .collectionGroup('members')
+      .where('uid', '==', uid)
+      .where('orgRole', '==', 'admin')
+      .get();
+    const managedOrgIds = membershipSnap.docs.map((d) => d.ref.parent.parent.id);
+
+    res.json({ uid, email: req.firebaseUser.email || null, permissions, managedOrgIds });
   } catch (e) {
     console.error('[GET /admin/me エラー]', e.message);
     res.status(500).json({ error: '取得に失敗しました' });

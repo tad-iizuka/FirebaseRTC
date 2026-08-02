@@ -141,6 +141,11 @@
 | expireAt | timestamp | TTL用 |
 
 `lib/auditLog.js`の`logAdminAction()`が管理系操作のたびに書き込む。
+[組織ロースター層、実装着手 2026-08-01] `action`に`org:member_grant` /
+`org:member_revoke` / `org:member_view` / `org:member_edit`を追加。
+`detail`に`orgId`・`targetNodeId`・`actorType`(`'root'` \|
+`'org_admin_full'` \| `'org_admin_scoped'`)・`actorScopeNodeId`・
+`isOverride`を格納する(トップレベルスキーマは変更しない)。
 
 ---
 
@@ -157,6 +162,32 @@
 
 `organizations/{orgId}/nodes/{nodeId}` は任意深さの階層nodeで、`name`、
 `parentNodeId`、`ancestorIds`、`depth`を持つ。
+
+`organizations/{orgId}/members/{uid}` [組織ロースター層、実装着手
+2026-08-01。`phase11-org-roster-design.md`(案C)・`brushup-plan.md`
+二十四訂で確定した設計]
+
+| Field | Type | Description |
+|--------|------|-------------|
+| uid | string | ドキュメントIDと同値を明示的にフィールドとしても保持(`GET /admin/me`の`managedOrgIds`が使うcollectionGroupクエリの絞り込み条件のため) |
+| orgRole | `'admin'` \| `'staff'` | 団体内での役割。Room role(owner/moderator/member/guest)とは別軸 |
+| scopeNodeIds | string[] | `orgRole: 'admin'`のみ意味を持つ。空配列 = 団体全体を管理。1件以上 = 列挙node配下の兼務管理。`staff`は常に空配列 |
+| grantedAt | timestamp | 付与日時 |
+| grantedBy | string | 付与者uid |
+
+**Room roleとの分離**：所属(このコレクション)はアクセス制御の軸にしない。
+Roomに入れるか・何ができるかはこれまで通り`rooms/{roomId}/members/{uid}`
+のroleだけで決まる。所属情報は団体管理者が自団体の状況を横断的に見るための
+付帯情報という位置づけ(Guestは名簿の対象外)。
+
+**権限判定**：「団体管理者(特定orgId配下のみ管理)」というスコープ付き
+権限は、`adminUsers`(サイト全体権限)とは別の再帰的スコープモデルとして
+表現する。root(`adminUsers/{uid}.permissions`に`organizations:manage`を
+含む)は常時override可能。org内adminは、`scopeNodeIds`が指す node の
+`ancestorIds`(Phase11で計算済み・非正規化)を流用して祖先判定する
+(広いscopeを持つadminが、その配下の狭いscopeを持つadminをoverride可能)。
+判定ロジックは`token-server/lib/orgRoster.js#resolveRosterAccess`に
+集約している。
 
 `badges/{badgeId}` と `badgeGrants/{grantId}` [Phase13]
 

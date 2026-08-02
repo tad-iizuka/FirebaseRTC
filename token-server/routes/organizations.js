@@ -34,10 +34,11 @@
  */
 
 const express = require('express');
-const { db } = require('../lib/firebaseAdmin');
+const { db, auth } = require('../lib/firebaseAdmin');
 const { logAdminAction } = require('../lib/auditLog');
 const { requireFirebaseAuth, isValidRoomId } = require('../middleware/requireAuth');
 const { requireAdminPermission } = require('../middleware/requireAdmin');
+const { resolveRosterAccess } = require('../lib/orgRoster');
 
 const router = express.Router();
 
@@ -424,6 +425,377 @@ router.patch(
     } catch (e) {
       console.error('[組織階層: room割り当てエラー]', e.message);
       res.status(500).json({ error: 'ルームの組織割り当てに失敗しました' });
+    }
+  }
+);
+
+/**
+ * ==========================================================================
+ * 組織ロースター(所属)API [実装着手 2026-08-01]
+ *
+ * `phase11-org-roster-design.md`(案C)の通り、ここで扱う「所属」は
+ * アクセス制御の軸にしない。Roomに入れるか・何ができるかは、これまで
+ * 通り rooms/{roomId}/members/{uid} の role だけで決まる。ここで管理する
+ * のは、団体管理者が自団体の状況を横断的に見るための付帯情報と、
+ * その付帯情報を管理するためのスコープ付き権限(admin/staff)である。
+ *
+ * 権限判定は lib/orgRoster.js#resolveRosterAccess に集約している
+ * (brushup-plan.md 二十四訂の判定式をそのまま実装)。既存の
+ * requireAdminPermission('organizations:manage'/'organizations:monitor')
+ * とは別軸のため、ここではミドルウェアとして使わず、各ハンドラ内で
+ * resolveRosterAccess の結果を見て403を返す。
+ * ==========================================================================
+ */
+
+function isValidScopeNodeIds(v) {
+  return Array.isArray(v) && v.every((id) => isValidId(id));
+}
+
+/**
+ * scopeNodeIdsで指定された各nodeが、実際にこのorg配下に存在するかを
+ * 検証する(orgId違いのnodeIdを紛れ込ませる抜け道を塞ぐ。
+ * PATCH /admin/rooms/:roomId/org-assignment と同じ考え方)。
+ */
+async function assertNodesExist(orgRef, nodeIds) {
+  const unique = [...new Set(nodeIds)];
+  const snaps = await db.getAll(...unique.map((id) => orgRef.collection('nodes').doc(id)));
+  const missing = snaps.filter((s) => !s.exists).map((s) => s.id);
+  return { unique, missing };
+}
+
+/**
+ * GET /admin/organizations/:orgId/members
+ *
+ * 名簿一覧。root、またはこの団体のadmin(scope問わず)であれば閲覧できる。
+ * scope限定adminにも一覧全体を見せる(「対象Branch配下のstaffに限定した
+ * 閲覧」のようなさらに絞った可視範囲は、招待コードの可視範囲(item4、
+ * brushup-plan.md 6.)側の課題として別途検討する)。
+ */
+router.get('/organizations/:orgId/members', requireFirebaseAuth, async (req, res) => {
+  const uid = req.firebaseUser.uid;
+  const { orgId } = req.params;
+  if (!isValidId(orgId)) {
+    return res.status(400).json({ error: 'orgId が不正です' });
+  }
+
+  try {
+    const orgSnap = await db.collection('organizations').doc(orgId).get();
+    if (!orgSnap.exists) {
+      return res.status(404).json({ error: '団体が見つかりません' });
+    }
+
+    const access = await resolveRosterAccess(uid, orgId, null);
+    if (!access.allowed) {
+      return res.status(403).json({ error: '管理者権限がありません' });
+    }
+
+    const snap = await db.collection('organizations').doc(orgId).collection('members').get();
+    const members = snap.docs.map((d) => {
+      const m = d.data();
+      return {
+        uid: d.id,
+        orgRole: m.orgRole,
+        scopeNodeIds: m.scopeNodeIds || [],
+        grantedAt: m.grantedAt?.toMillis?.() ?? null,
+        grantedBy: m.grantedBy,
+      };
+    });
+
+    await logAdminAction({
+      actorUid: uid,
+      action: 'org:member_view',
+      targetUid: null,
+      detail: { orgId, actorType: access.actorType, actorScopeNodeId: access.actorScopeNodeId, isOverride: access.isOverride },
+    });
+
+    res.json({ members });
+  } catch (e) {
+    console.error('[組織ロースター: 一覧エラー]', e.message);
+    res.status(500).json({ error: '名簿の取得に失敗しました' });
+  }
+});
+
+/**
+ * POST /admin/organizations/:orgId/members/:targetUid
+ * body: { orgRole: 'admin' | 'staff', scopeNodeIds?: string[] }
+ *
+ * 名簿への新規登録(所属付与)。既存エントリがある場合は409を返す
+ * (scopeやroleの変更はPATCHを使う。作成と更新を分けているのは、
+ * routes/rooms.js のBAN・moderator任命APIと同様「意図しない上書き」を
+ * 事故で起こさないため)。
+ *
+ * [最初の団体管理者の代理登録(鶏卵問題)]
+ * このエンドポイント自体が代理登録も兼ねる。まだ誰も管理者登録されて
+ * いない団体でも、root(organizations:manage 保持者)であれば
+ * resolveRosterAccess が無条件に許可を返すため、専用の別APIは不要
+ * (lib/orgRoster.js 冒頭コメント参照)。
+ *
+ * 対象uidは先にMember(メール認証)登録済みである必要がある
+ * (phase11-org-roster-design.md 6.1)。Firebase Authに存在しない
+ * uidを指定した場合は404を返す。
+ */
+router.post(
+  '/organizations/:orgId/members/:targetUid',
+  requireFirebaseAuth,
+  async (req, res) => {
+    const actorUid = req.firebaseUser.uid;
+    const { orgId, targetUid } = req.params;
+    const { orgRole, scopeNodeIds } = req.body || {};
+
+    if (!isValidId(orgId)) {
+      return res.status(400).json({ error: 'orgId が不正です' });
+    }
+    if (!isValidId(targetUid)) {
+      return res.status(400).json({ error: 'targetUid が不正です' });
+    }
+    if (orgRole !== 'admin' && orgRole !== 'staff') {
+      return res.status(400).json({ error: "orgRole は 'admin' か 'staff' で指定してください" });
+    }
+    if (scopeNodeIds !== undefined && !isValidScopeNodeIds(scopeNodeIds)) {
+      return res.status(400).json({ error: 'scopeNodeIds は文字列配列で指定してください' });
+    }
+    if (orgRole === 'staff' && scopeNodeIds !== undefined && scopeNodeIds.length > 0) {
+      // staffはRoom roleのような細かい権限フラグを持たせない方針
+      // (phase11-org-roster-design.md 5.)。scopeNodeIdsはadmin専用。
+      return res.status(400).json({ error: 'staff には scopeNodeIds を指定できません' });
+    }
+
+    try {
+      const orgRef = db.collection('organizations').doc(orgId);
+      const orgSnap = await orgRef.get();
+      if (!orgSnap.exists) {
+        return res.status(404).json({ error: '団体が見つかりません' });
+      }
+
+      // staffの付与/剥奪は特定nodeでの判定を持たない(orgRoster.js参照)。
+      // adminの付与は、指定scope(未指定/空なら団体全体)をactorがカバー
+      // しているかで判定する。
+      const targetScopeNodeIds = orgRole === 'staff' ? null : scopeNodeIds || [];
+      const access = await resolveRosterAccess(actorUid, orgId, targetScopeNodeIds);
+      if (!access.allowed) {
+        return res.status(403).json({ error: '管理者権限がありません' });
+      }
+
+      if (orgRole === 'admin' && scopeNodeIds && scopeNodeIds.length > 0) {
+        const { missing } = await assertNodesExist(orgRef, scopeNodeIds);
+        if (missing.length > 0) {
+          return res.status(404).json({ error: `scopeNodeIds にこの団体配下に存在しないnodeがあります: ${missing.join(', ')}` });
+        }
+      }
+
+      const memberRef = orgRef.collection('members').doc(targetUid);
+      const existing = await memberRef.get();
+      if (existing.exists) {
+        return res.status(409).json({ error: '既に名簿に登録されています。変更はPATCHを使用してください' });
+      }
+
+      // 対象がMember(メール認証)登録済みであることを確認する
+      // (phase11-org-roster-design.md 6.1「対象ユーザーは先にMember登録
+      // 済みである必要がある」)。
+      try {
+        await auth.getUser(targetUid);
+      } catch (e) {
+        if (e.code === 'auth/user-not-found') {
+          return res.status(404).json({ error: '対象uidに対応するアカウントが見つかりません(先にMember登録が必要です)' });
+        }
+        throw e;
+      }
+
+      const now = new Date();
+      const normalizedScopeNodeIds = orgRole === 'admin' ? [...new Set(scopeNodeIds || [])] : [];
+      await memberRef.set({
+        uid: targetUid, // [GET /admin/me の managedOrgIds 用] collectionGroupクエリで
+        // uidを条件に絞り込めるよう、ドキュメントIDと同じ値を明示的に
+        // フィールドとしても持たせる(lib/attachments.jsのexpiresAtと
+        // 同じ考え方: ドキュメントIDだけではcollectionGroupクエリの
+        // 絞り込み条件にできないため)。
+        orgRole,
+        scopeNodeIds: normalizedScopeNodeIds,
+        grantedAt: now,
+        grantedBy: actorUid,
+      });
+
+      await logAdminAction({
+        actorUid,
+        action: 'org:member_grant',
+        targetUid,
+        detail: {
+          orgId,
+          orgRole,
+          scopeNodeIds: normalizedScopeNodeIds,
+          targetNodeId: normalizedScopeNodeIds[0] ?? null,
+          actorType: access.actorType,
+          actorScopeNodeId: access.actorScopeNodeId,
+          isOverride: access.isOverride,
+        },
+      });
+
+      console.log(`[組織ロースター: 付与] orgId=${orgId} targetUid=${targetUid} orgRole=${orgRole} by=${actorUid}`);
+      res.status(201).json({
+        uid: targetUid,
+        orgRole,
+        scopeNodeIds: normalizedScopeNodeIds,
+        grantedAt: now.getTime(),
+        grantedBy: actorUid,
+      });
+    } catch (e) {
+      console.error('[組織ロースター: 付与エラー]', e.message);
+      res.status(500).json({ error: '名簿への登録に失敗しました' });
+    }
+  }
+);
+
+/**
+ * PATCH /admin/organizations/:orgId/members/:targetUid
+ * body: { orgRole?: 'admin' | 'staff', scopeNodeIds?: string[] }
+ *
+ * 既存の名簿エントリのrole/scope変更。scopeの拡大(自分の権限が及ばない
+ * scopeへの書き換え)を防ぐため、変更前・変更後の両方のscopeをactorが
+ * カバーしていることを要求する。
+ */
+router.patch(
+  '/organizations/:orgId/members/:targetUid',
+  requireFirebaseAuth,
+  async (req, res) => {
+    const actorUid = req.firebaseUser.uid;
+    const { orgId, targetUid } = req.params;
+    const { orgRole, scopeNodeIds } = req.body || {};
+
+    if (!isValidId(orgId)) {
+      return res.status(400).json({ error: 'orgId が不正です' });
+    }
+    if (!isValidId(targetUid)) {
+      return res.status(400).json({ error: 'targetUid が不正です' });
+    }
+    if (orgRole !== undefined && orgRole !== 'admin' && orgRole !== 'staff') {
+      return res.status(400).json({ error: "orgRole は 'admin' か 'staff' で指定してください" });
+    }
+    if (scopeNodeIds !== undefined && !isValidScopeNodeIds(scopeNodeIds)) {
+      return res.status(400).json({ error: 'scopeNodeIds は文字列配列で指定してください' });
+    }
+
+    try {
+      const orgRef = db.collection('organizations').doc(orgId);
+      const memberRef = orgRef.collection('members').doc(targetUid);
+      const existing = await memberRef.get();
+      if (!existing.exists) {
+        return res.status(404).json({ error: '名簿にこのuidのエントリが見つかりません' });
+      }
+      const current = existing.data();
+
+      const nextOrgRole = orgRole ?? current.orgRole;
+      const nextScopeNodeIds =
+        nextOrgRole === 'staff' ? [] : scopeNodeIds !== undefined ? [...new Set(scopeNodeIds)] : current.scopeNodeIds || [];
+
+      if (nextOrgRole === 'staff' && scopeNodeIds !== undefined && scopeNodeIds.length > 0) {
+        return res.status(400).json({ error: 'staff には scopeNodeIds を指定できません' });
+      }
+
+      // 変更前・変更後の両方のscopeをactorがカバーしているか確認する
+      // (staffはnode判定を持たないためnullで扱う)。
+      const beforeTarget = current.orgRole === 'staff' ? null : current.scopeNodeIds || [];
+      const afterTarget = nextOrgRole === 'staff' ? null : nextScopeNodeIds;
+
+      const accessBefore = await resolveRosterAccess(actorUid, orgId, beforeTarget);
+      if (!accessBefore.allowed) {
+        return res.status(403).json({ error: '管理者権限がありません' });
+      }
+      const accessAfter = await resolveRosterAccess(actorUid, orgId, afterTarget);
+      if (!accessAfter.allowed) {
+        return res.status(403).json({ error: '変更後のscopeはあなたの管理範囲を超えています' });
+      }
+
+      if (nextOrgRole === 'admin' && nextScopeNodeIds.length > 0) {
+        const { missing } = await assertNodesExist(orgRef, nextScopeNodeIds);
+        if (missing.length > 0) {
+          return res.status(404).json({ error: `scopeNodeIds にこの団体配下に存在しないnodeがあります: ${missing.join(', ')}` });
+        }
+      }
+
+      await memberRef.update({ orgRole: nextOrgRole, scopeNodeIds: nextScopeNodeIds });
+
+      await logAdminAction({
+        actorUid,
+        action: 'org:member_edit',
+        targetUid,
+        detail: {
+          orgId,
+          orgRole: nextOrgRole,
+          scopeNodeIds: nextScopeNodeIds,
+          targetNodeId: nextScopeNodeIds[0] ?? null,
+          actorType: accessAfter.actorType,
+          actorScopeNodeId: accessAfter.actorScopeNodeId,
+          isOverride: accessAfter.isOverride,
+        },
+      });
+
+      console.log(`[組織ロースター: 編集] orgId=${orgId} targetUid=${targetUid} orgRole=${nextOrgRole} by=${actorUid}`);
+      res.json({ uid: targetUid, orgRole: nextOrgRole, scopeNodeIds: nextScopeNodeIds });
+    } catch (e) {
+      console.error('[組織ロースター: 編集エラー]', e.message);
+      res.status(500).json({ error: '名簿の更新に失敗しました' });
+    }
+  }
+);
+
+/**
+ * DELETE /admin/organizations/:orgId/members/:targetUid
+ *
+ * 名簿からの除名(所属剥奪)。転職(トレード相当)は「旧団体の名簿から
+ * 削除 → 新団体の名簿へ追加」という2手順で表現する
+ * (phase11-org-roster-design.md 6.2「5. 転職」)。Memberアカウント自体・
+ * 過去のRoom参加履歴(監査ログ)には一切影響しない。
+ */
+router.delete(
+  '/organizations/:orgId/members/:targetUid',
+  requireFirebaseAuth,
+  async (req, res) => {
+    const actorUid = req.firebaseUser.uid;
+    const { orgId, targetUid } = req.params;
+
+    if (!isValidId(orgId)) {
+      return res.status(400).json({ error: 'orgId が不正です' });
+    }
+    if (!isValidId(targetUid)) {
+      return res.status(400).json({ error: 'targetUid が不正です' });
+    }
+
+    try {
+      const memberRef = db.collection('organizations').doc(orgId).collection('members').doc(targetUid);
+      const existing = await memberRef.get();
+      if (!existing.exists) {
+        return res.status(404).json({ error: '名簿にこのuidのエントリが見つかりません' });
+      }
+      const current = existing.data();
+      const targetScopeNodeIds = current.orgRole === 'staff' ? null : current.scopeNodeIds || [];
+
+      const access = await resolveRosterAccess(actorUid, orgId, targetScopeNodeIds);
+      if (!access.allowed) {
+        return res.status(403).json({ error: '管理者権限がありません' });
+      }
+
+      await memberRef.delete();
+
+      await logAdminAction({
+        actorUid,
+        action: 'org:member_revoke',
+        targetUid,
+        detail: {
+          orgId,
+          orgRole: current.orgRole,
+          scopeNodeIds: current.scopeNodeIds || [],
+          targetNodeId: (current.scopeNodeIds || [])[0] ?? null,
+          actorType: access.actorType,
+          actorScopeNodeId: access.actorScopeNodeId,
+          isOverride: access.isOverride,
+        },
+      });
+
+      console.log(`[組織ロースター: 剥奪] orgId=${orgId} targetUid=${targetUid} by=${actorUid}`);
+      res.json({ uid: targetUid, revoked: true });
+    } catch (e) {
+      console.error('[組織ロースター: 剥奪エラー]', e.message);
+      res.status(500).json({ error: '名簿からの除名に失敗しました' });
     }
   }
 );
