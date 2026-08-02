@@ -1035,6 +1035,67 @@ blocking functionまで必要か）は、次アクションitem3の対応方針�
   ビュー機能（phase11-org-roster-design.md 6.2で触れられている将来機能）は
   未着手。今回はデータモデルとCRUD APIの土台のみ
 
+三十四訂: 2026-08-02（三十三訂で実装した組織ロースター層バックエンドについて、
+ユーザーがtoken-serverをローカルで起動し、新規スクリプト`dev-tools/
+test-roster.sh`（実Firebase ID Token・実行中サーバーに対するcurl+jqの
+統合テスト、コミット`39d2906`）を用いてHTTPレベルの動作確認を行い、
+全14ステップPASS（FAIL=0）という結果を得た。
+
+**確認内容（テスト結果を、リポジトリ本体のソースコードと直接突き合わせて検証）：**
+
+- ステップ1-2（団体・node階層作成／鶏卵問題）: root（`organizations:manage`
+  保持者）による最初の団体管理者(UID_A)の代理登録と、`GET /admin/me`の
+  `managedOrgIds`への反映 → `lib/orgRoster.js`の`resolveRosterAccess()`
+  （「root OR 対象orgの既存admin」の判定式）通りであることをコードで確認
+- ステップ3-4（override規約）: 団体全体admin(UID_A)によるscope限定
+  admin(UID_B)の付与、UID_Bによる子node(△△現場)へのstaff付与（成功）・
+  自スコープを団体全体へ拡大しようとする操作(403)・兄弟node(大阪支社)への
+  付与(403)、UID_Aによるスコープ縮小(200) → `actorScopeCovers()`の
+  override規約（広いscopeのadminが狭いscopeをoverride可能、逆は不可）通り
+  であることをコードで確認
+- ステップ5（名簿閲覧・単体取得APIの権限）: UID_Bが名簿一覧を閲覧できる
+  一方、`organizations:monitor`を持たないため全団体一覧
+  `GET /admin/organizations`は403、しかし単体取得
+  `GET /admin/organizations/:orgId`・node一覧
+  `GET /admin/organizations/:orgId/nodes`はいずれも成功（テストのコメントに
+  「2026-08-02対応」と明記）。**これは三十三訂で「意図的にスコープ外・
+  未完了」としていた「scope限定admin自身によるadmin-dashboardでの団体選択」
+  に対応するものであり、`git log`で確認したところ、テスト実施と同日の
+  コミット群（`c6c173e`〜`2713a6c`、いずれも`git status`で
+  `origin/main`と一致していることを確認済み）で追加実装されていた**:
+  `routes/organizations.js`に新設した`canReadOrg()`（サイト全体の
+  閲覧権限 OR `resolveRosterAccess`の許可、のOR条件）へ単体取得・node一覧
+  エンドポイントの権限チェックを`organizations:monitor`固定から差し替え、
+  `admin-dashboard`側も`stores/adminOrganizations.ts`に
+  `fetchOrganizationById`/`fetchManagedOrganizations`を新設し、
+  `OrganizationsView.vue`が一覧403時に`managedOrgIds`経由の個別取得で
+  フォールバック表示するよう変更されていた。三十三訂時点の残課題のうち
+  この項目は解消済みと判断する
+- ステップ6-7（無関係uidの拒否／除名）: 権限を持たないTOKEN_Cによる編集が
+  403になること、UID_Aによる除名(revoke)が成功し、除名後の再除名が404に
+  なること
+
+**（重要な留保）** 今回のテスト実行そのもの（14 PASSという結果）は
+ユーザーの手元での実行報告であり、本ドキュメント側でターミナルを直接実行して
+確認したものではない（十一訂・十七訂と同種の限界）。ただし今回はそれに加え、
+テストが検証しようとしている権限判定ロジック
+（`resolveRosterAccess`・`actorScopeCovers`・`canReadOrg`）をリポジトリ
+本体から直接読み、テストの各アサーションと実装が一致していることを
+確認している。これは六訂・八訂で行った`git show`によるコミット内容の
+直接検証と同種の確認であり、三十三訂で「Firestoreをモックした簡易テストの
+みで確認」としていたバックエンドの権限判定ロジックについて、実際の
+HTTPエンドポイント・Firestore・Firebase Authに対する統合テストで裏付けが
+取れたことになる。一方、admin-dashboardの画面をブラウザで実際に操作しての
+確認（三十三訂で「実機動作確認は行っていない」としていたうちUI側）は
+今回のテスト範囲外であり、引き続き未確認のまま残る。
+
+以上を踏まえ、「6. 次アクションの提案」item5「組織ロースター層の実装着手」の
+残課題のうち、①「scope限定adminによるadmin-dashboardでの団体選択」と
+②「リポジトリへの実際のコミット・反映の確認」は完了扱いとし、
+「実機動作確認」は**バックエンドAPI(HTTPレベルの統合テスト)分のみ完了**と
+更新する。admin-dashboardのブラウザでの実機確認は完了しておらず、
+次アクションとして残す）
+
 ---
 
 ## 0. README.mdが定義するビジョンの要点（前提の再確認）
@@ -1601,7 +1662,7 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
 
 ---
 
-## 6. 次アクションの提案（2026-07-31 三十二訂で更新）
+## 6. 次アクションの提案（2026-08-02 三十四訂で更新）
 
 旧item 5「十八訂の変更のリポジトリへの反映確認」は、`git show`によるコミット
 `d802de0`の直接検証をもって完了したため「6.1」item 13へ移動した。item 1は
@@ -1619,7 +1680,13 @@ item 1の残り全項目についてユーザーから実機検証結果の報�
 ブートストラップ時の懸念点を洗い出した（詳細は文書冒頭の各訂参照）。
 三十二訂では、候補(i)〜(iv)を実装し「6.1」item 17へ移動した（詳細は文書
 冒頭の三十二訂参照）。候補(v)(vi)（サインインという行為自体を閉じるか）は
-意思決定が済んでいないため、独立した項目として残す。残る項目は以下の4件。
+意思決定が済んでいないため、独立した項目として残す。三十三訂で組織
+ロースター層のバックエンド・フロントエンドを実装し、三十四訂で
+`dev-tools/test-roster.sh`によるHTTPレベルの統合テスト（全14ステップPASS）と
+実コード直接確認により、item5の残課題のうち「scope限定adminによる
+admin-dashboardでの団体選択」「リポジトリへの反映確認」を解消し、
+「実機動作確認」もバックエンドAPI分は完了扱いとした（詳細は文書冒頭の
+三十四訂参照）。残る項目は以下の4件。
 
 1. **APIドキュメントの継続的な同期**：Phase11・Phase13・ユーザー管理・
    Phase16のエンドポイントは`API.md`に反映した。以後もルート追加時には
@@ -1650,36 +1717,36 @@ item 1の残り全項目についてユーザーから実機検証結果の報�
    権限」という選択肢が設計可能になるため、item5の実装着手・完了を前提
    条件とする。item5とは別項目として残すが、実質的な着手順序としては
    item5が先行する
-5. **組織ロースター層の実装着手** 🚧 **一部実装済み（2026-08-01、三十三訂）**：
+5. **組織ロースター層の実装着手** 🚧 **バックエンドは検証済み・
+   admin-dashboardのブラウザ確認のみ残る（2026-08-02、三十四訂）**：
    `phase11-org-roster-design.md`で合意した案C（`organizations/{orgId}/
    members/{uid}`によるRoom roleとは独立した所属管理）について、
    admin-dashboardの権限モデルへのスコープ追加方法（4層構造・
    `scopeNodeIds`によるデータモデル・`ancestorIds`流用の祖先判定・
-   監査ログスキーマ）は**2026-07-31、二十四訂で設計決着済み**であり、
-   **2026-08-01、三十三訂でバックエンド（`lib/orgRoster.js`・
-   `routes/organizations.js`のCRUD API・`GET /admin/me`拡張・
-   `firestore.rules`/インデックス・監査ログ）とフロントエンド
-   （`stores/adminOrganizations.ts`・`stores/auth.ts`・`App.vue`・
-   `OrganizationsView.vue`の名簿管理UI）を実装した**。
-   `vue-tsc -b`/`eslint`/`vite build`は通過済み、権限判定ロジックは
-   モックによる簡易テストで確認済みだが、**実機（ブラウザ・エミュレータ/
-   本番Firestore）での動作確認は未実施**。
+   監査ログスキーマ）は**2026-07-31、二十四訂で設計決着済み**、
+   **2026-08-01、三十三訂でバックエンド・フロントエンドを実装済み**、
+   **2026-08-02、三十四訂で`dev-tools/test-roster.sh`によるHTTPレベルの
+   統合テスト（root/団体全体admin/scope限定admin/staffの4者・override規約・
+   権限境界を含む全14ステップ、FAIL=0）を実施し、実コードとの突き合わせも
+   完了した**。
    最初の団体管理者の代理登録（鶏卵問題）は専用APIを作らず、
    「root OR 対象orgの既存admin」という判定式をそのまま利用する形で
-   解決した（詳細は三十三訂本文参照）。
+   解決している（詳細は三十三訂本文参照）。
    `phase11-org-roster-design.md`自体は二十四訂の時点で設計決着済みの
    まま更新していない（内容に変更はないため）。
+   以下2点は三十四訂で解消済みとして「6.1」へ移動する：
+   - ~~scope限定adminによるadmin-dashboardでの団体選択~~ → 解消済み
+     （単体取得`GET /admin/organizations/:orgId`・node一覧の権限を
+     `canReadOrg()`へ差し替え、`OrganizationsView.vue`側にフォールバック
+     表示を追加。詳細は三十四訂本文参照）
+   - ~~リポジトリへの実際のコミット・反映の確認~~ → 解消済み（`git status`で
+     ローカルの検証環境が`origin/main`と一致していることを確認済み）
    残っているのは以下。
-   - **実機動作確認**（ブラウザでのサインイン・名簿の付与/編集/剥奪・
-     `firestore.rules`/インデックスのデプロイ含む）
-   - **scope限定adminによるadmin-dashboardでの団体選択**：
-     `OrganizationsView.vue`の団体一覧は`GET /admin/organizations`
-     （`organizations:monitor`権限）に依存しており、サイト全体権限を
-     持たない団体スコープのみのadminは自分の管理団体を一覧から選べない。
-     `managedOrgIds`をもとに個別団体を取得する手段（例:
-     `GET /admin/organizations/:orgId`単体取得）が必要
-   - リポジトリへの実際のコミット・反映の確認（六訂・八訂等と同じ
-     `git show`等による直接検証）
+   - **admin-dashboardのブラウザでの実機動作確認**：サインイン・名簿の
+     付与/編集/剥奪・scope限定adminによる団体選択UIの実際の画面操作、
+     `firestore.rules`/インデックスの本番デプロイ確認。バックエンドAPI
+     レベルの動作は`test-roster.sh`で確認済みのため、残るのは主に
+     admin-dashboard側のUI層の確認
    - 完了後、item4（招待コードの可視範囲）に着手する
 
 ### 6.1 完了済みアクション（アーカイブ）
@@ -1886,5 +1953,20 @@ item 1の残り全項目についてユーザーから実機検証結果の報�
     目視確認は未実施）。候補(v)(vi)（サインイン自体を閉じるか）は意思
     決定が済んでいないため対象外とし、次アクションとして独立させた。
     詳細は文書冒頭の三十二訂参照
+18. ✅ **完了（2026-08-02、三十四訂）**: item5（組織ロースター層）の残課題
+    のうち2点を解消した。①「scope限定adminによるadmin-dashboardでの団体
+    選択」: `routes/organizations.js`に`canReadOrg()`を新設し、単体取得
+    `GET /admin/organizations/:orgId`・node一覧`GET /admin/organizations/
+    :orgId/nodes`の権限チェックを`organizations:monitor`固定から
+    差し替え、`stores/adminOrganizations.ts`・`OrganizationsView.vue`側にも
+    `managedOrgIds`経由のフォールバック取得・表示を追加した。②「リポジトリ
+    への実際のコミット・反映の確認」: `git status`でローカル検証環境が
+    `origin/main`と一致していることを確認した。あわせて、`dev-tools/
+    test-roster.sh`によるHTTPレベルの統合テスト（root/団体全体admin/
+    scope限定admin/staffの4者・override規約を含む全14ステップ、FAIL=0）が
+    実施され、その権限判定ロジックをリポジトリ本体のソースコードと直接
+    突き合わせて確認した。これにより「実機動作確認」はバックエンドAPI分に
+    ついて完了扱いとした（admin-dashboardのブラウザでの確認は未実施のまま
+    次アクションとして残る）。詳細は文書冒頭の三十四訂参照
 
 </details>
