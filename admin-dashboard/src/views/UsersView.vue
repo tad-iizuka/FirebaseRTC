@@ -46,57 +46,61 @@ function formatIso(iso: string | null) {
 
 <template>
   <div class="p-5">
-    <h2 class="mb-1 text-sm font-semibold">ユーザー</h2>
-    <p class="mb-4 text-[11px] text-muted-foreground">
-      Firebase Authに登録されているユーザー(メールアドレス認証のMember)をメールアドレスで検索する。
-      匿名認証のGuestアカウントはメールアドレスを持たないため一覧には出てこない。
-      バッジの付与/剥奪は各ユーザーのプロフィール画面から行う。
-    </p>
-
-    <div class="mb-4 flex max-w-md items-center gap-2">
-      <Input v-model="emailQuery" placeholder="メールアドレス(部分一致)" @keyup.enter="search" />
-      <Button size="sm" class="w-auto" :disabled="store.isLoadingUsers" @click="search">
-        {{ store.isLoadingUsers ? '検索中...' : '検索' }}
-      </Button>
-    </div>
-
+    <!-- [2026-08-02追加] 権限がない場合はエラーのみを表示し、検索フォームや
+         一覧等は出さない(見えていても叩けば403になるだけのため)。 -->
     <p v-if="store.isForbidden" class="text-xs text-destructive">
       管理者権限がありません。
     </p>
-    <p v-else-if="store.errorMessage" class="text-xs text-destructive">
-      ユーザー一覧の取得に失敗しました: {{ store.errorMessage }}
-    </p>
-    <p
-      v-else-if="!store.isLoadingUsers && store.users.length === 0"
-      class="text-xs text-muted-foreground"
-    >
-      — 検索結果なし(メールアドレスの一部を入力して検索してください) —
-    </p>
+    <template v-else>
+      <h2 class="mb-1 text-sm font-semibold">ユーザー</h2>
+      <p class="mb-4 text-[11px] text-muted-foreground">
+        Firebase Authに登録されているユーザー(メールアドレス認証のMember)をメールアドレスで検索する。
+        匿名認証のGuestアカウントはメールアドレスを持たないため一覧には出てこない。
+        バッジの付与/剥奪は各ユーザーのプロフィール画面から行う。
+      </p>
 
-    <div class="grid gap-2">
-      <Card
-        v-for="u in store.users"
-        :key="u.uid"
-        class="cursor-pointer p-3 hover:border-primary"
-        @click="openProfile(u.uid)"
+      <div class="mb-4 flex max-w-md items-center gap-2">
+        <Input v-model="emailQuery" placeholder="メールアドレス(部分一致)" @keyup.enter="search" />
+        <Button size="sm" class="w-auto" :disabled="store.isLoadingUsers" @click="search">
+          {{ store.isLoadingUsers ? '検索中...' : '検索' }}
+        </Button>
+      </div>
+
+      <p v-if="store.errorMessage" class="text-xs text-destructive">
+        ユーザー一覧の取得に失敗しました: {{ store.errorMessage }}
+      </p>
+      <p
+        v-else-if="!store.isLoadingUsers && store.users.length === 0"
+        class="text-xs text-muted-foreground"
       >
-        <div class="flex flex-wrap items-center gap-2">
-          <span class="text-xs font-medium">{{ u.email }}</span>
-          <Badge v-if="u.disabled" variant="destructive">無効化済み</Badge>
-        </div>
-        <p class="mt-1 text-[11px] text-muted-foreground">
-          uid: {{ u.uid }} / 作成: {{ formatIso(u.createdAt) }}
-        </p>
-      </Card>
-    </div>
+        — 検索結果なし(メールアドレスの一部を入力して検索してください) —
+      </p>
 
-    <div v-if="store.nextPageToken" class="mt-4">
-      <Button size="sm" variant="secondary" class="w-auto" :disabled="store.isLoadingUsers" @click="loadMore">
-        {{ store.isLoadingUsers ? '読み込み中...' : 'もっと読み込む' }}
-      </Button>
-      <!-- [既知の制約] 1リクエストにつきFirebase Authの1ページ(最大1000件)しか
-           走査しないため、該当ユーザーが多い場合は複数回「もっと読み込む」が
-           必要になることがある(token-server/routes/users.js参照)。 -->
-    </div>
+      <div class="grid gap-2">
+        <Card
+          v-for="u in store.users"
+          :key="u.uid"
+          class="cursor-pointer p-3 hover:border-primary"
+          @click="openProfile(u.uid)"
+        >
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="text-xs font-medium">{{ u.email }}</span>
+            <Badge v-if="u.disabled" variant="destructive">無効化済み</Badge>
+          </div>
+          <p class="mt-1 text-[11px] text-muted-foreground">
+            uid: {{ u.uid }} / 作成: {{ formatIso(u.createdAt) }}
+          </p>
+        </Card>
+      </div>
+
+      <div v-if="store.nextPageToken" class="mt-4">
+        <Button size="sm" variant="secondary" class="w-auto" :disabled="store.isLoadingUsers" @click="loadMore">
+          {{ store.isLoadingUsers ? '読み込み中...' : 'もっと読み込む' }}
+        </Button>
+        <!-- [既知の制約] 1リクエストにつきFirebase Authの1ページ(最大1000件)しか
+             走査しないため、該当ユーザーが多い場合は複数回「もっと読み込む」が
+             必要になることがある(token-server/routes/users.js参照)。 -->
+      </div>
+    </template>
   </div>
 </template>
