@@ -342,7 +342,19 @@ async function copyInviteCode() {
           <span v-else class="text-muted-foreground">— 無所属 —</span>
         </div>
 
-        <p v-if="orgs.isForbidden" class="text-[11px] text-muted-foreground">
+        <!-- [2026-08-02 修正] 以前はisForbiddenのみで出し分けており、
+             isForbiddenの初期値がfalseのため、fetchOrganizations()が
+             403で解決するまでの間、選択フォームが一瞬表示されてから
+             消えるちらつきが発生していた(他画面のisLoading&&list.length===0
+             という定番パターンから外れていた)。ローディング中は
+             フォームを出さない分岐を先頭に追加して解消する。 -->
+        <p
+          v-if="orgs.isLoadingOrganizations && orgs.organizations.length === 0 && !orgs.isForbidden"
+          class="text-[11px] text-muted-foreground"
+        >
+          確認中...
+        </p>
+        <p v-else-if="orgs.isForbidden" class="text-[11px] text-muted-foreground">
           割り当てを変更するには organizations:monitor / organizations:manage 権限が必要です。
         </p>
         <div v-else class="flex flex-wrap items-center gap-2">
