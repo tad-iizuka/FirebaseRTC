@@ -204,6 +204,7 @@ admin」であるため)。対象uidはFirebase Authに存在する(先にMember
 | GET | `/admin/me` | 必須(権限は問わない) | 自分自身の権限一覧を取得 **[2026-07-31、item3対応]** |
 | GET | `/admin/rooms` | 必須(`rooms:monitor`) | 複数ルーム横断の一覧監視 |
 | GET | `/admin/rooms/:roomId` | 必須(`rooms:monitor`) | ルーム詳細監視 |
+| GET | `/admin/rooms/:roomId/invite-code` | 必須(`rooms:manage`) | 招待コードの取得(閲覧のたびに監査ログへ記録) **[招待コードのadmin-dashboard移管]** |
 | GET | `/admin/audit-logs` | 必須(`audit:read`) | 監査ログ一覧(roomId/actorUidで絞込可) **[Phase8]** |
 | GET | `/admin/admins` | 必須(`admins:manage`) | 管理者権限台帳の一覧 **[Phase8]** |
 | POST | `/admin/admins/:uid/permissions` | 必須(`admins:manage`) | 他ユーザーへの権限付与/剥奪(`admins:manage`自体は対象外) **[Phase8]** |
@@ -223,6 +224,23 @@ admin」であるため)。対象uidはFirebase Authに存在する(先にMember
 できないようガードしている(自己昇格・権限エスカレーション防止)。
 `admins:manage`の付与は`dev-tools/grant-admin-permission.js`経由の手動運用に
 固定している。
+
+**`GET /admin/rooms/:roomId/invite-code`【招待コードのadmin-dashboard移管】:**
+招待コードは従来`POST /rooms`(または`POST /admin/rooms`)作成時のレスポンス
+でしか返却されず、以降どのAPIからも再取得できなかった
+(brushup-plan.md 5.4「招待コードの可視範囲」)。この課題を解消するために
+追加したエンドポイントだが、`GET /admin/rooms/:roomId`(`rooms:monitor`)とは
+あえて分離し、以下2点を満たす設計にしている。
+
+- 要求権限は`rooms:monitor`ではなく、より強い`rooms:manage`。
+  `rooms:monitor`保有者全員に「Roomへの参加権を事実上配布できる」権限まで
+  広げないため
+- 呼び出しのたびに`logAdminAction()`で`room:invite_code_viewed`として
+  監査ログに記録する。`GET /admin/rooms/:roomId`はRoomDetailView.vueから
+  10秒間隔でポーリングされているため、そちらに招待コードを含めると画面を
+  開いているだけで大量の閲覧ログが記録されてしまう。そのため専用の
+  エンドポイントに切り出し、admin-dashboard側は「表示」ボタン押下など
+  ユーザーの明示的な操作でのみ呼び出す
 
 **`GET /admin/me`【2026-07-31追加、brushup-plan.md item3(論点5)対応】:**
 特定の管理者権限を要求せず、サインインしてさえいれば誰でも呼べる。目的は
