@@ -6,3 +6,4 @@ service-account.json
 GoogleService-Info.plist
 UserInterfaceState.xcuserstate
 attachments-service-account.json
+dev-tools/.auth/
