@@ -38,7 +38,7 @@ const { db, auth } = require('../lib/firebaseAdmin');
 const { logAdminAction } = require('../lib/auditLog');
 const { requireFirebaseAuth, isValidRoomId } = require('../middleware/requireAuth');
 const { requireAdminPermission } = require('../middleware/requireAdmin');
-const { resolveRosterAccess } = require('../lib/orgRoster');
+const { resolveRosterAccess, hasSitewideOrgReadAccess } = require('../lib/orgRoster');
 
 const router = express.Router();
 
@@ -55,6 +55,24 @@ function isValidId(id) {
 
 function isNonEmptyString(v, maxLength) {
   return typeof v === 'string' && v.trim().length > 0 && v.trim().length <= maxLength;
+}
+
+/**
+ * [2026-08-02追加] 「この団体を閲覧できるか」の統一判定。
+ * サイト全体の 'organizations:monitor'/'organizations:manage' 保持者
+ * (rootを含む)、または当該orgIdの名簿にadmin登録されている本人
+ * (団体全体admin・scope限定adminいずれも)であれば閲覧できる。
+ *
+ * GET /admin/organizations/:orgId(単体取得)・
+ * GET /admin/organizations/:orgId/nodes(node一覧)で使う。一覧
+ * (GET /admin/organizations)は引き続き 'organizations:monitor' 必須の
+ * ままとする(全団体を横断的に見せる操作であり、scope限定adminに
+ * 開放する理由が無いため)。
+ */
+async function canReadOrg(uid, orgId) {
+  if (await hasSitewideOrgReadAccess(uid)) return true;
+  const access = await resolveRosterAccess(uid, orgId, null);
+  return access.allowed;
 }
 
 /**
@@ -101,52 +119,109 @@ router.get('/organizations', requireFirebaseAuth, requireAdminPermission('organi
 });
 
 /**
+ * GET /admin/organizations/:orgId
+ *
+ * [2026-08-02追加] 団体単体取得。scope限定admin(サイト全体の
+ * 'organizations:monitor'は持たず、`organizations/{orgId}/members`
+ * 経由でのみ管理権限を持つユーザー)が、admin-dashboardの一覧
+ * (GET /admin/organizations、'organizations:monitor'必須)を経由せずに
+ * 自分の管理する団体を直接取得するための入口。レスポンス形状は
+ * GET /admin/organizations の配列要素と同一。
+ */
+router.get('/organizations/:orgId', requireFirebaseAuth, async (req, res) => {
+  const uid = req.firebaseUser.uid;
+  const { orgId } = req.params;
+  if (!isValidId(orgId)) {
+    return res.status(400).json({ error: 'orgId が不正です' });
+  }
+
+  try {
+    const orgSnap = await db.collection('organizations').doc(orgId).get();
+    if (!orgSnap.exists) {
+      return res.status(404).json({ error: '団体が見つかりません' });
+    }
+
+    if (!(await canReadOrg(uid, orgId))) {
+      return res.status(403).json({ error: '管理者権限がありません' });
+    }
+
+    const org = orgSnap.data();
+    let roomCount = null;
+    try {
+      const countSnap = await db.collection('rooms').where('orgId', '==', orgId).count().get();
+      roomCount = countSnap.data().count;
+    } catch (e) {
+      console.warn(`[組織階層] roomCount取得失敗 orgId=${orgId}: ${e.message}`);
+    }
+
+    res.json({
+      orgId,
+      name: org.name,
+      industryProfile: org.industryProfile ?? null,
+      ownerUid: org.ownerUid,
+      roomCount,
+      attachmentRetentionDays: org.attachmentRetentionDays ?? null,
+      createdAt: org.createdAt?.toMillis?.() ?? null,
+    });
+  } catch (e) {
+    console.error('[組織階層: 団体単体取得エラー]', e.message);
+    res.status(500).json({ error: '団体の取得に失敗しました' });
+  }
+});
+
+/**
  * GET /admin/organizations/:orgId/nodes
  *
  * 団体配下のnodeをフラット配列で返す(parentNodeIdを持たせ、ツリーの
  * 組み立てはクライアント側に委ねる。admin-dashboard側の表示形式を
  * このAPIで決め打ちしないため)。
+ *
+ * [2026-08-02変更] 'organizations:monitor'固定だった権限チェックを
+ * canReadOrg()に変更した。scope限定adminが名簿(members)のscopeNodeIds
+ * 選択UI用に自団体のnode一覧を取得できる必要があるため
+ * (GET /admin/organizations/:orgId/members は元々canReadOrg相当の
+ * 判定だったが、nodes側だけ取り残されていた)。
  */
-router.get(
-  '/organizations/:orgId/nodes',
-  requireFirebaseAuth,
-  requireAdminPermission('organizations:monitor'),
-  async (req, res) => {
-    const { orgId } = req.params;
-    if (!isValidId(orgId)) {
-      return res.status(400).json({ error: 'orgId が不正です' });
-    }
-
-    try {
-      const orgSnap = await db.collection('organizations').doc(orgId).get();
-      if (!orgSnap.exists) {
-        return res.status(404).json({ error: '団体が見つかりません' });
-      }
-
-      const nodesSnap = await db
-        .collection('organizations')
-        .doc(orgId)
-        .collection('nodes')
-        .orderBy('depth', 'asc')
-        .get();
-
-      const nodes = nodesSnap.docs.map((d) => {
-        const n = d.data();
-        return {
-          nodeId: d.id,
-          name: n.name,
-          parentNodeId: n.parentNodeId ?? null,
-          depth: n.depth,
-        };
-      });
-
-      res.json({ nodes });
-    } catch (e) {
-      console.error('[組織階層: node一覧エラー]', e.message);
-      res.status(500).json({ error: 'nodeの一覧取得に失敗しました' });
-    }
+router.get('/organizations/:orgId/nodes', requireFirebaseAuth, async (req, res) => {
+  const uid = req.firebaseUser.uid;
+  const { orgId } = req.params;
+  if (!isValidId(orgId)) {
+    return res.status(400).json({ error: 'orgId が不正です' });
   }
-);
+
+  try {
+    const orgSnap = await db.collection('organizations').doc(orgId).get();
+    if (!orgSnap.exists) {
+      return res.status(404).json({ error: '団体が見つかりません' });
+    }
+
+    if (!(await canReadOrg(uid, orgId))) {
+      return res.status(403).json({ error: '管理者権限がありません' });
+    }
+
+    const nodesSnap = await db
+      .collection('organizations')
+      .doc(orgId)
+      .collection('nodes')
+      .orderBy('depth', 'asc')
+      .get();
+
+    const nodes = nodesSnap.docs.map((d) => {
+      const n = d.data();
+      return {
+        nodeId: d.id,
+        name: n.name,
+        parentNodeId: n.parentNodeId ?? null,
+        depth: n.depth,
+      };
+    });
+
+    res.json({ nodes });
+  } catch (e) {
+    console.error('[組織階層: node一覧エラー]', e.message);
+    res.status(500).json({ error: 'nodeの一覧取得に失敗しました' });
+  }
+});
 
 /**
  * POST /admin/organizations

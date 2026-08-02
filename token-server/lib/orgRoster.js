@@ -135,4 +135,24 @@ async function resolveRosterAccess(uid, orgId, targetScopeNodeIds = null) {
   return { allowed: covers, actorType, actorScopeNodeId, isOverride };
 }
 
-module.exports = { resolveRosterAccess, getOrgMember, isSiteWideOrgManager, actorScopeCovers };
+/**
+ * 実行者(uid)がサイト全体の組織「閲覧」権限を持つかどうか。
+ * 'organizations:monitor'(閲覧専用)または'organizations:manage'
+ * (root、閲覧も当然含む)のいずれかを持てばtrue。
+ *
+ * [用途] GET /admin/organizations/:orgId(単体取得)・
+ * GET /admin/organizations/:orgId/nodes(node一覧)は、従来
+ * 'organizations:monitor'必須としていたが、scope限定admin(サイト全体
+ * 権限は持たず、特定orgIdのみ`organizations/{orgId}/members`経由で
+ * 管理権限を持つユーザー)が自分の団体を閲覧する手段が無いという抜け穴が
+ * あった。この関数はサイト全体権限側の判定のみを担い、org側の判定
+ * (resolveRosterAccess)と合わせて「どちらかを満たせば閲覧可」という
+ * OR条件を呼び出し側(routes/organizations.js)で組み立てる。
+ */
+async function hasSitewideOrgReadAccess(uid) {
+  const snap = await db.collection('adminUsers').doc(uid).get();
+  const permissions = snap.exists ? snap.data().permissions || [] : [];
+  return permissions.includes('organizations:monitor') || permissions.includes('organizations:manage');
+}
+
+module.exports = { resolveRosterAccess, getOrgMember, isSiteWideOrgManager, actorScopeCovers, hasSitewideOrgReadAccess };

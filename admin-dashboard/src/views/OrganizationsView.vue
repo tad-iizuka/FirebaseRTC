@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSettingsStore } from '@/stores/settings'
+import { useAuthStore } from '@/stores/auth'
 import { useAdminOrganizationsStore } from '@/stores/adminOrganizations'
 import Button from '@/components/ui/Button.vue'
 import Input from '@/components/ui/Input.vue'
@@ -18,12 +19,30 @@ import { cn } from '@/lib/utils'
 
 const router = useRouter()
 const settings = useSettingsStore()
+const auth = useAuthStore()
 const orgs = useAdminOrganizationsStore()
 
 const selectedOrgId = ref<string | null>(null)
 
+/**
+ * [2026-08-02追加] `GET /admin/organizations`(一覧)は`organizations:monitor`
+ * を要求するため、サイト全体権限を持たない団体スコープのみのadminには
+ * 403になる(`orgs.isForbidden`がtrueになる)。その場合でも、
+ * `auth.managedOrgIds`(自分がorgRole:'admin'として登録されている団体)
+ * が分かっていれば、団体単体取得API(`GET /admin/organizations/:orgId`、
+ * canReadOrgで許可される)で個別に取得して一覧に載せる。
+ * どちらも取得できない(=一覧も個別取得も権限が無い)場合のみ、下の
+ * `orgs.isForbidden`表示に落ちる。
+ */
 function load() {
-  orgs.fetchOrganizations(settings.tokenServerUrl).catch(() => {})
+  orgs
+    .fetchOrganizations(settings.tokenServerUrl)
+    .catch(() => {})
+    .finally(() => {
+      if (auth.managedOrgIds.length > 0) {
+        orgs.fetchManagedOrganizations(settings.tokenServerUrl, auth.managedOrgIds).catch(() => {})
+      }
+    })
 }
 onMounted(load)
 
@@ -218,8 +237,16 @@ async function revokeMember(uid: string) {
     <div>
       <h2 class="mb-2 text-[12px] font-medium">団体</h2>
 
-      <p v-if="orgs.isForbidden" class="text-xs text-destructive">管理者権限がありません。</p>
-      <p v-else-if="orgs.errorMessage" class="text-xs text-destructive">
+      <!-- [2026-08-02変更] 一覧取得(organizations:monitor)が403でも、
+           managedOrgIds経由で1件以上取得できていれば、その分は表示する
+           (scope限定adminにも自分の団体は見えるようにするため)。 -->
+      <p
+        v-if="orgs.isForbidden && orgs.organizations.length === 0"
+        class="text-xs text-destructive"
+      >
+        管理者権限がありません。
+      </p>
+      <p v-else-if="orgs.errorMessage && orgs.organizations.length === 0" class="text-xs text-destructive">
         団体一覧の取得に失敗しました: {{ orgs.errorMessage }}
       </p>
       <p
