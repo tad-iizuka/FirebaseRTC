@@ -126,21 +126,25 @@ async function saveDisplayConfig() {
         バッジ一覧の取得に失敗しました: {{ store.errorMessage }}
       </p>
 
-      <h3 class="mb-2 mt-2 text-[12px] font-medium">表示設定</h3>
-      <div class="mb-6 flex flex-wrap items-center gap-2">
-        <span class="text-xs text-muted-foreground">プロフィール画面の最大表示件数</span>
-        <input
-          type="number"
-          min="1"
-          max="20"
-          class="h-8 w-20 rounded-sm border border-input bg-background px-2 text-xs text-foreground outline-none focus:border-primary"
-          :value="maxDisplayCountDraft ?? store.displayConfig?.maxDisplayCount ?? 5"
-          @input="maxDisplayCountDraft = Number(($event.target as HTMLInputElement).value)"
-        />
-        <Button size="sm" class="w-auto" :disabled="store.isSaving" @click="saveDisplayConfig">
-          {{ store.isSaving ? '更新中...' : '保存' }}
-        </Button>
-      </div>
+      <!-- [2026-08-02追加, item6] isForbiddenは初回フェッチが完了するまでfalse
+           のままなので、isLoadingBadges中は未確定のまま表示しない。 -->
+      <template v-if="!(store.isLoadingBadges && store.badges.length === 0)">
+        <h3 class="mb-2 mt-2 text-[12px] font-medium">表示設定</h3>
+        <div class="mb-6 flex flex-wrap items-center gap-2">
+          <span class="text-xs text-muted-foreground">プロフィール画面の最大表示件数</span>
+          <input
+            type="number"
+            min="1"
+            max="20"
+            class="h-8 w-20 rounded-sm border border-input bg-background px-2 text-xs text-foreground outline-none focus:border-primary"
+            :value="maxDisplayCountDraft ?? store.displayConfig?.maxDisplayCount ?? 5"
+            @input="maxDisplayCountDraft = Number(($event.target as HTMLInputElement).value)"
+          />
+          <Button size="sm" class="w-auto" :disabled="store.isSaving" @click="saveDisplayConfig">
+            {{ store.isSaving ? '更新中...' : '保存' }}
+          </Button>
+        </div>
+      </template>
 
       <h3 class="mb-2 text-[12px] font-medium">バッジ一覧</h3>
       <p v-if="store.isLoadingBadges && store.badges.length === 0" class="mb-3 text-xs text-muted-foreground">
@@ -191,8 +195,10 @@ async function saveDisplayConfig() {
         </Card>
       </div>
 
-      <h3 class="mb-2 text-[12px] font-medium">バッジを新規作成</h3>
-      <div class="grid max-w-md gap-2">
+      <h3 v-if="!(store.isLoadingBadges && store.badges.length === 0)" class="mb-2 text-[12px] font-medium">
+        バッジを新規作成
+      </h3>
+      <div v-if="!(store.isLoadingBadges && store.badges.length === 0)" class="grid max-w-md gap-2">
         <Input v-model="newName" placeholder="名称(例: 優秀対応賞)" />
         <Input v-model="newIcon" placeholder="アイコン(絵文字。例: 🏅)" />
         <Input v-model="newDescription" placeholder="説明(任意)" />

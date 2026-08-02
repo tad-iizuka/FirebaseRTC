@@ -59,7 +59,14 @@ function formatIso(iso: string | null) {
         バッジの付与/剥奪は各ユーザーのプロフィール画面から行う。
       </p>
 
-      <div class="mb-4 flex max-w-md items-center gap-2">
+      <!-- [2026-08-02追加, item6] このViewは現状onMountedでの自動フェッチが
+           無く、isForbiddenは検索操作を行うまでfalseのまま変化しないため、
+           現時点では実害のあるフラッシュは発生しない。他5画面とパターンを
+           揃えておくことで、将来自動フェッチが追加された場合の再発を防ぐ。 -->
+      <div
+        v-if="!(store.isLoadingUsers && store.users.length === 0)"
+        class="mb-4 flex max-w-md items-center gap-2"
+      >
         <Input v-model="emailQuery" placeholder="メールアドレス(部分一致)" @keyup.enter="search" />
         <Button size="sm" class="w-auto" :disabled="store.isLoadingUsers" @click="search">
           {{ store.isLoadingUsers ? '検索中...' : '検索' }}

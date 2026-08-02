@@ -31,7 +31,12 @@ function nextPage() {
       管理者権限がありません。
     </p>
     <template v-else>
-      <div class="mb-4 flex flex-wrap items-center gap-2">
+      <!-- [2026-08-02追加, item6] isForbiddenは初回フェッチが完了するまでfalse
+           のままなので、isLoading中は未確定のまま表示しない。 -->
+      <div
+        v-if="!(auditLogs.isLoading && auditLogs.logs.length === 0)"
+        class="mb-4 flex flex-wrap items-center gap-2"
+      >
         <Input v-model="auditLogs.roomIdFilter" placeholder="roomIdで絞込(任意)" class="max-w-[220px]" />
         <Input v-model="auditLogs.actorUidFilter" placeholder="actorUidで絞込(任意)" class="max-w-[220px]" />
         <Button variant="secondary" size="sm" class="w-auto" @click="load">絞込</Button>

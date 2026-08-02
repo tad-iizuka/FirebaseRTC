@@ -91,18 +91,22 @@ async function revoke() {
         — 管理者なし —
       </p>
 
-      <div class="grid max-w-md gap-2">
-        <Input v-model="targetUid" placeholder="対象UID" />
-        <Input v-model="targetPermission" placeholder="permission (例: audit:read)" />
-        <div class="flex gap-2">
-          <Button size="sm" class="w-auto" @click="grant">付与</Button>
-          <Button variant="secondary" size="sm" class="w-auto" @click="revoke">剥奪</Button>
+      <!-- [2026-08-02追加, item6] isForbiddenは初回フェッチが完了するまでfalse
+           のままなので、isLoading中は未確定のまま表示しない。 -->
+      <template v-if="!(adminUsers.isLoading && adminUsers.admins.length === 0)">
+        <div class="grid max-w-md gap-2">
+          <Input v-model="targetUid" placeholder="対象UID" />
+          <Input v-model="targetPermission" placeholder="permission (例: audit:read)" />
+          <div class="flex gap-2">
+            <Button size="sm" class="w-auto" @click="grant">付与</Button>
+            <Button variant="secondary" size="sm" class="w-auto" @click="revoke">剥奪</Button>
+          </div>
         </div>
-      </div>
-      <p class="mt-3 max-w-md text-[11px] text-muted-foreground">
-        admins:manage 自体はこの画面から付与/剥奪できません
-        (dev-tools/grant-admin-permission.js での手動運用に固定しています)。
-      </p>
+        <p class="mt-3 max-w-md text-[11px] text-muted-foreground">
+          admins:manage 自体はこの画面から付与/剥奪できません
+          (dev-tools/grant-admin-permission.js での手動運用に固定しています)。
+        </p>
+      </template>
     </template>
   </div>
 </template>

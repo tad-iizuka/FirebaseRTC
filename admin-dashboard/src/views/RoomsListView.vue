@@ -100,7 +100,13 @@ function dismissCreatedRoom() {
       </div>
 
       <!-- [ルーム作成のadmin-dashboard移管] -->
-      <div class="mb-5 grid max-w-md gap-2 rounded-sm border border-dashed border-border p-3">
+      <!-- [2026-08-02追加, item6] isForbiddenは初回フェッチが完了するまでfalseの
+           ままなので、isLoadingList中は未確定のまま表示しない。読み込み完了後、
+           isForbiddenがtrueならこのtemplate自体がv-elseで非表示になる。 -->
+      <div
+        v-if="!(rooms.isLoadingList && rooms.rooms.length === 0)"
+        class="mb-5 grid max-w-md gap-2 rounded-sm border border-dashed border-border p-3"
+      >
         <h3 class="text-[11px] font-medium text-muted-foreground">ルームを新規作成</h3>
         <p class="text-[11px] text-muted-foreground">
           作成には rooms:create 権限が必要です(付与は「管理者権限」タブから)。
