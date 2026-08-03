@@ -593,15 +593,21 @@ struct ContentView: View {
         }
     }
 
-    /// [見出し・アイコンの表示名切り替え] Roomが組織(orgId)に紐づく場合は組織名を、
-    /// 無所属Roomはルーム名を使う。Web版RoomView.vueのdisplayNameに相当。
+    /// [見出し・アイコンの表示名切り替え・再訂正] Roomが組織(orgId)に紐づく場合、
+    /// 最下層のノード名を優先して使う(同名の組織が複数の支社・現場を持つ場合、
+    /// 最上位の組織名だけでは区別がつかないため)。ノード未割り当ての場合は
+    /// 組織名、無所属Roomはルーム名を使う。Web版RoomView.vueのdisplayNameに相当。
     private var displayName: String? {
-        orgContext.orgName ?? currentRoomName
+        if let leaf = orgContext.breadcrumb.last {
+            return leaf.name
+        }
+        return orgContext.orgName ?? currentRoomName
     }
 
-    /// [見出し] 組織に紐づくRoomは組織名、無所属Roomはルーム名を表示する。未設定の場合は
-    /// 表示しない(roomIdはstatusRow側で常に表示されるため、名前は補助的な表示)。
-    /// Web版RoomView.vueの`<h1 v-if="displayName">`に相当。
+    /// [見出し] 組織に紐づくRoomは最下層のノード名(無ければ組織名)、無所属Roomは
+    /// ルーム名を表示する。未設定の場合は表示しない(roomIdはstatusRow側で常に
+    /// 表示されるため、名前は補助的な表示)。Web版RoomView.vueの
+    /// `<h1 v-if="displayName">`に相当。
     @ViewBuilder
     private var roomNameHeader: some View {
         if let name = displayName {
@@ -615,19 +621,19 @@ struct ContentView: View {
         orgBreadcrumbRow
     }
 
-    /// [組織階層内のノードパンくず表示] Web版RoomView.vueの`<OrgBreadcrumb>`に相当。
-    /// 組織名自体はdisplayName(見出し)側で既に表示されているため、ここでは
-    /// breadcrumb(組織直下からRoomが割り当てられたノードまでの経路)のみを表示し、
-    /// 組織名を重複表示しない。ノード未割り当て(breadcrumbが空)の場合は何も表示しない
-    /// (無所属Roomの場合と同じ「無ければ出さない」方針)。
+    /// [組織階層内の祖先パンくず表示] Web版RoomView.vueの`<OrgBreadcrumb>`に相当。
+    /// 最下層のノード名はdisplayName(見出し)側で既に表示されているため、ここでは
+    /// 「組織名 › 祖先ノード…」という、最下層を除いた祖先経路のみを表示する。
+    /// breadcrumbが空(Room=組織直下でノード未割り当て)の場合、見出し側がorgNameを
+    /// 表示するため、ここでは何も表示しない(無所属Roomの場合と同じ方針)。
     @ViewBuilder
     private var orgBreadcrumbRow: some View {
-        if !orgContext.breadcrumb.isEmpty {
+        if let orgName = orgContext.orgName, !orgContext.breadcrumb.isEmpty {
+            let ancestorNodes = orgContext.breadcrumb.dropLast()
             HStack(spacing: 4) {
-                ForEach(Array(orgContext.breadcrumb.enumerated()), id: \.element.id) { index, node in
-                    if index > 0 {
-                        Text("›")
-                    }
+                Text(orgName)
+                ForEach(ancestorNodes) { node in
+                    Text("›")
                     Text(node.name)
                 }
             }

@@ -53,12 +53,19 @@ const lockedByName = computed(() => {
   return connection.participants.get(uid)?.name ?? uid
 })
 const participantList = computed(() => Array.from(connection.participants.values()))
-// [組織階層への表示切り替え] Roomが組織(orgId)に紐づいている場合はルーム名の
-// 代わりに組織名(orgContext.orgName)を見出し・ヘッダーアイコンの頭文字として使う。
-// 無所属Room(orgId===null)は従来通りルーム名を使う。
-// OrgBreadcrumb側は組織名を先頭に重複表示しないよう、ノード階層(breadcrumb配列)
-// のみを表示する形に変更している(displayNameが既に組織名を担うため)。
-const displayName = computed(() => orgContext.orgName ?? roomStore.currentRoomName)
+// [組織階層への表示切り替え・再訂正] Roomが組織(orgId)に紐づいている場合、
+// 見出し・ヘッダーアイコンの頭文字には「最下層のノード名」を優先して使う。
+// 同名の組織が複数の支社・現場を持つ場合、最上位の組織名だけでは区別が
+// つかないため(例: 「ACME」より「ACME 現場3」の方が識別に有用)。
+// ノード未割り当て(breadcrumbが空、Room=組織直下)の場合は組織名を、
+// 無所属Room(orgId===null)の場合は従来通りルーム名を使う。
+// OrgBreadcrumb側は最下層を除いた祖先経路(組織名+上位ノード)のみを
+// 補助表示する(displayNameが既に最下層を担うため)。
+const displayName = computed(() => {
+  const { orgName, breadcrumb } = orgContext
+  if (breadcrumb.length > 0) return breadcrumb[breadcrumb.length - 1].name
+  return orgName ?? roomStore.currentRoomName
+})
 // [Phase13] badges.byUidは{badges, topBadge}を保持するが、ParticipantList.vue
 // はtopBadgeだけを表示に使うため、ここでuid -> topBadgeの形へ変換する。
 const topBadges = computed(() =>
@@ -201,16 +208,16 @@ onUnmounted(() => {
   <div>
     <p v-if="banNotice" class="px-5 py-2 text-xs text-destructive">{{ banNotice }}</p>
 
-    <!-- [見出し] 組織(orgId)に紐づくRoomは組織名を、無所属Roomはルーム名を表示する。
-         いずれも未設定の場合は表示しない(roomIdはStatusRow側で常に表示されるため、
-         名前は補助的な表示)。 -->
+    <!-- [見出し] 組織(orgId)に紐づくRoomは最下層のノード名(無ければ組織名)を、
+         無所属Roomはルーム名を表示する。いずれも未設定の場合は表示しない
+         (roomIdはStatusRow側で常に表示されるため、名前は補助的な表示)。 -->
     <h1
       v-if="displayName"
       class="truncate px-5 pb-0 pt-3 text-[15px] font-semibold"
     >
       {{ displayName }}
     </h1>
-    <OrgBreadcrumb :breadcrumb="orgContext.breadcrumb" />
+    <OrgBreadcrumb :org-name="orgContext.orgName" :breadcrumb="orgContext.breadcrumb" />
 
     <StatusRow :kind="connection.statusKind" :message="connection.statusMessage" :room-id="roomId" />
     <GuestStatusBar

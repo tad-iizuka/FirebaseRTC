@@ -19,11 +19,15 @@ const onboarding = useOnboardingStore()
 const roomStore = useRoomStore()
 const orgContext = useOrgContextStore()
 
-// [ヘッダーアイコンの表示名] 組織(orgId)に紐づくRoomは組織名を、無所属Roomは
-// ルーム名を使う。RoomView.vue側のdisplayNameと同じロジック
-// (orgContextはRoomView.vueが入室時にfetchOnceする同一Piniaストアなので、
-// ここでも同じ値をそのまま参照できる)。
-const headerRoomName = computed(() => orgContext.orgName ?? roomStore.currentRoomName)
+// [ヘッダーアイコンの表示名・再訂正] 組織(orgId)に紐づくRoomは最下層の
+// ノード名を優先し、ノード未割り当てなら組織名、無所属Roomはルーム名を使う。
+// RoomView.vue側のdisplayNameと同じロジック(orgContextはRoomView.vueが
+// 入室時にfetchOnceする同一Piniaストアなので、ここでも同じ値をそのまま参照できる)。
+const headerRoomName = computed(() => {
+  const { orgName, breadcrumb } = orgContext
+  if (breadcrumb.length > 0) return breadcrumb[breadcrumb.length - 1].name
+  return orgName ?? roomStore.currentRoomName
+})
 
 // [ヘッダーの表示名]
 // ゲストがルーム内で変更したニックネーム(ban.myDisplayName、rooms/{roomId}/members/{uid}の

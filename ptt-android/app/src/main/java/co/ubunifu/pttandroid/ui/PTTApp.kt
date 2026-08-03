@@ -466,9 +466,13 @@ fun PTTApp(
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
     ) {
-        // [見出し・アイコンの表示名切り替え] Roomが組織(orgId)に紐づく場合は組織名を、
-        // 無所属Roomはルーム名を使う。Web版RoomView.vueのdisplayNameに相当。
-        val displayName = orgContext.orgName ?: currentRoomName
+        // [見出し・アイコンの表示名切り替え・再訂正] Roomが組織(orgId)に紐づく場合、
+        // 最下層のノード名を優先して使う(同名の組織が複数の支社・現場を持つ場合、
+        // 最上位の組織名だけでは区別がつかないため)。ノード未割り当ての場合は
+        // 組織名、無所属Roomはルーム名を使う。Web版RoomView.vueのdisplayNameに相当。
+        val displayName = orgContext.breadcrumb.lastOrNull()?.name
+            ?: orgContext.orgName
+            ?: currentRoomName
 
         HeaderRow(
             // [表示名の優先順位] Web版App.vueのheaderDisplayNameと同じ: ルーム内で変更した
@@ -497,9 +501,10 @@ fun PTTApp(
             )
 
             activeRoomId != null -> {
-                // [見出し] 組織に紐づくRoomは組織名、無所属Roomはルーム名を表示する。
-                // 未設定の場合は表示しない(roomIdはStatusRow側で常に表示されるため、
-                // 名前は補助的な表示。Web版RoomView.vueのh1と同じ位置づけ)。
+                // [見出し] 組織に紐づくRoomは最下層のノード名(無ければ組織名)、
+                // 無所属Roomはルーム名を表示する。未設定の場合は表示しない
+                // (roomIdはStatusRow側で常に表示されるため、名前は補助的な表示。
+                // Web版RoomView.vueのh1と同じ位置づけ)。
                 displayName?.let { name ->
                     Text(
                         name,
@@ -803,17 +808,19 @@ private fun AuthSection(
 }
 
 /**
- * [組織階層内のノードパンくず表示] Web版RoomView.vueの`<OrgBreadcrumb>`・
+ * [組織階層内の祖先パンくず表示] Web版RoomView.vueの`<OrgBreadcrumb>`・
  * iOS版orgBreadcrumbRowに相当。
- * 組織名自体は見出し(displayName)側で既に表示されているため、ここでは
- * breadcrumb(組織直下からRoomが割り当てられたノードまでの経路)のみを表示し、
- * 組織名を重複表示しない。ノード未割り当て(breadcrumbが空)の場合は何も表示しない
- * (無所属Roomの場合と同じ「無ければ出さない」方針)。
+ * 最下層のノード名は見出し(displayName)側で既に表示されているため、ここでは
+ * 「組織名 › 祖先ノード…」という、最下層を除いた祖先経路のみを表示する。
+ * breadcrumbが空(Room=組織直下でノード未割り当て)の場合、見出し側がorgNameを
+ * 表示するため、ここでは何も表示しない(無所属Roomの場合と同じ「無ければ出さない」方針)。
  */
 @Composable
 private fun OrgBreadcrumbRow(orgContext: OrgContext) {
+    val orgName = orgContext.orgName ?: return
     if (orgContext.breadcrumb.isEmpty()) return
-    val text = orgContext.breadcrumb.joinToString(" › ") { it.name }
+    val ancestorNodes = orgContext.breadcrumb.dropLast(1)
+    val text = (listOf(orgName) + ancestorNodes.map { it.name }).joinToString(" › ")
     Text(text, fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Muted)
     Spacer(Modifier.height(4.dp))
 }
