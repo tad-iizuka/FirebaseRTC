@@ -1,7 +1,7 @@
 # PTTアプリ ブラッシュアップ計画（改定版）
 
 対象リポジトリ: `tad-iizuka/FirebaseRTC`
-作成日: 2026-07-09 ／ 最終改定: 2026-08-03（四十七訂）
+作成日: 2026-07-09 ／ 最終改定: 2026-08-03（四十八訂）
 
 このドキュメントは訂（改定）のたびに履歴を積み増していく形式のため、
 冒頭の改定履歴は下記に折りたたんである。通常の参照では「0. README.mdが
@@ -1419,6 +1419,19 @@ Android(`PTTApp.kt`のdisplayName val)の3クライアント共通で導入し�
 方針を踏襲)。四十六訂と同様、本ドキュメント側でのビルド確認・
 リポジトリへの反映は未実施のため、次アクション(item4)を四十七訂の内容も
 含む形として維持する)
+四十八訂: 2026-08-03（次アクションitem4「item29のリポジトリへの反映確認」を
+実施。アップロードされたリポジトリ一式（HEAD=`6745f2c`）を`git show`・
+`grep`で直接検証し、`displayName = breadcrumb.at(-1)?.name ?? orgName ??
+roomName`に相当するロジックが、Web(`RoomView.vue`の`displayName`
+computed)・iOS(`ContentView.swift`の`private var displayName`、
+`breadcrumb.last`参照)・Android(`PTTApp.kt`の`orgContext.breadcrumb.
+lastOrNull()?.name`)の3クライアントいずれにもコミット済み（`b41fc20`）で
+あることを確認した。`OrgBreadcrumb.vue`側のコメントも「最下層のノード名は
+見出し側で表示するため、ここでは補助表示のみ」という四十七訂の設計と
+一致していた。item4を完了扱いとし「6.1」item30へ移動する。これにより
+「6. 次アクションの提案」に残るのはitem1（Phase14着手）・item2（文書棚卸し
+漏れ6ファイル）・item3（Room owner向けバッジ付与UI、低優先度）の3件のみと
+なった）
 
 </details>
 
@@ -2043,7 +2056,7 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
 
 ---
 
-## 6. 次アクションの提案（2026-08-03 四十五訂で更新）
+## 6. 次アクションの提案（2026-08-03 四十八訂で更新）
 
 <details>
 <summary>この一覧のitem番号がどう変遷してきたか（クリックで展開）</summary>
@@ -2131,14 +2144,10 @@ item 6（`isForbidden`系フラグの機械的な棚卸し）に実際に着手�
    スコープ外とした判断。管理者サイト経由での付与/剥奪運用で当面は
    足りている想定だが、Room ownerが自分の画面から直接操作したいという
    要望が出た場合に再検討する
-4. **（2026-08-03 四十六訂→四十七訂で再訂正）item29のリポジトリへの反映確認**：
-   見出し・アイコンの表示を「組織に紐づくRoomは最下層のノード名(無ければ
-   組織名)、無所属Roomはルーム名」で切り替える変更
-   （`RoomView.vue`/`App.vue`/`OrgBreadcrumb.vue`・`ContentView.swift`・
-   `PTTApp.kt`）はアップロードされたZIPアーカイブに対して実装したのみで、
-   `tad-iizuka/FirebaseRTC`リポジトリへの実際のコミット・反映は
-   本ドキュメント作成時点では未確認。item27と同様、`git show`等による
-   直接検証を次アクションとして残す
+
+**（2026-08-03 四十八訂）** 旧item4「item29のリポジトリへの反映確認」は
+`git show`による直接検証で完了したため「6.1」item30へ移動した。現在
+有効な次アクションは上記3件のみ。
 
 ### 6.1 完了済みアクション（アーカイブ）
 
@@ -2495,5 +2504,12 @@ item 6（`isForbidden`系フラグの機械的な棚卸し）に実際に着手�
     除いた祖先ノード」のみを補助表示する形に整理した。リポジトリへの
     反映確認は次アクションとして残る（item27と同様、Xcode/Gradleビルドは
     この環境では未実施）
+30. ✅ **完了（2026-08-03、四十八訂）**: item29（組織階層パンくず表示の
+    最下層ノード名優先ロジック）のリポジトリへの反映確認。アップロードされた
+    リポジトリ一式（HEAD=`6745f2c`）を`git show`・`grep`で直接検証し、
+    `displayName = breadcrumb.at(-1)?.name ?? orgName ?? roomName`相当の
+    ロジックがWeb(`RoomView.vue`)・iOS(`ContentView.swift`)・
+    Android(`PTTApp.kt`)いずれにもコミット`b41fc20`で反映済みであることを
+    確認した
 
 </details>
