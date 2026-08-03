@@ -483,7 +483,13 @@ router.patch(
           return res.status(404).json({ error: 'nodeId で指定されたnodeがこの団体配下に見つかりません' });
         }
         const node = nodeSnap.data();
-        nodeAncestorIds = [...(node.ancestorIds || []), nodeId];
+        // [バグ修正] nodeAncestorIdsは「祖先のみ」であるべきで、nodeId(自分自身)は
+        // 含めない。node.ancestorIdsは既に「祖先のみ」の正しい定義で計算されている
+        // (上記のnode作成時ロジック参照)ため、そのまま使う。lib/orgContext.jsの
+        // resolveOrgContext()側でパンくず組み立て時にroom.nodeIdを別途末尾へ追加する
+        // 設計になっており、ここでnodeIdまで含めてしまうと同じnodeがパンくずに
+        // 二重に現れる不具合が発生する(旧実装のバグ)。
+        nodeAncestorIds = [...(node.ancestorIds || [])];
       }
 
       await roomRef.update({ orgId, nodeId: nodeId ?? null, nodeAncestorIds });
