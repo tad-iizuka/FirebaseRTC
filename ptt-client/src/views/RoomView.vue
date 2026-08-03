@@ -71,6 +71,11 @@ const displayName = computed(() => {
 const topBadges = computed(() =>
   Object.fromEntries(Object.entries(badges.byUid).map(([uid, entry]) => [uid, entry.topBadge])),
 )
+// [2026-08-04] 剥奪ボタン表示用に、uid -> 現在の全バッジ配列も渡す
+// (topBadgesは最優先1件のみのため、2件目以降を剥奪できない)。
+const allBadges = computed(() =>
+  Object.fromEntries(Object.entries(badges.byUid).map(([uid, entry]) => [uid, entry.badges])),
+)
 
 async function enter() {
   banNotice.value = null
@@ -194,6 +199,25 @@ async function updateNickname(displayName: string) {
   }
 }
 
+// [2026-08-04] Room owner向けバッジ付与/剥奪。サーバー側
+// (routes/roomBadges.js)がowner判定・grantableByRoomOwnerフラグの両方を
+// 検証するため、フロント側はエラーメッセージの表示のみを担う
+// (confirmBan等と同じ、catchして store側のエラー表示に任せるパターン)。
+async function grantBadge(p: ParticipantInfo, badgeId: string) {
+  try {
+    await badges.grantBadgeTo(settings.tokenServerUrl, roomId.value, p.identity, badgeId)
+  } catch {
+    // badges.grantErrorMessage に理由がセットされているのでUIには既に反映済み
+  }
+}
+async function revokeBadge(p: ParticipantInfo, badgeId: string) {
+  try {
+    await badges.revokeBadgeFrom(settings.tokenServerUrl, roomId.value, p.identity, badgeId)
+  } catch {
+    // badges.grantErrorMessage に理由がセットされているのでUIには既に反映済み
+  }
+}
+
 onMounted(enter)
 onUnmounted(() => {
   connection.disconnect()
@@ -260,8 +284,13 @@ onUnmounted(() => {
       :participants="participantList"
       :can-ban="canBan"
       :top-badges="topBadges"
+      :all-badges="allBadges"
+      :grantable-badges="badges.grantableBadges"
+      :is-granting-badge="badges.isGranting"
       @ban="requestBan"
       @report="reportParticipant"
+      @grant-badge="grantBadge"
+      @revoke-badge="revokeBadge"
     />
 
     <ChatPanel

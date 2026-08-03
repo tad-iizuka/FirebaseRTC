@@ -220,6 +220,10 @@ export interface AdminBadge {
   autoGrantCondition: Record<string, unknown> | null
   priority: number
   active: boolean
+  // [2026-08-04] Room内ownerがこのバッジを付与/剥奪できるかどうか(単純な
+  // ON/OFF。role単位の段階分けはなし、ユーザー確認済み)。falseの場合、
+  // 引き続きこの画面(admin-dashboard、badges:manage権限)経由でのみ操作可能。
+  grantableByRoomOwner: boolean
   createdAt: number | null
   updatedAt: number | null
   createdBy: string

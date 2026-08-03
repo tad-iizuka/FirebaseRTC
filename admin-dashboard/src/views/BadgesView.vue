@@ -33,6 +33,9 @@ const newDescription = ref('')
 const newCategory = ref<BadgeCategory>('skill')
 const newGrantMethod = ref<BadgeGrantMethod>('manual')
 const newPriority = ref(10)
+// [2026-08-04] Room ownerへの委譲はデフォルトfalse(サイト管理者専用)。
+// 「リーダーアサイン」のような軽いバッジを作る場合のみ、作成時にONにする想定。
+const newGrantableByRoomOwner = ref(false)
 
 const CATEGORY_OPTIONS: { value: BadgeCategory; label: string }[] = [
   { value: 'role', label: '役割章(通常はGuest用の予約枠。手動作成は非推奨)' },
@@ -57,6 +60,7 @@ async function createBadge() {
       category: newCategory.value,
       grantMethod: newGrantMethod.value,
       priority: newPriority.value,
+      grantableByRoomOwner: newGrantableByRoomOwner.value,
     })
     newName.value = ''
     newIcon.value = ''
@@ -64,6 +68,7 @@ async function createBadge() {
     newCategory.value = 'skill'
     newGrantMethod.value = 'manual'
     newPriority.value = 10
+    newGrantableByRoomOwner.value = false
   } catch {
     // saveErrorMessageに反映済み
   }
@@ -89,6 +94,15 @@ async function savePriority(badgeId: string) {
 async function toggleActive(badgeId: string, active: boolean) {
   try {
     await store.updateBadge(settings.tokenServerUrl, badgeId, { active })
+  } catch {
+    // saveErrorMessageに反映済み
+  }
+}
+
+// [2026-08-04] Room owner委譲フラグの行内トグル。toggleActiveと同じ形。
+async function toggleGrantableByRoomOwner(badgeId: string, grantableByRoomOwner: boolean) {
+  try {
+    await store.updateBadge(settings.tokenServerUrl, badgeId, { grantableByRoomOwner })
   } catch {
     // saveErrorMessageに反映済み
   }
@@ -163,6 +177,7 @@ async function saveDisplayConfig() {
             <span class="text-xs font-medium">{{ b.name }}</span>
             <Badge>{{ b.category }}</Badge>
             <Badge variant="accent">{{ b.grantMethod }}</Badge>
+            <Badge v-if="b.grantableByRoomOwner" variant="accent">Room owner委譲中</Badge>
             <Badge v-if="!b.active" variant="destructive">廃止済み</Badge>
           </div>
           <p v-if="b.description" class="mb-2 text-[11px] text-muted-foreground">{{ b.description }}</p>
@@ -190,6 +205,14 @@ async function saveDisplayConfig() {
               @click="toggleActive(b.badgeId, !b.active)"
             >
               {{ b.active ? '廃止する' : '再度有効化する' }}
+            </button>
+            <span class="mx-1 text-muted-foreground">|</span>
+            <button
+              type="button"
+              class="text-[11px] text-primary underline-offset-2 hover:underline"
+              @click="toggleGrantableByRoomOwner(b.badgeId, !b.grantableByRoomOwner)"
+            >
+              {{ b.grantableByRoomOwner ? 'Room owner委譲を解除する' : 'Room ownerに委譲する' }}
             </button>
           </div>
         </Card>
@@ -222,6 +245,10 @@ async function saveDisplayConfig() {
             class="h-9 w-24 rounded-sm border border-input bg-background px-2 text-sm text-foreground outline-none focus:border-primary"
           />
         </div>
+        <label class="flex items-center gap-2 text-xs text-muted-foreground">
+          <input v-model="newGrantableByRoomOwner" type="checkbox" class="h-4 w-4" />
+          Room ownerによる付与/剥奪を許可する(「リーダーアサイン」等の軽いバッジ向け)
+        </label>
         <Button size="sm" class="w-auto" :disabled="store.isSaving" @click="createBadge">
           {{ store.isSaving ? '作成中...' : 'バッジを作成' }}
         </Button>

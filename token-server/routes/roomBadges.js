@@ -19,10 +19,23 @@
  * [admin-dashboard経由の並行パス]
  * routes/rooms.js のmoderator任命が「Room内owner専用API」と「admin-dashboard
  * のrooms:manage権限経由」の2経路を持つのに倣い(RoomDetailView.vueコメント
- * 参照)、バッジのgrant/revokeも routes/badges.js 側に admin-dashboard 向けの
- * 並行パス(badges:manage権限)を用意している。両者は同じ lib/badges.js の
- * grantBadge/revokeBadge を呼ぶため、実装(一意性チェック・監査ログ)は
- * 重複しない。
+ * 参照)、バッジのgrant/revokeも admin-dashboard 向けの並行パス
+ * (badges:manage権限)を用意している。
+ * [2026-07-27] admin-dashboard側の並行パスは、その後 routes/badges.js から
+ * routes/users.js(ユーザー管理画面)へ移設された(badgeGrantsがRoomに
+ * 紐付かないユーザー単位のレコードであるため)。呼び出し先はいずれも同じ
+ * lib/badges.js の grantBadge/revokeBadge のため、実装(一意性チェック・
+ * 監査ログ)は重複しない。
+ *
+ * [2026-08-04] Room内owner専用パス(このファイル)は、バッジマスタ側の
+ * `grantableByRoomOwner`フラグがtrueのバッジのみ操作できるよう制限した
+ * (grantBadge/revokeBadgeに`viaRoomOwner: true`を渡す)。「当日のリーダー
+ * アサイン」のような軽いバッジのみRoom ownerに委譲し、資格章・階級章の
+ * ような重いバッジはこれまで通りサイト管理者専用(routes/users.js経由、
+ * badges:manage権限)のままにする運用を想定している。フラグはバッジ単位の
+ * 単純なON/OFFのみで、role単位(例: moderatorにも一部委譲)の段階分けは
+ * 導入していない(ユーザー確認済み)。admin-dashboard経由(routes/users.js)
+ * はこの制約を受けない(viaRoomOwnerを渡さないため常にfalse扱い)。
  */
 
 const express = require('express');
@@ -30,7 +43,7 @@ const { db } = require('../lib/firebaseAdmin');
 const { logAdminAction } = require('../lib/auditLog');
 const { requireFirebaseAuth, isValidRoomId, requireRoomMembership } = require('../middleware/requireAuth');
 const { hasRoomPermission } = require('../lib/permissions');
-const { getBadgesForRoomMembers, grantBadge, revokeBadge } = require('../lib/badges');
+const { getBadgesForRoomMembers, grantBadge, revokeBadge, listRoomOwnerGrantableBadges } = require('../lib/badges');
 
 const router = express.Router();
 
@@ -54,7 +67,14 @@ router.get('/:roomId/badges', requireFirebaseAuth, requireRoomMembership, async 
     const members = membersSnap.docs.map((doc) => ({ uid: doc.id, role: doc.data().role }));
 
     const badgesByUid = await getBadgesForRoomMembers(members);
-    res.json({ roomId, members: badgesByUid });
+
+    // [2026-08-04] 付与UIの選択肢は、Room内owner(実際にgrant/revokeを
+    // 呼べる立場)にのみ返す。「どんなバッジが存在するか」自体は
+    // badges:monitor権限が無いRoomメンバーへ広く見せる情報ではないため、
+    // ownerでない場合はnullのまま(=UIを出さない)にする。
+    const grantableBadges = req.roomMember.role === 'owner' ? await listRoomOwnerGrantableBadges() : null;
+
+    res.json({ roomId, members: badgesByUid, grantableBadges });
   } catch (e) {
     console.error('[Room内バッジ取得エラー]', e.message);
     res.status(500).json({ error: 'バッジ情報の取得に失敗しました' });
@@ -102,6 +122,9 @@ router.post('/:roomId/members/:targetUid/badges', requireFirebaseAuth, async (re
       targetUid,
       targetRole: targetSnap.data().role,
       badgeId,
+      // [2026-08-04] Room内owner専用パスであることを明示し、バッジ単位の
+      // grantableByRoomOwnerフラグによる絞り込みを受けさせる。
+      viaRoomOwner: true,
     });
 
     await logAdminAction({
@@ -142,7 +165,7 @@ router.delete('/:roomId/members/:targetUid/badges/:badgeId', requireFirebaseAuth
       return res.status(403).json({ error: '権限がありません(ownerのみ実行可能)' });
     }
 
-    const result = await revokeBadge({ actorUid: uid, targetUid, badgeId });
+    const result = await revokeBadge({ actorUid: uid, targetUid, badgeId, viaRoomOwner: true });
 
     await logAdminAction({
       actorUid: uid,

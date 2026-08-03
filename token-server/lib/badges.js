@@ -110,6 +110,12 @@ function validateBadgeInput(body, { partial = false } = {}) {
   if (body.active !== undefined && typeof body.active !== 'boolean') {
     return 'active はboolean型で指定してください';
   }
+  // [Room owner委譲フラグ] バッジ単位の単純なON/OFF(ユーザー確認済み、
+  // 2026-08-04)。role単位の段階的な委譲(例: moderatorにも一部許可)は
+  // 現時点では導入しない。
+  if (body.grantableByRoomOwner !== undefined && typeof body.grantableByRoomOwner !== 'boolean') {
+    return 'grantableByRoomOwner はboolean型で指定してください';
+  }
   // [Phase13] 自動付与条件の中身の妥当性検証はPhase13の最小スコープ外
   // (phase13-badge-schema.md「2.1」参照。typeが未知でもバッチ側でスキップする
   // 設計のため、ここでは型のみチェックする)。
@@ -133,6 +139,9 @@ function badgeDocToJson(doc) {
     autoGrantCondition: data.autoGrantCondition ?? null,
     priority: data.priority,
     active: data.active,
+    // [2026-08-04] Room owner委譲フラグ。既存のバッジドキュメントには
+    // フィールド自体が無いため、未設定は false(委譲なし) として扱う。
+    grantableByRoomOwner: data.grantableByRoomOwner ?? false,
     createdAt: data.createdAt?.toMillis?.() ?? null,
     updatedAt: data.updatedAt?.toMillis?.() ?? null,
     createdBy: data.createdBy,
@@ -163,6 +172,7 @@ async function createBadge({ actorUid, body }) {
     autoGrantCondition: body.autoGrantCondition ?? null,
     priority: body.priority,
     active: body.active !== undefined ? body.active : true,
+    grantableByRoomOwner: body.grantableByRoomOwner === true,
     createdAt: now,
     updatedAt: now,
     createdBy: actorUid,
@@ -187,7 +197,7 @@ async function updateBadge({ badgeId, body }) {
   }
 
   const patch = { updatedAt: new Date() };
-  for (const key of ['name', 'icon', 'description', 'category', 'grantMethod', 'autoGrantCondition', 'priority', 'active']) {
+  for (const key of ['name', 'icon', 'description', 'category', 'grantMethod', 'autoGrantCondition', 'priority', 'active', 'grantableByRoomOwner']) {
     if (body[key] !== undefined) {
       patch[key] = typeof body[key] === 'string' ? body[key].trim() : body[key];
     }
@@ -288,8 +298,18 @@ async function getBadgesForRoomMembers(members) {
  * 手動付与(Owner操作)。同一uid×badgeIdで既にactiveな付与がある場合は
  * 409エラーを投げる(phase13-badge-schema.md「4.1」の一意性ルール)。
  * Guestを対象にした付与は拒否する(5.3「Guestの対象範囲」)。
+ *
+ * @param {boolean} [viaRoomOwner=false]
+ *   Room内owner専用API(routes/roomBadges.js)経由の呼び出しかどうか。
+ *   trueの場合、バッジマスタの`grantableByRoomOwner`がtrueのバッジのみ
+ *   許可する(2026-08-04、ユーザー要望により追加。「当日のリーダーアサイン」
+ *   のような軽いバッジのみRoom ownerに委譲し、資格章・階級章のような
+ *   重いバッジはサイト管理者専用のまま残す運用を想定)。
+ *   admin-dashboard経由(routes/users.js、badges:manage権限)の呼び出しは
+ *   falseのままとし、この制約を受けない(サイト管理者は委譲フラグに
+ *   関わらず全バッジを操作できる)。
  */
-async function grantBadge({ actorUid, targetUid, targetRole, badgeId }) {
+async function grantBadge({ actorUid, targetUid, targetRole, badgeId, viaRoomOwner = false }) {
   if (targetRole === 'guest') {
     const e = new Error('Guestには資格・勤続バッジを付与できません(役割バッジのみ対象)');
     e.statusCode = 400;
@@ -301,6 +321,11 @@ async function grantBadge({ actorUid, targetUid, targetRole, badgeId }) {
   if (!badgeSnap.exists || !badgeSnap.data().active) {
     const e = new Error('指定されたバッジは存在しないか、廃止済みです');
     e.statusCode = 404;
+    throw e;
+  }
+  if (viaRoomOwner && !badgeSnap.data().grantableByRoomOwner) {
+    const e = new Error('このバッジはRoom内ownerによる付与を許可されていません(管理者にご依頼ください)');
+    e.statusCode = 403;
     throw e;
   }
   const grantMethod = badgeSnap.data().grantMethod;
@@ -341,8 +366,24 @@ async function grantBadge({ actorUid, targetUid, targetRole, badgeId }) {
 /**
  * 手動剥奪(Owner操作)。既存のactiveなbadgeGrantsドキュメントを
  * revokedへ更新する(ドキュメントの削除はしない。履歴として残すため)。
+ *
+ * @param {boolean} [viaRoomOwner=false] grantBadge()と同じ意味。trueの
+ *   場合、剥奪しようとしているバッジの現在の`grantableByRoomOwner`が
+ *   trueであることを要求する。付与時にtrueだったバッジが後からfalseに
+ *   変更された場合、Room ownerはそのバッジを剥奪できなくなる(管理者経由の
+ *   剥奪は引き続き可能)。「委譲を絞る」運用側の意図をそのまま反映する
+ *   挙動として妥当と判断し、付与時点の値をスナップショットする設計には
+ *   していない。
  */
-async function revokeBadge({ actorUid, targetUid, badgeId, reason = null }) {
+async function revokeBadge({ actorUid, targetUid, badgeId, reason = null, viaRoomOwner = false }) {
+  if (viaRoomOwner) {
+    const badgeSnap = await db.collection('badges').doc(badgeId).get();
+    if (!badgeSnap.exists || !badgeSnap.data().grantableByRoomOwner) {
+      const e = new Error('このバッジはRoom内ownerによる剥奪を許可されていません(管理者にご依頼ください)');
+      e.statusCode = 403;
+      throw e;
+    }
+  }
   return db.runTransaction(async (tx) => {
     const existingSnap = await tx.get(
       db.collection('badgeGrants').where('uid', '==', targetUid).where('badgeId', '==', badgeId).where('status', '==', 'active')
@@ -391,6 +432,32 @@ async function setBadgeDisplayConfig({ actorUid, maxDisplayCount }) {
   return getBadgeDisplayConfig();
 }
 
+/**
+ * Room内owner向けUI(routes/roomBadges.js の GET /:roomId/badges)が
+ * 「付与できるバッジの選択肢」を組み立てるための一覧。
+ * `active && grantableByRoomOwner && grantMethod in [manual, both]`の
+ * バッジのみを、必要最小限のフィールド(badgeId/name/icon/category)で返す。
+ * autoGrantCondition・createdBy等の管理者向け情報は含めない
+ * (Room ownerはbadges:monitor権限を持たない一般のRoomメンバーのため)。
+ */
+async function listRoomOwnerGrantableBadges() {
+  const snap = await db
+    .collection('badges')
+    .where('active', '==', true)
+    .where('grantableByRoomOwner', '==', true)
+    .get();
+  return snap.docs
+    .map((doc) => ({ badgeId: doc.id, ...doc.data() }))
+    .filter((data) => data.grantMethod === 'manual' || data.grantMethod === 'both')
+    .map((data) => ({
+      badgeId: data.badgeId,
+      name: data.name,
+      icon: data.icon,
+      category: data.category,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+}
+
 module.exports = {
   GUEST_ROLE_BADGE,
   BADGE_CATEGORIES,
@@ -403,4 +470,5 @@ module.exports = {
   revokeBadge,
   getBadgeDisplayConfig,
   setBadgeDisplayConfig,
+  listRoomOwnerGrantableBadges,
 };

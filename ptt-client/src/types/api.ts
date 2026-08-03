@@ -155,9 +155,20 @@ export interface RoomMemberBadges {
   topBadge: AssignedBadge | null
 }
 
+// [2026-08-04] Room内owner向け「付与できるバッジ」の選択肢。owner以外には
+// nullが返る(lib/badges.js listRoomOwnerGrantableBadges参照。管理者向けの
+// autoGrantCondition等は含めない最小フィールドのみ)。
+export interface GrantableBadge {
+  badgeId: string
+  name: string
+  icon: string
+  category: 'role' | 'skill' | 'unit' | 'rank' | 'other'
+}
+
 export interface RoomBadgesResponse {
   roomId: string
   members: Record<string, RoomMemberBadges>
+  grantableBadges: GrantableBadge[] | null
 }
 
 // [Phase12→パンくず実装] GET /rooms/:roomId/org-context のレスポンス
