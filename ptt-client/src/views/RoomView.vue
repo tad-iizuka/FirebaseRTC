@@ -53,6 +53,12 @@ const lockedByName = computed(() => {
   return connection.participants.get(uid)?.name ?? uid
 })
 const participantList = computed(() => Array.from(connection.participants.values()))
+// [組織階層への表示切り替え] Roomが組織(orgId)に紐づいている場合はルーム名の
+// 代わりに組織名(orgContext.orgName)を見出し・ヘッダーアイコンの頭文字として使う。
+// 無所属Room(orgId===null)は従来通りルーム名を使う。
+// OrgBreadcrumb側は組織名を先頭に重複表示しないよう、ノード階層(breadcrumb配列)
+// のみを表示する形に変更している(displayNameが既に組織名を担うため)。
+const displayName = computed(() => orgContext.orgName ?? roomStore.currentRoomName)
 // [Phase13] badges.byUidは{badges, topBadge}を保持するが、ParticipantList.vue
 // はtopBadgeだけを表示に使うため、ここでuid -> topBadgeの形へ変換する。
 const topBadges = computed(() =>
@@ -195,15 +201,16 @@ onUnmounted(() => {
   <div>
     <p v-if="banNotice" class="px-5 py-2 text-xs text-destructive">{{ banNotice }}</p>
 
-    <!-- [ルーム名] admin-dashboardで設定された名前。未設定の場合は表示しない
-         (roomIdはStatusRow側で常に表示されるため、名前は補助的な表示)。 -->
+    <!-- [見出し] 組織(orgId)に紐づくRoomは組織名を、無所属Roomはルーム名を表示する。
+         いずれも未設定の場合は表示しない(roomIdはStatusRow側で常に表示されるため、
+         名前は補助的な表示)。 -->
     <h1
-      v-if="roomStore.currentRoomName"
+      v-if="displayName"
       class="truncate px-5 pb-0 pt-3 text-[15px] font-semibold"
     >
-      {{ roomStore.currentRoomName }}
+      {{ displayName }}
     </h1>
-    <OrgBreadcrumb :org-name="orgContext.orgName" :breadcrumb="orgContext.breadcrumb" />
+    <OrgBreadcrumb :breadcrumb="orgContext.breadcrumb" />
 
     <StatusRow :kind="connection.statusKind" :message="connection.statusMessage" :room-id="roomId" />
     <GuestStatusBar

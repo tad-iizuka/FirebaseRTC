@@ -244,7 +244,7 @@ struct ContentView: View {
                 .font(.system(size: 11, weight: .regular, design: .monospaced))
                 .foregroundColor(.pttMuted)
             Spacer()
-            ConnectionStatusIcon(status: connection.status, roomName: currentRoomName)
+            ConnectionStatusIcon(status: connection.status, roomName: displayName)
             PTTSettingsIcon(settings: settingsStore)
             LoginStatusIcon(
                 photoURL: auth.currentUser?.photoURL,
@@ -593,12 +593,18 @@ struct ContentView: View {
         }
     }
 
-    /// [ルーム名] admin-dashboardで設定された名前。未設定の場合は表示しない
-    /// (roomIdはstatusRow側で常に表示されるため、名前は補助的な表示)。
-    /// Web版RoomView.vueの`<h1 v-if="roomStore.currentRoomName">`に相当。
+    /// [見出し・アイコンの表示名切り替え] Roomが組織(orgId)に紐づく場合は組織名を、
+    /// 無所属Roomはルーム名を使う。Web版RoomView.vueのdisplayNameに相当。
+    private var displayName: String? {
+        orgContext.orgName ?? currentRoomName
+    }
+
+    /// [見出し] 組織に紐づくRoomは組織名、無所属Roomはルーム名を表示する。未設定の場合は
+    /// 表示しない(roomIdはstatusRow側で常に表示されるため、名前は補助的な表示)。
+    /// Web版RoomView.vueの`<h1 v-if="displayName">`に相当。
     @ViewBuilder
     private var roomNameHeader: some View {
-        if let name = currentRoomName {
+        if let name = displayName {
             Text(name)
                 .font(.system(size: 15, weight: .semibold, design: .monospaced))
                 .lineLimit(1)
@@ -609,15 +615,19 @@ struct ContentView: View {
         orgBreadcrumbRow
     }
 
-    /// [パンくず表示] Web版RoomView.vueの`<OrgBreadcrumb>`に相当。
-    /// 無所属Room(orgName == nil)は何も表示しない(roomNameHeaderと同じ方針)。
+    /// [組織階層内のノードパンくず表示] Web版RoomView.vueの`<OrgBreadcrumb>`に相当。
+    /// 組織名自体はdisplayName(見出し)側で既に表示されているため、ここでは
+    /// breadcrumb(組織直下からRoomが割り当てられたノードまでの経路)のみを表示し、
+    /// 組織名を重複表示しない。ノード未割り当て(breadcrumbが空)の場合は何も表示しない
+    /// (無所属Roomの場合と同じ「無ければ出さない」方針)。
     @ViewBuilder
     private var orgBreadcrumbRow: some View {
-        if let orgName = orgContext.orgName {
+        if !orgContext.breadcrumb.isEmpty {
             HStack(spacing: 4) {
-                Text(orgName)
-                ForEach(orgContext.breadcrumb) { node in
-                    Text("›")
+                ForEach(Array(orgContext.breadcrumb.enumerated()), id: \.element.id) { index, node in
+                    if index > 0 {
+                        Text("›")
+                    }
                     Text(node.name)
                 }
             }

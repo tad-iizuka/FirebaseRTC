@@ -466,6 +466,10 @@ fun PTTApp(
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
     ) {
+        // [見出し・アイコンの表示名切り替え] Roomが組織(orgId)に紐づく場合は組織名を、
+        // 無所属Roomはルーム名を使う。Web版RoomView.vueのdisplayNameに相当。
+        val displayName = orgContext.orgName ?: currentRoomName
+
         HeaderRow(
             // [表示名の優先順位] Web版App.vueのheaderDisplayNameと同じ: ルーム内で変更した
             // ニックネーム(myDisplayName)があればそれを優先し、無ければFirebase Authの値
@@ -474,7 +478,7 @@ fun PTTApp(
             photoUrl = currentUser?.photoUrl?.toString(),
             isSignedIn = currentUser != null,
             status = status,
-            roomName = currentRoomName,
+            roomName = displayName,
             settingsStore = settingsStore,
             onSignOut = { leaveRoom(); authManager.signOut() },
         )
@@ -493,10 +497,10 @@ fun PTTApp(
             )
 
             activeRoomId != null -> {
-                // [ルーム名] admin-dashboardで設定された名前。未取得の場合は表示しない
-                // (roomIdはStatusRow側で常に表示されるため、名前は補助的な表示。
-                // Web版RoomView.vueのh1と同じ位置づけ)。
-                currentRoomName?.let { name ->
+                // [見出し] 組織に紐づくRoomは組織名、無所属Roomはルーム名を表示する。
+                // 未設定の場合は表示しない(roomIdはStatusRow側で常に表示されるため、
+                // 名前は補助的な表示。Web版RoomView.vueのh1と同じ位置づけ)。
+                displayName?.let { name ->
                     Text(
                         name,
                         fontFamily = Mono,
@@ -799,19 +803,17 @@ private fun AuthSection(
 }
 
 /**
- * [パンくず表示] Web版RoomView.vueの`<OrgBreadcrumb>`・iOS版orgBreadcrumbRowに相当。
- * 無所属Room(orgName == null)は何も表示しない(roomNameのnullチェックと同じ方針)。
+ * [組織階層内のノードパンくず表示] Web版RoomView.vueの`<OrgBreadcrumb>`・
+ * iOS版orgBreadcrumbRowに相当。
+ * 組織名自体は見出し(displayName)側で既に表示されているため、ここでは
+ * breadcrumb(組織直下からRoomが割り当てられたノードまでの経路)のみを表示し、
+ * 組織名を重複表示しない。ノード未割り当て(breadcrumbが空)の場合は何も表示しない
+ * (無所属Roomの場合と同じ「無ければ出さない」方針)。
  */
 @Composable
 private fun OrgBreadcrumbRow(orgContext: OrgContext) {
-    val orgName = orgContext.orgName ?: return
-    val text = buildString {
-        append(orgName)
-        orgContext.breadcrumb.forEach { node ->
-            append(" › ")
-            append(node.name)
-        }
-    }
+    if (orgContext.breadcrumb.isEmpty()) return
+    val text = orgContext.breadcrumb.joinToString(" › ") { it.name }
     Text(text, fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Muted)
     Spacer(Modifier.height(4.dp))
 }

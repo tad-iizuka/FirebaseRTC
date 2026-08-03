@@ -6,6 +6,7 @@ import { useSavedRoomsStore } from '@/stores/savedRooms'
 import { useConnectionStore } from '@/stores/connection'
 import { useOnboardingStore } from '@/stores/onboarding'
 import { useRoomStore } from '@/stores/room'
+import { useOrgContextStore } from '@/stores/orgContext'
 import AppHeader from '@/components/AppHeader.vue'
 import AuthView from '@/views/AuthView.vue'
 import OnboardingFlow from '@/components/OnboardingFlow.vue'
@@ -16,6 +17,13 @@ const savedRooms = useSavedRoomsStore()
 const connection = useConnectionStore()
 const onboarding = useOnboardingStore()
 const roomStore = useRoomStore()
+const orgContext = useOrgContextStore()
+
+// [ヘッダーアイコンの表示名] 組織(orgId)に紐づくRoomは組織名を、無所属Roomは
+// ルーム名を使う。RoomView.vue側のdisplayNameと同じロジック
+// (orgContextはRoomView.vueが入室時にfetchOnceする同一Piniaストアなので、
+// ここでも同じ値をそのまま参照できる)。
+const headerRoomName = computed(() => orgContext.orgName ?? roomStore.currentRoomName)
 
 // [ヘッダーの表示名]
 // ゲストがルーム内で変更したニックネーム(ban.myDisplayName、rooms/{roomId}/members/{uid}の
@@ -53,7 +61,7 @@ async function handleSignOut() {
 					:is-signed-in="!!auth.currentUser"
 					:connection-status-kind="connection.statusKind"
 					:room-id="connection.roomName"
-					:room-name="roomStore.currentRoomName"
+					:room-name="headerRoomName"
 					@sign-out="handleSignOut"
 				/>
 				<AuthView v-if="!auth.currentUser" />
