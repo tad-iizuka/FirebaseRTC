@@ -68,6 +68,7 @@ export const useAdminBadgesStore = defineStore('adminBadges', () => {
       category: BadgeCategory
       grantMethod: BadgeGrantMethod
       priority: number
+      grantableByRoomOwner: boolean
     },
   ) {
     isSaving.value = true
