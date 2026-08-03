@@ -38,6 +38,7 @@ import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import co.ubunifu.pttandroid.auth.PTTAuthManager
+import co.ubunifu.pttandroid.ui.theme.PTTColors
 import co.ubunifu.pttandroid.badges.PTTBadgesStore
 import co.ubunifu.pttandroid.orgcontext.PTTOrgContextStore
 import co.ubunifu.pttandroid.ban.PTTBanStore
@@ -147,8 +148,11 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            MaterialTheme {
-                Surface {
+            // [端末側テーマからの独立] colorSchemeを省略すると端末のライト/ダーク・
+            // Dynamic Colorに引きずられてしまう(PTTColors.ColorSchemeのコメント参照)。
+            // Web版・iOS版と同じ、常時ダーク1色の配色を明示的に固定する。
+            MaterialTheme(colorScheme = PTTColors.ColorScheme) {
+                Surface(color = PTTColors.Background) {
                     // targetSdk 35(Android 15)ではデフォルトでedge-to-edge描画になり、
                     // 何もしないとヘッダー行がステータスバー/カメラのくり抜き部分と重なって
                     // しまう(サインアウト操作が押せなくなる不具合の原因)。safeDrawing insetsを

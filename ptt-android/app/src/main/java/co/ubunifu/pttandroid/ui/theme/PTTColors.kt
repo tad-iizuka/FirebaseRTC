@@ -12,6 +12,7 @@
  */
 package co.ubunifu.pttandroid.ui.theme
 
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.ui.graphics.Color
 
 object PTTColors {
@@ -35,4 +36,33 @@ object PTTColors {
     val Warning = Color(0xFFF3B833)
     /** #ff5c5c — エラー・BAN・録音中 */
     val Danger = Color(0xFFFF5C5C)
+
+    /**
+     * [端末側テーマからの独立] Web版・iOS版は常時ダークな配色1色のみ(ライト/ダーク
+     * 切り替えが無い)。従来MainActivity.ktは`MaterialTheme { Surface { ... } }`を
+     * colorScheme省略で呼んでおり、Material3のデフォルト値(端末がライトテーマ、
+     * またはAndroid 12+のDynamic Color/Material You壁紙連動テーマの場合はさらに
+     * 端末ごとに変わる)がSurfaceの背景色に使われていた。個々のText等はここで定義した
+     * 固定色(ダーク背景前提の配色、例: 本文文字色Textは#d8e4ddという明るい色)を
+     * 直接指定していたため、端末がライトテーマの場合に「明るい背景に明るい文字」と
+     * なり見出し(ルーム名/組織名)がほぼ視認できなくなる不具合があった
+     * (2026-08-03、ユーザー報告のAndroidスクリーンショットで発覚)。
+     * 端末のテーマ設定に関係なく常にこのダーク配色で統一するため、
+     * MaterialThemeへ明示的に渡すColorSchemeをここに集約する。
+     */
+    val ColorScheme = darkColorScheme(
+        background = Background,
+        surface = Background,
+        surfaceVariant = Panel,
+        onBackground = Text,
+        onSurface = Text,
+        onSurfaceVariant = Muted,
+        primary = Accent,
+        onPrimary = Color.White,
+        primaryContainer = AccentDim,
+        onPrimaryContainer = Accent,
+        outline = Line,
+        error = Danger,
+        onError = Color.White,
+    )
 }
