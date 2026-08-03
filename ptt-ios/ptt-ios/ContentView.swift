@@ -56,8 +56,12 @@ struct ContentView: View {
     /// 送話操作を仲介する。connectionへはattach(to:)経由でweak参照するのみ。
     @StateObject private var backgroundControl = PTTBackgroundControlManager()
 
-    @State private var tokenServerURL: String = "https://ptt-token-server-rnn4fqay3a-an.a.run.app"
-    @State private var livekitURL: String = "wss://ubunifu-talk-wy19xst3.livekit.cloud"
+    /// [2026-07-29] 接続先(tokenServerURL/livekitURL)は設定画面(歯車アイコン)へ移設した。
+    /// 従来は@Stateとして保持し永続化もしていなかったが、PTTSettingsStore(UserDefaults)から
+    /// 都度導出する計算プロパティに変更した(Android版PTTApp.ktの同名コメント参照)。
+    @StateObject private var settingsStore = PTTSettingsStore()
+    private var tokenServerURL: String { settingsStore.tokenServerURL }
+    private var livekitURL: String { settingsStore.livekitURL }
     @State private var joinRoomId: String = ""
     @State private var joinInviteCode: String = ""
     @State private var chatInputText: String = ""
@@ -241,6 +245,7 @@ struct ContentView: View {
                 .foregroundColor(.pttMuted)
             Spacer()
             ConnectionStatusIcon(status: connection.status, roomName: currentRoomName)
+            PTTSettingsIcon(settings: settingsStore)
             LoginStatusIcon(
                 photoURL: auth.currentUser?.photoURL,
                 displayName: auth.currentUser != nil ? headerDisplayName : nil,
@@ -314,9 +319,6 @@ struct ContentView: View {
                     .foregroundColor(.pttDanger)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-
-            field(label: "トークンサーバーURL", text: $tokenServerURL)
-            field(label: "LiveKit URL (wss://)", text: $livekitURL)
 
             // [ルーム作成のadmin-dashboard移管] ルーム作成はadmin-dashboard専用の
             // POST /admin/rooms(rooms:create権限)へ一本化した。ptt-iosは常に
