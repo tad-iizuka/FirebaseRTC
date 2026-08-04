@@ -1,7 +1,7 @@
 # PTTアプリ ブラッシュアップ計画（改定版）
 
 対象リポジトリ: `tad-iizuka/FirebaseRTC`
-作成日: 2026-07-09 ／ 最終改定: 2026-08-04（五十訂）
+作成日: 2026-07-09 ／ 最終改定: 2026-08-05（五十一訂）
 
 > **⚠️ 巻き戻り事故について（2026-08-04 発見・記録）**
 >
@@ -1544,6 +1544,37 @@ iOS版の修正前と同じ構造（`AppHeader.vue`が固定文言`header.appNam
   `vue-tsc -b`・`eslint .`によるビルド確認はこの環境では未実施。型定義・
   未使用importの有無は目視確認のみ。リポジトリへの反映確認も次アクション
   として残す
+
+五十一訂: 2026-08-05（ユーザーから「まだ画面の相違があるようなので」との
+指摘とともに、iOS実機（iPhone 17シミュレータ）のスクリーンショット6枚が
+共有された。突き合わせた結果、五十訂でのWeb版移植作業に誤りがあったことが
+判明した。ヘッダー左側テキストの参照元を、iOS版`ContentView.swift`の
+`header()`が実際に参照している`orgContext.orgName`単体ではなく、誤って
+「breadcrumb最下層ノード名→組織名→ルーム名」という3段フォールバック
+（`displayName`ロジック。本文側の見出し(`RoomView.vue`のh1・iOS版
+`roomNameHeader`)が使うものと同じ）をそのまま流用してしまっていた。結果、
+共有されたスクリーンショット（組織名「東北警備株式会社」・ルーム名「夜勤」・
+breadcrumb「東北警備株式会社 › 仙台支社 › 仙台駅現場」の例）に対し、iOS版
+ヘッダーは「東北警備株式会社」（組織名）を表示するのに対し、Web版ヘッダーは
+「仙台駅現場」（breadcrumb最下層ノード名）を表示してしまう差分が生じていた。
+
+**（2026-08-05、五十一訂）修正内容**:
+- `App.vue`: 誤って追加していた`headerRoomName`computed（breadcrumb最下層
+  ノード名優先の3段フォールバック）を削除し、`AppHeader.vue`へは
+  `orgContext.orgName`をそのまま渡す形に修正した（プロップ名も
+  `room-name`→`org-name`に変更）。あわせて、この`headerRoomName`
+  以外に用途が無かった`roomStore`（`useRoomStore()`）の宣言・importも
+  未使用となったため削除した
+- `AppHeader.vue`: `orgName`未設定時は左側に何も表示しない（`header.appName`
+  へのフォールバックも廃止）よう変更した。iOS版`header()`が
+  `if let orgName = orgContext.orgName`のみを参照し、フォールバックを
+  一切持たない（未設定なら空白のまま）のに合わせた
+- `RoomView.vue`側のh1（`displayName`相当・breadcrumb最下層ノード名優先）・
+  `OrgBreadcrumb`は今回変更していない。これらはiOS版`roomNameHeader`・
+  `orgBreadcrumbRow`に相当する別の表示であり、五十訂時点から一貫して
+  正しく実装されていた（誤りはヘッダー(`AppHeader.vue`)側のみだった）
+- `npm`が実行できない環境のため、今回もビルド確認（`vue-tsc -b`・
+  `eslint .`）は未実施。目視確認のみ
 
 </details>
 
