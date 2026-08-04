@@ -49,9 +49,29 @@ Room Viewは以下の要素で構成される。
 
 - **参加者一覧（チップ）**：`ptt-design-system.md` 4.4のチップ仕様に従う。
   送話中(unmuted)の参加者のみ`live`色の境界線になる
-- **Guestバッジ**：自分自身がGuestの場合のみ表示（`role==='guest'`判定）。
-  他参加者のGuest判定手段は現状無く、一覧上での表示対象外
-  （`phase12-role-operation-inventory.md` 2章、`brushup-plan.md` 5.4参照）
+- **バッジ表示**：`GET /rooms/:roomId/badges`をポーリングし、参加者ごとに
+  優先順位が最も高いバッジ1個のみをチップに表示する（Guestは`badgeGrants`
+  へ永続化しない仮想の役割バッジとして合成表示）。このAPIはrole不問で
+  room memberなら誰でも呼べるため、結果として他参加者がGuestかどうかも
+  このバッジ経由で分かるようになっている（旧: 「Guestバッジは自分自身の
+  場合のみ表示、他参加者の判定手段は無し」としていたが、Phase13の
+  バッジ表示機能の副次効果として解消済み。`brushup-plan.md` 5.4・
+  「6.1」item28参照）
+- **バッジ付与/剥奪UI（Room内owner向け）**：バッジ単位の
+  `grantableByRoomOwner`フラグがtrueのバッジのみ、Room内ownerが自室完結で
+  付与/剥奪できる（`grantableBadges`をサーバーから取得し、owner以外には
+  `null`が返るためクライアント側でrole判定を重複させない）。false（既定）の
+  バッジは従来通りadmin-dashboard経由のサイト管理者専用のまま
+  （`brushup-plan.md` 5.3・Phase13「四十九訂」参照）
+- **組織階層パンくず**：Roomが組織階層（`organizations`/`nodes`）に
+  紐づいている場合、Room View入室時に`GET /rooms/:roomId/org-context`を
+  1回だけ取得し、見出し直下に「組織名 › 祖先ノード…」の形で補助表示する
+  （20秒ポーリングのバッジ表示とは異なり変化頻度が低いため1回取得）。
+  見出し(`displayName`)側は最下層のノード名（無ければ組織名、それも
+  無ければRoom名）を優先表示し、パンくず側は最下層を除いた祖先経路のみを
+  表示することで同名組織の重複表示を避けている。無所属Roomでは何も
+  表示しない。Web(`components/OrgBreadcrumb.vue`)・iOS
+  (`PTTOrgContextStore.swift`)・Android(`PTTOrgContextStore.kt`)に実装済み
 - **BAN操作**：`owner`/`moderator`のみ表示（`myRole==='owner'||'moderator'`）。
   実行確認ダイアログは`ptt-design-system.md` 4.1のDangerバリアントを使用
 - **通報ボタン**：全role表示。`POST /reports`を呼ぶのみの薄い操作で、

@@ -58,10 +58,39 @@ Room内roleと無関係に、uidごとに付与される権限文字列の配列
 （例: `rooms:monitor`, `rooms:manage`, `audit:read`, `admins:manage`,
 `organizations:monitor`, `organizations:manage`, `badges:manage`,
 `users:monitor`）。エンドポイントごとの必要権限は`API.md`の各節を参照。
-admin-dashboard側には事前のUI非表示チェック（Room内roleのクライアントが
-持つような`myRole==='owner'`判定）が無く、各画面はAPIを呼んで403が返ったら
-エラー表示するのみという設計になっている（メニュー自体の出し分けは
-`GET /admin/me`の`permissions`で行う）。
+
+事前チェックは「全部か0か」の粗い粒度のみ実装している：サインイン直後に
+`GET /admin/me`で`permissions`（サイト全体権限）と`managedOrgIds`（後述の
+組織ロースター層で自分が団体管理者として登録されている団体一覧）を取得し、
+両方とも0件の場合のみ`NavTabs`自体を出さず「利用する権限がありません」と
+表示する（以前は`auth.currentUser`の有無だけで判定しており、任意の
+Googleアカウントでサインインするだけで管理メニューの構成が見えてしまって
+いた）。この事前ゲートより細かい粒度――個々のタブや画面内の操作（招待
+コード表示ボタン等）を権限別に出し分ける処理――は無く、各画面はAPIを
+呼んで403が返ったらエラー表示するのみという設計のままである
+（Room内roleのクライアントが持つような`myRole==='owner'`判定の対になる
+仕組みは、admin-dashboard側にはトップレベルのゲート以外に存在しない）。
+
+### 組織ロースター（所属）層のスコープ付き権限
+
+`adminUsers.permissions`とは別軸の、団体単位の権限。
+`organizations/{orgId}/members/{uid}`に`orgRole: 'admin' | 'staff'`・
+`scopeNodeIds`を持つ。所属はアクセス制御の軸にはせず（Roomに入れるか・
+何ができるかは従来通りRoom内roleのみで決まる）、団体管理者が自団体の
+状況を横断的に見るための付帯情報という位置づけ。権限判定は
+`token-server/lib/orgRoster.js#resolveRosterAccess`に一元化している。
+
+- **root**：`adminUsers/{uid}.permissions`に`organizations:manage`を持つ
+  ユーザー。対象org・scopeを問わず常に許可
+- **団体全体admin**：`orgRole: 'admin'`かつ`scopeNodeIds`未指定/空。
+  当該org配下は無条件に許可
+- **scope限定admin**：`scopeNodeIds`を指定。対象nodeまたはその配下
+  （Phase11で保存済みの`ancestorIds`による祖先判定）のみ許可
+- 上記いずれにも該当しない場合は403
+
+固定の層数を列挙するのではなく、「あるuidがあるnodeIdをscopeとして持つ」
+という1種類の関係を木の任意の深さに適用する再帰的スコープモデルとして
+実装している（詳細は`phase11-org-roster-design.md`・`DATA_MODEL.md`参照）。
 
 ---
 
