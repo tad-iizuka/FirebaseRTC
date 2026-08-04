@@ -146,7 +146,6 @@ struct ContentView: View {
                     if activeRoomId != nil && selectedTab != .settings {
                         header()
                         roomNameHeader
-                        statusRow
                         recordingBanner
                     }
 
@@ -573,21 +572,31 @@ struct ContentView: View {
 
     // MARK: - Header
 
-    // [接続状態アイコン]
-    // Web版(ptt-client/src/components/AppHeader.vue)に合わせ、以前ここにあった
-    // 「表示名テキスト + サインアウトテキストボタン + room: xxxx / 未接続テキスト」を
-    // ConnectionStatusIcon の丸アイコンに置き換えた。
-    /// [モバイルUI再編・2026-08-04(再改定)] 設定アイコン(歯車)・ログイン状態アイコン
-    /// (アバター)は、サインイン後に常設される「設定」タブ(profileSection/
-    /// connectionSettingsSection)へ移設した。この関数は入室中(activeRoomId != nil)
-    /// のみ呼ばれるため、ここに残すのは接続状態アイコンのみでよい。
+    /// [不具合修正・2026-08-04(6訂)] 従来はここに固定文言「PTT CLIENT」+
+    /// ConnectionStatusIconの丸アイコン(接続状態を頭文字1文字で表す)を表示していたが、
+    /// ユーザー指摘により「アプリ名の静的表示」「アイコンだけでは何の状態か
+    /// 分かりにくい」の2点を解消するため、組織名(左)と接続状態のドット+テキスト(右)を
+    /// 直接ヘッダーに並べる形へ変更した。接続状態のドット色・文言は元々statusRowが
+    /// 持っていたstatusColor/statusTextをそのまま流用し、statusRow自体は
+    /// (room=...)付きの表示がここと重複するため廃止した(statusTextから
+    /// room=...部分も削除済み。詳細はstatusText参照)。
     private func header() -> some View {
         HStack(spacing: 10) {
-            Text("PTT CLIENT")
-                .font(.system(size: 11, weight: .regular, design: .monospaced))
-                .foregroundColor(.pttMuted)
+            if let orgName = orgContext.orgName {
+                Text(orgName)
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundColor(.pttMuted)
+                    .lineLimit(1)
+            }
             Spacer()
-            ConnectionStatusIcon(status: connection.status, roomName: displayName)
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 7, height: 7)
+                Text(statusText)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.pttMuted)
+            }
         }
         .padding(14)
     }
@@ -605,20 +614,6 @@ struct ContentView: View {
 
     // MARK: - Status
 
-    private var statusRow: some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(statusColor)
-                .frame(width: 7, height: 7)
-            Text(statusText)
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundColor(.pttMuted)
-            Spacer()
-        }
-        .padding(.horizontal, 14)
-        .padding(.bottom, 10)
-    }
-
     private var statusColor: Color {
         switch connection.status {
         case .connected: return .pttLive
@@ -632,10 +627,10 @@ struct ContentView: View {
         switch connection.status {
         case .disconnected: return String(localized: "サーバ未接続")
         case .connecting: return String(localized: "接続中...")
-        case .connected(let room):
-            return String(format: NSLocalizedString("接続中 (room=%@)", comment: "Connected status"), room)
-        case .reconnecting(let room):
-            return String(format: NSLocalizedString("再接続中... (room=%@)", comment: "Reconnecting status"), room)
+        case .connected:
+            return String(localized: "status_header_connected", defaultValue: "接続中", comment: "Header connection status: connected")
+        case .reconnecting:
+            return String(localized: "status_header_reconnecting", defaultValue: "再接続中...", comment: "Header connection status: reconnecting")
         case .error(let message):
             return String(format: NSLocalizedString("エラー: %@", comment: "Error status"), message)
         }
@@ -652,16 +647,6 @@ struct ContentView: View {
                     .foregroundColor(.pttDanger)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-
-            // [ルーム作成のadmin-dashboard移管] ルーム作成はadmin-dashboard専用の
-            // POST /admin/rooms(rooms:create権限)へ一本化した。ptt-iosは常に
-            // 既存ルームへの招待コード参加のみを行う画面になっている
-            // (Web版roomSelect.joinOnlyHintと同じ文言。brushup-plan.md参照)。
-            // これにより、role/isAnonymous(Guest)によるボタン出し分けも不要になった。
-            Text("ルームの作成は管理者が行います。招待コードを受け取ったら、下記から参加してください。")
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundColor(.pttMuted)
-                .frame(maxWidth: .infinity, alignment: .leading)
 
             HStack(spacing: 10) {
                 field(label: "ルームID", text: $joinRoomId, placeholder: "招待された側が入力")
