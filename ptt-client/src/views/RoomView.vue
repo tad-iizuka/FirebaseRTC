@@ -12,7 +12,6 @@ import { useRecordingStore } from '@/stores/recording'
 import { useBadgesStore } from '@/stores/badges'
 import { useOrgContextStore } from '@/stores/orgContext'
 import Button from '@/components/ui/Button.vue'
-import StatusRow from '@/components/StatusRow.vue'
 import GuestStatusBar from '@/components/GuestStatusBar.vue'
 import OrgBreadcrumb from '@/components/OrgBreadcrumb.vue'
 import PttButton from '@/components/PttButton.vue'
@@ -233,9 +232,11 @@ onUnmounted(() => {
   <div>
     <p v-if="banNotice" class="px-5 py-2 text-xs text-destructive">{{ banNotice }}</p>
 
-    <!-- [見出し] 組織(orgId)に紐づくRoomは最下層のノード名(無ければ組織名)を、
-         無所属Roomはルーム名を表示する。いずれも未設定の場合は表示しない
-         (roomIdはStatusRow側で常に表示されるため、名前は補助的な表示)。 -->
+    <!-- [見出し・不具合修正] 組織(orgId)に紐づくRoomは最下層のノード名(無ければ組織名)を、
+         無所属Roomはルーム名を表示する。いずれも未設定の場合は表示しない。
+         接続状態(room=付き)は以前ここでStatusRowとして重複表示していたが、
+         AppHeader.vue側で常時ドット+テキスト表示するよう改めたため廃止した
+         (iOS版ContentView.swift 6訂の移植。詳細はbrushup-plan.md参照)。 -->
     <h1
       v-if="displayName"
       class="truncate px-5 pb-0 pt-3 text-[15px] font-semibold"
@@ -244,7 +245,6 @@ onUnmounted(() => {
     </h1>
     <OrgBreadcrumb :org-name="orgContext.orgName" :breadcrumb="orgContext.breadcrumb" />
 
-    <StatusRow :kind="connection.statusKind" :message="connection.statusMessage" :room-id="roomId" />
     <GuestStatusBar
       :is-guest="ban.myRole === 'guest'"
       :display-name="ban.myDisplayName"

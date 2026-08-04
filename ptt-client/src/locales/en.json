@@ -108,6 +108,8 @@
     "connecting": "Connecting...",
     "connected": "Connected (room={roomId})",
     "reconnecting": "Reconnecting... (room={roomId})",
+    "connectedShort": "Connected",
+    "reconnectingShort": "Reconnecting...",
     "error": "Error: {message}"
   },
   "invite": {

@@ -64,7 +64,7 @@ async function handleSignOut() {
 					:photo-url="auth.currentUser?.photoURL"
 					:is-signed-in="!!auth.currentUser"
 					:connection-status-kind="connection.statusKind"
-					:room-id="connection.roomName"
+					:status-message="connection.statusMessage"
 					:room-name="headerRoomName"
 					@sign-out="handleSignOut"
 				/>

@@ -108,6 +108,8 @@
     "connecting": "接続中...",
     "connected": "接続中 (room={roomId})",
     "reconnecting": "再接続中... (room={roomId})",
+    "connectedShort": "接続中",
+    "reconnectingShort": "再接続中...",
     "error": "エラー: {message}"
   },
   "invite": {
