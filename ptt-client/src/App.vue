@@ -5,7 +5,6 @@ import { useBanStore } from '@/stores/ban'
 import { useSavedRoomsStore } from '@/stores/savedRooms'
 import { useConnectionStore } from '@/stores/connection'
 import { useOnboardingStore } from '@/stores/onboarding'
-import { useRoomStore } from '@/stores/room'
 import { useOrgContextStore } from '@/stores/orgContext'
 import AppHeader from '@/components/AppHeader.vue'
 import AuthView from '@/views/AuthView.vue'
@@ -16,18 +15,19 @@ const ban = useBanStore()
 const savedRooms = useSavedRoomsStore()
 const connection = useConnectionStore()
 const onboarding = useOnboardingStore()
-const roomStore = useRoomStore()
 const orgContext = useOrgContextStore()
 
-// [ヘッダーアイコンの表示名・再訂正] 組織(orgId)に紐づくRoomは最下層の
-// ノード名を優先し、ノード未割り当てなら組織名、無所属Roomはルーム名を使う。
-// RoomView.vue側のdisplayNameと同じロジック(orgContextはRoomView.vueが
-// 入室時にfetchOnceする同一Piniaストアなので、ここでも同じ値をそのまま参照できる)。
-const headerRoomName = computed(() => {
-  const { orgName, breadcrumb } = orgContext
-  if (breadcrumb.length > 0) return breadcrumb[breadcrumb.length - 1].name
-  return orgName ?? roomStore.currentRoomName
-})
+// [ヘッダー左側テキストの参照元・再修正 2026-08-05] 前回の移植時、iOS版の
+// header()が組織名(orgContext.orgName)のみを表示している点を見落とし、
+// 誤って「breadcrumb最下層ノード名→組織名→ルーム名」という3段フォールバック
+// (displayNameロジック。RoomView.vueのh1・iOS版roomNameHeaderが使うものと同じ)を
+// そのまま流用してしまっていた。この結果、Web版ヘッダーには「東北警備株式会社」
+// (組織名)ではなく「仙台駅現場」(breadcrumb最下層ノード名)が表示されてしまい、
+// iOS実機のスクリーンショットとの間で表示差分が生じていた。
+// iOS版ContentView.swiftのheader()は`if let orgName = orgContext.orgName`のみを
+// 参照しており、breadcrumbやルーム名へのフォールバックは行わない(未設定なら
+// 何も表示しない)。RoomView.vue側のh1(displayName相当)・OrgBreadcrumbは
+// これとは別の表示であり、今回の修正対象ではない(前回同様、変更していない)。
 
 // [ヘッダーの表示名]
 // ゲストがルーム内で変更したニックネーム(ban.myDisplayName、rooms/{roomId}/members/{uid}の
@@ -65,7 +65,7 @@ async function handleSignOut() {
 					:is-signed-in="!!auth.currentUser"
 					:connection-status-kind="connection.statusKind"
 					:status-message="connection.statusMessage"
-					:room-name="headerRoomName"
+					:org-name="orgContext.orgName"
 					@sign-out="handleSignOut"
 				/>
 				<AuthView v-if="!auth.currentUser" />

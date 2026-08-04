@@ -101,6 +101,12 @@
     <string name="status_connected">Connected (room=%1$s)</string>
     <string name="status_reconnecting">Reconnecting... (room=%1$s)</string>
     <string name="status_error">Error: %1$s</string>
+    <!-- [Bug fix, 2026-08-04] Short-form connection status text used only in the
+         header. The room name is already shown on the header's left side, so
+         these omit the room= part (mirrors web's status.connectedShort /
+         iOS's status_header_connected/reconnecting). -->
+    <string name="status_header_connected">Connected</string>
+    <string name="status_header_reconnecting">Reconnecting...</string>
 
     <!-- invite -->
     <string name="invite_label">Invite code for this room (share with participants):</string>
