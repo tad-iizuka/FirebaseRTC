@@ -38,6 +38,14 @@ import PhotosUI
 import UniformTypeIdentifiers
 import UIKit
 
+/// [モバイルUI再編・2026-08-04] Talk/Members/Chat/Moreの4タブ構成。
+/// brushup-plan.mdの「モバイル最適化タブバー構成案」に基づく。
+/// PTT操作(Talk)を最優先の独立タブとし、参加者操作(BAN/通報/バッジ)はMembers、
+/// 頻度の低い操作(録音操作/ニックネーム変更/退室)はMoreへ集約する。
+private enum RootTab: Hashable {
+    case talk, members, chat, more
+}
+
 struct ContentView: View {
 
     @StateObject private var auth = PTTAuthManager()
@@ -66,6 +74,8 @@ struct ContentView: View {
     @State private var joinInviteCode: String = ""
     @State private var chatInputText: String = ""
 
+    /// [モバイルUI再編・2026-08-04] 入室後に表示中のタブ。
+    @State private var selectedTab: RootTab = .talk
     /// 実際に参加してLiveKit接続に進んだルームID。nilの間はルーム選択画面を表示する。
     @State private var activeRoomId: String?
     /// [ルーム名] admin-dashboardで設定されたルーム名。未設定 or 未取得の場合はnull。
@@ -104,28 +114,60 @@ struct ContentView: View {
             if !onboarding.hasCompletedOnboarding {
                 // [オンボーディング] 初回起動時はサインイン前でもこの画面を最優先で表示する。
                 PTTOnboardingView(onComplete: { onboarding.complete() })
+            } else if auth.currentUser == nil {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        header(showConnectionStatus: false, showLoginStatus: false)
+                        authSection
+                    }
+                }
+            } else if activeRoomId != nil {
+                // [モバイルUI再編・2026-08-04] 入室中のみタブ構成に切り替える。
+                // 接続状態・ルーム名・録音中バナーはどのタブを見ていても常に把握できるよう、
+                // TabViewの外側(全タブ共通)に固定表示する。
+                VStack(spacing: 0) {
+                    header()
+                    roomNameHeader
+                    statusRow
+                    recordingBanner
+
+                    TabView(selection: $selectedTab) {
+                        // [モバイルUI再編・2026-08-04] Talkタブ=ホーム画面。PTTボタンを
+                        // 画面中央に据え、他タブへの用事がない限りここだけで完結するようにする。
+                        VStack {
+                            Spacer(minLength: 0)
+                            talkArea
+                            Spacer(minLength: 0)
+                        }
+                        .tabItem { Label("通話", systemImage: "mic.circle") }
+                        .tag(RootTab.talk)
+
+                        ScrollView {
+                            talkerSection
+                        }
+                        .tabItem { Label("参加者", systemImage: "person.2") }
+                        .tag(RootTab.members)
+
+                        chatSection
+                            .tabItem { Label("チャット", systemImage: "bubble.left.and.bubble.right") }
+                            .tag(RootTab.chat)
+
+                        ScrollView {
+                            VStack(spacing: 0) {
+                                guestStatusSection
+                                recordingControlsSection
+                                voiceSection
+                            }
+                        }
+                        .tabItem { Label("その他", systemImage: "ellipsis.circle") }
+                        .tag(RootTab.more)
+                    }
+                }
             } else {
                 ScrollView {
                     VStack(spacing: 0) {
-                        header
-                        if auth.currentUser == nil {
-                            authSection
-                        } else if activeRoomId != nil {
-                            roomNameHeader
-                            statusRow
-                            guestStatusSection
-                            recordingSection
-                            voiceSection
-                            talkArea
-                            talkerSection
-                            chatSection
-                            // [2026-08-04] 開発者向けログ表示(logSection)を非表示化。
-                            // ログの収集自体(PTTConnectionManager.logLines / recordLog)は維持しており、
-                            // 表示のみをコメントアウトしている。再表示が必要な場合はこの行を戻すこと。
-                            // logSection
-                        } else {
-                            roomSelectionSection
-                        }
+                        header(showConnectionStatus: false)
+                        roomSelectionSection
                     }
                 }
             }
@@ -244,23 +286,33 @@ struct ContentView: View {
     // Web版(ptt-client/src/components/AppHeader.vue)に合わせ、以前ここにあった
     // 「表示名テキスト + サインアウトテキストボタン + room: xxxx / 未接続テキスト」を
     // ConnectionStatusIcon・LoginStatusIcon の2つの丸アイコンに置き換えた。
-    private var header: some View {
+    /// [モバイルUI再編・2026-08-04] 接続状態アイコン・ログイン状態アイコンは、
+    /// その画面で実際に意味を持つ場合だけ表示する(未サインイン画面で「未接続」
+    /// 「未サインイン」を常に表示し続けるのはノイズでしかないため)。
+    /// - 未サインイン: タイトル+設定のみ
+    /// - 入室待ち: タイトル+設定+ログイン状態(サインアウト導線として必要)
+    /// - 入室中: フル表示(従来通り)
+    private func header(showConnectionStatus: Bool = true, showLoginStatus: Bool = true) -> some View {
         HStack(spacing: 10) {
             Text("PTT CLIENT")
                 .font(.system(size: 11, weight: .regular, design: .monospaced))
                 .foregroundColor(.pttMuted)
             Spacer()
-            ConnectionStatusIcon(status: connection.status, roomName: displayName)
+            if showConnectionStatus {
+                ConnectionStatusIcon(status: connection.status, roomName: displayName)
+            }
             PTTSettingsIcon(settings: settingsStore)
-            LoginStatusIcon(
-                photoURL: auth.currentUser?.photoURL,
-                displayName: auth.currentUser != nil ? headerDisplayName : nil,
-                isSignedIn: auth.currentUser != nil,
-                onSignOut: {
-                    leaveRoom()
-                    auth.signOut()
-                }
-            )
+            if showLoginStatus {
+                LoginStatusIcon(
+                    photoURL: auth.currentUser?.photoURL,
+                    displayName: auth.currentUser != nil ? headerDisplayName : nil,
+                    isSignedIn: auth.currentUser != nil,
+                    onSignOut: {
+                        leaveRoom()
+                        auth.signOut()
+                    }
+                )
+            }
         }
         .padding(14)
     }
@@ -364,43 +416,55 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.top, 4)
 
-                VStack(spacing: 6) {
+                // [モバイルUI再編・2026-08-04] 従来は行末に小さな「削除」テキストリンクを
+                // 置いていたが、誤タップしやすく・見つけにくい。iOS標準のスワイプ削除
+                // (.swipeActions)に変更し、発見しやすさと誤操作防止を両立させる。
+                // Listは親のScrollView内で高さが定まらないため、行数から概算した
+                // 高さを明示し、スクロールは親側に任せる(scrollDisabled)。
+                List {
                     ForEach(savedRooms.rooms) { saved in
                         savedRoomRow(saved)
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    savedRooms.remove(roomId: saved.roomId)
+                                } label: {
+                                    Label(String(localized: "削除"), systemImage: "trash")
+                                }
+                            }
                     }
                 }
+                .listStyle(.plain)
+                .scrollDisabled(true)
+                .scrollContentBackground(.hidden)
+                .frame(height: CGFloat(savedRooms.rooms.count) * 58)
             }
         }
         .padding(14)
     }
 
     private func savedRoomRow(_ saved: PTTSavedRoomsStore.SavedRoom) -> some View {
-        HStack(spacing: 8) {
-            Button {
-                rejoinSavedRoom(saved)
-            } label: {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(saved.label)
-                        .font(.system(size: 12, design: .monospaced))
-                        .lineLimit(1)
-                    Text("(\(saved.roomId))")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(.pttMuted)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(8)
+        Button {
+            rejoinSavedRoom(saved)
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(saved.label)
+                    .font(.system(size: 12, design: .monospaced))
+                    .lineLimit(1)
+                Text("(\(saved.roomId))")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.pttMuted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
-            .buttonStyle(.plain)
-            .background(.pttPanel.opacity(0.6))
-
-            Button(String(localized: "削除")) {
-                savedRooms.remove(roomId: saved.roomId)
-            }
-            .font(.system(size: 11, design: .monospaced))
-            .foregroundColor(.pttMuted)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(8)
         }
+        .buttonStyle(.plain)
+        .background(.pttPanel.opacity(0.6))
+        .padding(.vertical, 3)
     }
 
     // MARK: - Guest status (Phase10: Guestロール 5.1)
@@ -482,63 +546,75 @@ struct ContentView: View {
 
     // MARK: - Recording (録音開始/停止UI)
 
-    /// Web版 RecordingBar.vue の移植。
-    /// - 録音中であることの開示(赤バッジ + 経過時間 + 同意文言)はロールに関わらず
-    ///   全参加者へ常時表示する(法的な同意の観点で必須。Web版と同じ方針)。
-    /// - 開始/停止ボタンはowner/moderatorのみ表示する(サーバー側でも権限を再チェックする)。
+    /// [モバイルUI再編・2026-08-04] 録音中であることの開示(赤バッジ+経過時間+同意文言)。
+    /// Web版 RecordingBar.vue の移植部分のうち、ロールに関わらず全参加者へ
+    /// 常時表示する必要がある部分(法的な同意の観点で必須)。
+    /// タブ内に置くとタブを切り替えた瞬間に開示が見えなくなってしまうため、
+    /// TabViewの外側(全タブ共通のヘッダー領域)に置く前提で切り出した。
     @ViewBuilder
-    private var recordingSection: some View {
-        if connection.isRecording || canControlRecording {
-            VStack(alignment: .leading, spacing: 8) {
-                if connection.isRecording {
-                    HStack(spacing: 8) {
-                        Circle()
-                            .fill(.pttDanger)
-                            .frame(width: 7, height: 7)
-                        Text("録音中")
-                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                            .foregroundColor(.pttDanger)
-                        if let startedAt = connection.recordingStartedAt {
-                            TimelineView(.periodic(from: startedAt, by: 1)) { _ in
-                                Text(elapsedLabel(since: startedAt))
-                                    .font(.system(size: 11, design: .monospaced))
-                                    .foregroundColor(.pttMuted)
-                            }
+    private var recordingBanner: some View {
+        if connection.isRecording {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(.pttDanger)
+                        .frame(width: 7, height: 7)
+                    Text("録音中")
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundColor(.pttDanger)
+                    if let startedAt = connection.recordingStartedAt {
+                        TimelineView(.periodic(from: startedAt, by: 1)) { _ in
+                            Text(elapsedLabel(since: startedAt))
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(.pttMuted)
                         }
                     }
-                    Text("このルームの通話内容は録音され、モデレーターが確認できます。")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(.pttMuted)
                 }
-
-                if canControlRecording {
-                    HStack(spacing: 10) {
-                        if connection.isRecording {
-                            Button(recording.stopping ? String(localized: "停止中...") : String(localized: "録音を停止")) {
-                                stopRecording()
-                            }
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
-                            .foregroundColor(.pttDanger)
-                            .disabled(recording.stopping)
-                        } else {
-                            Button(recording.starting ? String(localized: "開始中...") : String(localized: "録音を開始")) {
-                                showRecordingStartConfirm = true
-                            }
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
-                            .foregroundColor(.pttAccent)
-                            .disabled(recording.starting)
-                        }
-                    }
-
-                    if let message = recording.errorMessage {
-                        Text(message)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(.pttDanger)
-                    }
-                }
+                Text("このルームの通話内容は録音され、モデレーターが確認できます。")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.pttMuted)
             }
             .padding(.horizontal, 14)
             .padding(.bottom, 10)
+        }
+    }
+
+    /// [モバイルUI再編・2026-08-04] 録音の開始/停止ボタン本体。頻度の低い操作のため
+    /// Moreタブへ移設した(開示バナー自体はrecordingBannerとして常時表示を維持)。
+    /// owner/moderatorのみ表示する(サーバー側でも権限を再チェックする)。
+    @ViewBuilder
+    private var recordingControlsSection: some View {
+        if canControlRecording {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("録音操作")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.pttMuted)
+
+                HStack(spacing: 10) {
+                    if connection.isRecording {
+                        Button(recording.stopping ? String(localized: "停止中...") : String(localized: "録音を停止")) {
+                            stopRecording()
+                        }
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundColor(.pttDanger)
+                        .disabled(recording.stopping)
+                    } else {
+                        Button(recording.starting ? String(localized: "開始中...") : String(localized: "録音を開始")) {
+                            showRecordingStartConfirm = true
+                        }
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundColor(.pttAccent)
+                        .disabled(recording.starting)
+                    }
+                }
+
+                if let message = recording.errorMessage {
+                    Text(message)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.pttDanger)
+                }
+            }
+            .padding(14)
         }
     }
 
@@ -1024,6 +1100,8 @@ struct ContentView: View {
     /// 画像/動画/PDFの添付に対応。選択直後には送信せず、送信ボタンが
     /// 押されるまで`chatPendingAttachment*`に保持しておく(Web版のpendingFileと同じ)。
     private var chatSection: some View {
+        // [モバイルUI再編・2026-08-04] Chatタブの中身がそのままタブ全体を占めるよう、
+        // 縦方向いっぱいに広げる(以前は他セクションと縦に並ぶ1ブロックだった)。
         VStack(alignment: .leading, spacing: 8) {
             Text("チャット")
                 .font(.system(size: 10, design: .monospaced))
@@ -1036,7 +1114,9 @@ struct ContentView: View {
                     }
                 }
             }
-            .frame(maxHeight: 180)
+            // [モバイルUI再編・2026-08-04] Chat専用タブになったため、以前の180pt上限を撤廃し
+            // タブの縦幅いっぱいまでメッセージ一覧を表示する(入力欄はVStack末尾に残る)。
+            .frame(maxHeight: .infinity)
             .background(.pttPanel.opacity(0.4))
 
             if let errorMessage = chat.errorMessage {
@@ -1089,6 +1169,7 @@ struct ContentView: View {
             }
         }
         .padding(14)
+        .frame(maxHeight: .infinity)
         .photosPicker(
             isPresented: $showChatPhotoPicker,
             selection: $chatPhotoPickerItem,
