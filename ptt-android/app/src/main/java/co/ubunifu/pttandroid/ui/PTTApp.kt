@@ -642,7 +642,11 @@ fun PTTApp(
                     getThumbnailUrl = { messageId -> resolveThumbnailUrl(messageId) },
                 )
                 Spacer(Modifier.height(16.dp))
-                LogSection(logLines)
+                // [2026-08-04] 開発者向けログ表示(LogSection)を非表示化。
+                // ログの収集自体(PTTConnectionManager.logLines / _logLines.update)は維持しており、
+                // 表示のみをコメントアウトしている。再表示が必要な場合はこの行を戻すこと(iOS ContentView.swiftの
+                // logSectionコメントアウトと同じ方針)。
+                // LogSection(logLines)
             }
 
             else -> RoomSelectionSection(

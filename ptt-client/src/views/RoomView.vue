@@ -19,7 +19,8 @@ import PttButton from '@/components/PttButton.vue'
 import RecordingBar from '@/components/RecordingBar.vue'
 import ParticipantList from '@/components/ParticipantList.vue'
 import ChatPanel from '@/components/ChatPanel.vue'
-import LogPanel from '@/components/LogPanel.vue'
+// [2026-08-04] ログ表示非表示化に伴い一時的に未使用。再表示時にコメントを外す。
+// import LogPanel from '@/components/LogPanel.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import { authedFetch } from '@/lib/api'
 import { canManageRoom } from '@/lib/roomPermissions'
@@ -303,7 +304,10 @@ onUnmounted(() => {
       @send-file="sendChatFile"
     />
 
-    <LogPanel :lines="connection.logLines" />
+    <!-- [2026-08-04] 開発者向けログ表示(LogPanel)を非表示化。
+         ログの収集自体(stores/connection.ts の logLines)は維持しており、表示のみをコメントアウトしている。
+         再表示が必要な場合はこの行を戻すこと(iOS ContentView.swift / Android PTTApp.kt と同じ方針)。 -->
+    <!-- <LogPanel :lines="connection.logLines" /> -->
 
     <ConfirmDialog
       :open="!!banTarget"

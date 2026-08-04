@@ -119,7 +119,10 @@ struct ContentView: View {
                             talkArea
                             talkerSection
                             chatSection
-                            logSection
+                            // [2026-08-04] 開発者向けログ表示(logSection)を非表示化。
+                            // ログの収集自体(PTTConnectionManager.logLines / recordLog)は維持しており、
+                            // 表示のみをコメントアウトしている。再表示が必要な場合はこの行を戻すこと。
+                            // logSection
                         } else {
                             roomSelectionSection
                         }
