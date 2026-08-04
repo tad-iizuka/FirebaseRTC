@@ -38,12 +38,14 @@ import PhotosUI
 import UniformTypeIdentifiers
 import UIKit
 
-/// [モバイルUI再編・2026-08-04] Talk/Members/Chat/Moreの4タブ構成。
+/// [モバイルUI再編・2026-08-04(再改定)] Talk/Members/Chat/Settingsの4タブ構成。
 /// brushup-plan.mdの「モバイル最適化タブバー構成案」に基づく。
-/// PTT操作(Talk)を最優先の独立タブとし、参加者操作(BAN/通報/バッジ)はMembers、
-/// 頻度の低い操作(録音操作/ニックネーム変更/退室)はMoreへ集約する。
+/// サインイン後は常にこの4タブを表示し、Talkタブがルーム選択画面と通話画面を
+/// 兼ねる(未入室=ルーム選択、入室中=PTTボタン+退出ボタン)。
+/// 頻度の低い操作(プロフィール/サインアウト/録音操作/ニックネーム変更/接続設定)は
+/// 独立のSettingsタブ(歯車アイコン)に集約する。
 private enum RootTab: Hashable {
-    case talk, members, chat, more
+    case talk, members, chat, settings
 }
 
 struct ContentView: View {
@@ -97,6 +99,10 @@ struct ContentView: View {
     /// [Phase10: Guestロール] ニックネーム編集中かどうか、および編集中のテキスト。
     @State private var isEditingNickname = false
     @State private var nicknameDraft: String = ""
+    /// [モバイルUI再編・2026-08-04(再改定)] 設定タブ内「接続設定」行から開くシートの
+    /// 表示フラグ。従来はヘッダーのPTTSettingsIconが自前で保持していたが、
+    /// 設定タブの通常行として表示するためContentView側で保持する。
+    @State private var isConnectionSettingsPresented = false
 
     // [Phase16: チャット添付ファイル] Web版ChatPanel.vueのpendingFileの移植。
     // 選択直後には送信せず、送信ボタンが押されるまでここに保持しておく。
@@ -115,60 +121,46 @@ struct ContentView: View {
                 // [オンボーディング] 初回起動時はサインイン前でもこの画面を最優先で表示する。
                 PTTOnboardingView(onComplete: { onboarding.complete() })
             } else if auth.currentUser == nil {
-                ScrollView {
-                    VStack(spacing: 0) {
-                        header(showConnectionStatus: false, showLoginStatus: false)
-                        authSection
-                    }
-                }
-            } else if activeRoomId != nil {
-                // [モバイルUI再編・2026-08-04] 入室中のみタブ構成に切り替える。
-                // 接続状態・ルーム名・録音中バナーはどのタブを見ていても常に把握できるよう、
-                // TabViewの外側(全タブ共通)に固定表示する。
-                VStack(spacing: 0) {
-                    header()
-                    roomNameHeader
-                    statusRow
-                    recordingBanner
-
-                    TabView(selection: $selectedTab) {
-                        // [モバイルUI再編・2026-08-04] Talkタブ=ホーム画面。PTTボタンを
-                        // 画面中央に据え、他タブへの用事がない限りここだけで完結するようにする。
-                        VStack {
-                            Spacer(minLength: 0)
-                            talkArea
-                            Spacer(minLength: 0)
-                        }
-                        .tabItem { Label("通話", systemImage: "mic.circle") }
-                        .tag(RootTab.talk)
-
-                        ScrollView {
-                            talkerSection
-                        }
-                        .tabItem { Label("参加者", systemImage: "person.2") }
-                        .tag(RootTab.members)
-
-                        chatSection
-                            .tabItem { Label("チャット", systemImage: "bubble.left.and.bubble.right") }
-                            .tag(RootTab.chat)
-
-                        ScrollView {
-                            VStack(spacing: 0) {
-                                guestStatusSection
-                                recordingControlsSection
-                                voiceSection
-                            }
-                        }
-                        .tabItem { Label("その他", systemImage: "ellipsis.circle") }
-                        .tag(RootTab.more)
-                    }
-                }
+                // [モバイルUI再編・2026-08-04(再改定)] 未ログイン画面は上下左右中央揃えの
+                // 単一グラスカードのみで構成する(ヘッダーバーは持たない)。詳細はauthSection参照。
+                authSection
             } else {
-                ScrollView {
-                    VStack(spacing: 0) {
-                        header(showConnectionStatus: false)
-                        roomSelectionSection
+                // [モバイルUI再編・2026-08-04(再改定)] サインイン後は入室状態に関わらず
+                // 常にTalk/参加者/チャット/設定の4タブを表示する。未入室中はTalkタブが
+                // ルーム選択画面を、入室中はPTTボタン+退出ボタンを兼ねる(各タブ内で分岐)。
+                // 接続状態・ルーム名・録音中バナーは入室中のみ、TabViewの外側
+                // (全タブ共通のヘッダー領域)に固定表示する。
+                // [不具合修正・2026-08-04(3訂)] 設定タブはプロフィール/接続設定/録音操作など
+                // 「ルームに紐づかない・または既にタブ内(guestStatusSection等)で
+                // ルーム文脈を示している」項目が中心のため、他タブと違ってこの
+                // 共通ヘッダー(ルーム名・パンくず・接続状態行)を表示する意味が薄い。
+                // ユーザー指摘を受け、設定タブ選択中はこのヘッダーブロックを非表示にする。
+                // [不具合修正・2026-08-04(4訂)] 標準TabViewのLiquid Glass選択ハイライトは、
+                // 切り替えアニメーション中に背後のコンテンツを再サンプリングするらしく、
+                // `.toolbarBackground`で固定色を指定してもタップの瞬間だけ白っぽく
+                // フラッシュする現象が実機録画で確認された(スクリーンショットでは
+                // アニメーション完了後の状態しか捉えられず気づけなかった)。
+                // 標準TabViewへの依存をやめ、コンテンツ切り替え・タブバー描画とも
+                // 自前で行うことで、色を完全にこちらの管理下に置く。
+                VStack(spacing: 0) {
+                    if activeRoomId != nil && selectedTab != .settings {
+                        header()
+                        roomNameHeader
+                        statusRow
+                        recordingBanner
                     }
+
+                    Group {
+                        switch selectedTab {
+                        case .talk: talkTabContent
+                        case .members: membersTabContent
+                        case .chat: chatTabContent
+                        case .settings: settingsTabContent
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                    customTabBar
                 }
             }
         }
@@ -180,6 +172,15 @@ struct ContentView: View {
         }
         .onChange(of: auth.currentUser?.uid, initial: true) { _, newUid in
             savedRooms.load(forUid: newUid)
+            // [不具合修正・2026-08-04(7訂)] 設定タブでサインアウト→再サインインすると、
+            // selectedTabが.settingsのまま残っていて再ログイン後も設定タブに
+            // 留まってしまう指摘を受けた。ログイン画面自体はタブを持たないため
+            // 気づきにくいが、サインイン成功(newUidが非nilになった瞬間)には
+            // 常にメインタブである通話タブへ戻すのが自然な挙動と判断し、
+            // ここでリセットする。
+            if newUid != nil {
+                selectedTab = .talk
+            }
         }
         // [BAN対応] 自分がBANされたことをリアルタイム検知したら、即座にルームから退出する。
         // BAN自体の強制力はLiveKit側の即時キック(サーバー)が担うため、ここは表示のための補助。
@@ -231,88 +232,362 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Auth
+    // MARK: - Tabs (4タブ構成: 通話/参加者/チャット/設定)
 
-    /// 未サインイン時の画面。Web版のauthSectionに相当。
-    private var authSection: some View {
-        VStack(spacing: 14) {
-            Button {
-                Task { await auth.signInWithGoogle() }
-            } label: {
-                Text(auth.isSigningIn ? String(localized: "サインイン中...") : String(localized: "Googleでサインイン"))
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 9)
+    /// [不具合修正・2026-08-04(4訂)] 標準TabViewのタブバーを置き換える自前実装。
+    /// 色を完全に固定できるよう、選択状態のハイライトも`Color.pttAccentDim`ベースの
+    /// カプセルで自前描画する(システムのLiquid Glass選択アニメーションに伴う
+    /// 色のフラッシュを避けるため。詳細はbody側のコメント参照)。
+    /// カプセル自体はガラス風の質感を保つよう`.glassEffect()`で仕上げる。
+    private var customTabBar: some View {
+        GlassEffectContainer(spacing: 8) {
+            HStack(spacing: 2) {
+                tabBarButton(tab: .talk, systemImage: "mic.circle", label: "通話")
+                tabBarButton(tab: .members, systemImage: "person.2", label: "参加者")
+                tabBarButton(tab: .chat, systemImage: "bubble.left.and.bubble.right", label: "チャット")
+                tabBarButton(tab: .settings, systemImage: "gearshape", label: "設定")
             }
-            .buttonStyle(.plain)
-            .overlay(
-                RoundedRectangle(cornerRadius: 2)
-                    .stroke(Color.pttAccent, lineWidth: 1)
-            )
-            .foregroundColor(.pttAccent)
-            .disabled(auth.isSigningIn)
+            .padding(6)
+            .glassEffect(.regular.tint(.pttPanel), in: Capsule())
+        }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 8)
+        .padding(.top, 6)
+    }
 
-            // [Phase10: Guestロール] Firebase匿名認証でサインインする。
-            // 以降のルーム参加フロー(招待コード必須)は他のサインイン方法と全く同じ。
-            Button {
-                Task { await auth.signInAsGuest() }
-            } label: {
-                Text(String(localized: "ゲストとして参加"))
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 9)
+    /// [不具合修正・2026-08-04(6訂)] `label`をプレーンな`String`にしていたため、
+    /// `Text(label)`がローカライズ検索(Localizable.xcstrings)を経由せず
+    /// 常に日本語のまま表示されていた(SwiftUIは文字列リテラルが直接
+    /// `LocalizedStringKey`型のパラメータに渡された場合のみ自動でローカライズ
+    /// 変換する。一度`String`型の変数に代入してから`Text`に渡すと、その変換は
+    /// 起きない)。`LocalizedStringKey`に変更し、呼び出し側のリテラルが
+    /// カタログ経由で翻訳されるようにした。
+    private func tabBarButton(tab: RootTab, systemImage: String, label: LocalizedStringKey) -> some View {
+        let isSelected = selectedTab == tab
+        return Button {
+            selectedTab = tab
+        } label: {
+            VStack(spacing: 3) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 19))
+                Text(label)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
             }
-            .buttonStyle(.plain)
-            .overlay(RoundedRectangle(cornerRadius: 2).stroke(.pttLine, lineWidth: 1))
-            .foregroundColor(.pttMuted)
-            .disabled(auth.isSigningIn)
+            .foregroundColor(isSelected ? .pttAccent : .pttMuted)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .background {
+                if isSelected {
+                    Capsule().fill(Color.pttAccentDim.opacity(0.55))
+                }
+            }
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .animation(.easeOut(duration: 0.15), value: isSelected)
+    }
 
-            Text("ゲストは登録不要ですが、送信内容や参加履歴は削除されず保持されます。")
-                .font(.system(size: 11, design: .monospaced))
+    /// Talkタブ。未入室=ルーム選択画面、入室中=PTTボタン+退出ボタンを表示する。
+    /// 「入室後は通話ボタン＋ルーム退出ボタンも表示」という要件に合わせ、退出ボタン
+    /// (voiceSection)はこのタブの下部に据える(旧: Moreタブに分離されていた)。
+    /// [不具合修正・2026-08-04] TabViewの各ページはVStack側の`.background(.pttBackground)`を
+    /// 継承せず、既定の(ライトモードでは白い)ページ背景で描画されてしまう
+    /// (foregroundColorはSwiftUIの環境値として伝播するため文字色自体は正しいが、
+    /// 白背景に暗色パレットの文字色が乗ることで「文字が薄く見える」現象が起きていた)。
+    /// 各タブのルートに明示的に背景を敷いて解決する。
+    @ViewBuilder
+    private var talkTabContent: some View {
+        Group {
+            if activeRoomId != nil {
+                VStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    talkArea
+                    Spacer(minLength: 0)
+                    voiceSection
+                }
+            } else {
+                ScrollView {
+                    roomSelectionSection
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.pttBackground.ignoresSafeArea())
+    }
+
+    /// 参加者タブ。未入室中はそもそも参加者情報が存在しないため案内文のみを表示する。
+    @ViewBuilder
+    private var membersTabContent: some View {
+        Group {
+            if activeRoomId != nil {
+                ScrollView { talkerSection }
+            } else {
+                emptyTabPlaceholder(
+                    systemImage: "person.2",
+                    message: String(localized: "ルームに参加すると参加者一覧が表示されます")
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.pttBackground.ignoresSafeArea())
+    }
+
+    /// チャットタブ。未入室中は案内文のみを表示する。
+    @ViewBuilder
+    private var chatTabContent: some View {
+        Group {
+            if activeRoomId != nil {
+                chatSection
+            } else {
+                emptyTabPlaceholder(
+                    systemImage: "bubble.left.and.bubble.right",
+                    message: String(localized: "ルームに参加するとチャットが利用できます")
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.pttBackground.ignoresSafeArea())
+    }
+
+    /// 設定タブ(旧Moreタブ)。プロフィール(旧ヘッダーのLoginStatusIcon相当)・
+    /// 接続設定(旧ヘッダーのPTTSettingsIcon相当)を新たに集約し、入室中のみ
+    /// 意味を持つ操作(ゲストのニックネーム変更・録音操作)はそれに続けて表示する。
+    /// [不具合修正・2026-08-04(3訂)] 他タブと違い共通ヘッダー(ルーム状態)を
+    /// 表示しないため、代わりに簡単なタイトルとセーフエリア分の余白を確保する。
+    private var settingsTabContent: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                Text("設定")
+                    .font(.system(size: 11, weight: .regular, design: .monospaced))
+                    .foregroundColor(.pttMuted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
+
+                profileSection
+                Divider().overlay(Color.pttLine).padding(.horizontal, 14)
+                connectionSettingsSection
+                if activeRoomId != nil {
+                    Divider().overlay(Color.pttLine).padding(.horizontal, 14)
+                    guestStatusSection
+                    recordingControlsSection
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.pttBackground.ignoresSafeArea())
+    }
+
+    /// 参加者/チャットタブを未入室中に開いた場合の空状態表示。
+    private func emptyTabPlaceholder(systemImage: String, message: String) -> some View {
+        VStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.system(size: 28))
                 .foregroundColor(.pttMuted)
+            Text(message)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(.pttMuted)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(40)
+    }
 
-            if let message = auth.lastErrorMessage {
-                Text(message)
+    // MARK: - Settings tab: profile (旧ヘッダーのLoginStatusIcon相当)
+
+    /// アバター・表示名・サインアウトをまとめたプロフィール行。
+    /// 従来ヘッダーの丸アイコン+Menuだった導線を、設定タブ内の常時表示行に置き換えた。
+    private var profileSection: some View {
+        HStack(spacing: 12) {
+            profileAvatar
+            VStack(alignment: .leading, spacing: 2) {
+                Text(headerDisplayName.isEmpty ? String(localized: "ニックネーム未設定") : headerDisplayName)
+                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                Text(auth.currentUser?.isAnonymous == true ? String(localized: "ゲストとしてログイン中") : String(localized: "ログイン中"))
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(.pttDanger)
+                    .foregroundColor(.pttMuted)
             }
+            Spacer()
+            Button(role: .destructive) {
+                leaveRoom()
+                auth.signOut()
+            } label: {
+                Image(systemName: "rectangle.portrait.and.arrow.right")
+                    .font(.system(size: 14))
+            }
+            .accessibilityLabel(String(localized: "サインアウト"))
         }
         .padding(14)
     }
 
+    @ViewBuilder
+    private var profileAvatar: some View {
+        ZStack {
+            Circle().fill(Color.pttPanel)
+            Circle().strokeBorder(Color.pttLine, lineWidth: 1)
+            if let photoURL = auth.currentUser?.photoURL {
+                AsyncImage(url: photoURL) { phase in
+                    if case .success(let image) = phase {
+                        image.resizable().scaledToFill()
+                    } else {
+                        Image(systemName: "person.fill").font(.system(size: 15)).foregroundColor(.pttMuted)
+                    }
+                }
+                .frame(width: 40, height: 40)
+                .clipShape(Circle())
+            } else {
+                Image(systemName: "person.fill").font(.system(size: 15)).foregroundColor(.pttMuted)
+            }
+        }
+        .frame(width: 40, height: 40)
+    }
+
+    // MARK: - Settings tab: 接続設定(旧ヘッダーのPTTSettingsIcon相当)
+
+    /// 接続先(トークンサーバー/LiveKit)設定へのエントリ行。従来はヘッダーの
+    /// 歯車アイコンから即シート表示していたが、設定タブ内の1行に変更した
+    /// (PTTSettingsView自体は変更なくシートとして再利用する)。
+    private var connectionSettingsSection: some View {
+        Button {
+            isConnectionSettingsPresented = true
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "server.rack")
+                    .foregroundColor(.pttMuted)
+                Text("接続設定(サーバー/LiveKit)")
+                    .font(.system(size: 12, design: .monospaced))
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11))
+                    .foregroundColor(.pttMuted)
+            }
+        }
+        .buttonStyle(.plain)
+        .foregroundColor(.pttText)
+        .padding(14)
+        .sheet(isPresented: $isConnectionSettingsPresented) {
+            PTTSettingsView(settings: settingsStore)
+        }
+    }
+
+    // MARK: - Auth
+
+    /// 未サインイン時の画面。Web版のauthSectionに相当。
+    /// [モバイルUI再編・2026-08-04(再改定)] 画面全体を上下左右中央揃えにし、
+    /// iOS 26 Liquid Glass(`.glassEffect`)に準拠したカード1枚で構成する。
+    private var authSection: some View {
+        ZStack {
+            Color.pttBackground.ignoresSafeArea()
+
+            // [Liquid Glass] ガラス越しに背景の質感が見えるよう、うっすらとした
+            // アクセントカラーの円をぼかして背後に置く(素の単色背景だとガラスの
+            // 透過・屈折表現がほぼ視認できないため)。
+            Circle()
+                .fill(Color.pttAccent.opacity(0.25))
+                .frame(width: 260, height: 260)
+                .blur(radius: 90)
+                .offset(x: -80, y: -160)
+            Circle()
+                .fill(Color.pttLive.opacity(0.18))
+                .frame(width: 220, height: 220)
+                .blur(radius: 90)
+                .offset(x: 100, y: 180)
+
+            GlassEffectContainer(spacing: 14) {
+                VStack(spacing: 22) {
+                    VStack(spacing: 6) {
+                        Image(systemName: "mic.circle.fill")
+                            .font(.system(size: 44))
+                            .foregroundStyle(.pttAccent)
+                        Text("PTT CLIENT")
+                            .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                            .foregroundColor(.pttMuted)
+                        Text("人ではなく、場につながる。")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.pttMuted)
+                    }
+
+                    authButtons
+
+                    Text("ゲストは登録不要ですが、送信内容や参加履歴は削除されず保持されます。")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.pttMuted)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if let message = auth.lastErrorMessage {
+                        Text(message)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.pttDanger)
+                            .multilineTextAlignment(.center)
+                    }
+                }
+                .padding(28)
+                .frame(maxWidth: 340)
+                .glassEffect(.regular.tint(.pttPanel).interactive(), in: RoundedRectangle(cornerRadius: 28))
+            }
+            .padding(24)
+        }
+        // [設定] 未サインイン時も接続先(トークンサーバー/LiveKit)を変更できるよう、
+        // ガラスカードの右上に小さく歯車アイコンを重ねる(サインイン後は設定タブへ移動)。
+        .overlay(alignment: .topTrailing) {
+            PTTSettingsIcon(settings: settingsStore)
+                .glassEffect(.regular, in: Circle())
+                .padding(20)
+        }
+    }
+
+    /// Google/ゲストサインインの2ボタン。主操作(Googleサインイン)は塗りつぶしで
+    /// 目立たせたいため`.buttonStyle(.glassProminent)`、副次操作(ゲスト参加)は
+    /// カードのガラスに馴染む`.buttonStyle(.glass)`(ニュートラル)を使い分ける。
+    /// [不具合修正・2026-08-04(5訂)] 当初は両方とも`.glass`+`.tint()`にしていたが、
+    /// 実機では`.tint()`が反映されず両方とも同じニュートラルな見た目になって
+    /// しまうことが判明した(`.glass`はニュートラルな質感を保つスタイルで、
+    /// 色付き塗りつぶしにするには`.glassProminent`が必要だった)。
+    private var authButtons: some View {
+        VStack(spacing: 12) {
+            Button {
+                Task { await auth.signInWithGoogle() }
+            } label: {
+                Text(auth.isSigningIn ? String(localized: "サインイン中...") : String(localized: "Googleでサインイン"))
+                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+            }
+            .buttonStyle(.glassProminent)
+            .tint(.pttAccent)
+            .disabled(auth.isSigningIn)
+
+            Button {
+                Task { await auth.signInAsGuest() }
+            } label: {
+                Text(String(localized: "ゲストとして参加"))
+                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+            }
+            .buttonStyle(.glass)
+            .disabled(auth.isSigningIn)
+        }
+    }
+
     // MARK: - Header
 
-    // [接続状態・ログイン状態のアイコン化]
+    // [接続状態アイコン]
     // Web版(ptt-client/src/components/AppHeader.vue)に合わせ、以前ここにあった
     // 「表示名テキスト + サインアウトテキストボタン + room: xxxx / 未接続テキスト」を
-    // ConnectionStatusIcon・LoginStatusIcon の2つの丸アイコンに置き換えた。
-    /// [モバイルUI再編・2026-08-04] 接続状態アイコン・ログイン状態アイコンは、
-    /// その画面で実際に意味を持つ場合だけ表示する(未サインイン画面で「未接続」
-    /// 「未サインイン」を常に表示し続けるのはノイズでしかないため)。
-    /// - 未サインイン: タイトル+設定のみ
-    /// - 入室待ち: タイトル+設定+ログイン状態(サインアウト導線として必要)
-    /// - 入室中: フル表示(従来通り)
-    private func header(showConnectionStatus: Bool = true, showLoginStatus: Bool = true) -> some View {
+    // ConnectionStatusIcon の丸アイコンに置き換えた。
+    /// [モバイルUI再編・2026-08-04(再改定)] 設定アイコン(歯車)・ログイン状態アイコン
+    /// (アバター)は、サインイン後に常設される「設定」タブ(profileSection/
+    /// connectionSettingsSection)へ移設した。この関数は入室中(activeRoomId != nil)
+    /// のみ呼ばれるため、ここに残すのは接続状態アイコンのみでよい。
+    private func header() -> some View {
         HStack(spacing: 10) {
             Text("PTT CLIENT")
                 .font(.system(size: 11, weight: .regular, design: .monospaced))
                 .foregroundColor(.pttMuted)
             Spacer()
-            if showConnectionStatus {
-                ConnectionStatusIcon(status: connection.status, roomName: displayName)
-            }
-            PTTSettingsIcon(settings: settingsStore)
-            if showLoginStatus {
-                LoginStatusIcon(
-                    photoURL: auth.currentUser?.photoURL,
-                    displayName: auth.currentUser != nil ? headerDisplayName : nil,
-                    isSignedIn: auth.currentUser != nil,
-                    onSignOut: {
-                        leaveRoom()
-                        auth.signOut()
-                    }
-                )
-            }
+            ConnectionStatusIcon(status: connection.status, roomName: displayName)
         }
         .padding(14)
     }
@@ -394,13 +669,12 @@ struct ContentView: View {
             }
             Button(action: handleJoinRoom) {
                 Text(roomManager.isWorking ? String(localized: "参加中...") : String(localized: "招待コードで参加する"))
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 9)
+                    .padding(.vertical, 12)
             }
-            .buttonStyle(.plain)
-            .overlay(RoundedRectangle(cornerRadius: 2).stroke(.pttLine, lineWidth: 1))
-            .foregroundColor(.pttMuted)
+            .buttonStyle(.glassProminent)
+            .tint(.pttAccent)
             .disabled(roomManager.isWorking)
 
             if let message = roomManager.lastErrorMessage {
@@ -449,21 +723,27 @@ struct ContentView: View {
         Button {
             rejoinSavedRoom(saved)
         } label: {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(saved.label)
-                    .font(.system(size: 12, design: .monospaced))
-                    .lineLimit(1)
-                Text("(\(saved.roomId))")
-                    .font(.system(size: 11, design: .monospaced))
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(saved.label)
+                        .font(.system(size: 13, design: .monospaced))
+                        .lineLimit(1)
+                    Text("(\(saved.roomId))")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.pttMuted)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(.pttMuted)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(8)
+            .padding(10)
         }
         .buttonStyle(.plain)
-        .background(.pttPanel.opacity(0.6))
+        .background(.pttPanel.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
         .padding(.vertical, 3)
     }
 
@@ -480,9 +760,10 @@ struct ContentView: View {
                 HStack(spacing: 8) {
                     Text("ゲスト")
                         .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .overlay(RoundedRectangle(cornerRadius: 2).stroke(Color.pttAccent, lineWidth: 1))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.pttAccent.opacity(0.15), in: Capsule())
+                        .overlay(Capsule().stroke(Color.pttAccent, lineWidth: 1))
                         .foregroundColor(.pttAccent)
 
                     if isEditingNickname {
@@ -728,16 +1009,25 @@ struct ContentView: View {
     }
 
     /// 入室後: 退出ボタン。Web版のleaveRoomBtnに相当。
+    /// [ボタンデザイン再検討・2026-08-04] 従来はWeb版の枠線ボタン(角丸2pt・
+    /// pttMuted文字色)をそのまま踏襲していたが、iOSでは馴染みが薄いという
+    /// 指摘を受け、role: .destructiveを持つボタンに変更した。
+    /// [不具合修正・2026-08-04(5訂)] role: .destructiveや`.tint()`だけでは
+    /// 実機で赤系に着色されず(通常時は白文字、タップ時はただの白っぽい
+    /// ハイライトになっていた)、退出という破壊的操作なのに見た目上それと
+    /// 分からなかった。原因は`.buttonStyle(.glass)`がニュートラルな質感を保つ
+    /// スタイルで、色付き塗りつぶしには`.glassProminent`が必要だったため
+    /// (authButtons参照)。`.glassProminent` + `.tint(.pttDanger)`に変更し、
+    /// 通常時・押下時とも赤系で統一されるようにした。
     private var voiceSection: some View {
-        Button(action: leaveRoom) {
+        Button(role: .destructive, action: leaveRoom) {
             Text("ルームを退出する")
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .font(.system(size: 14, weight: .medium, design: .monospaced))
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 9)
+                .padding(.vertical, 12)
         }
-        .buttonStyle(.plain)
-        .overlay(RoundedRectangle(cornerRadius: 2).stroke(.pttLine, lineWidth: 1))
-        .foregroundColor(.pttMuted)
+        .buttonStyle(.glassProminent)
+        .tint(.pttDanger)
         .padding(14)
     }
 
@@ -748,8 +1038,8 @@ struct ContentView: View {
                 .foregroundColor(.pttMuted)
             TextField(placeholder, text: text)
                 .font(.system(size: 14, design: .monospaced))
-                .padding(8)
-                .background(.pttPanel.opacity(0.6))
+                .padding(10)
+                .background(.pttPanel.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
         }
