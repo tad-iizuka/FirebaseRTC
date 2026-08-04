@@ -114,6 +114,11 @@
     <!-- participants -->
     <string name="participants_title">Participants (green = talking)</string>
     <string name="participants_none">— None —</string>
+    <!-- [2026-08-04・next action item4] Room owner badge grant/revoke UI, ported from ParticipantList.vue -->
+    <string name="participants_badge_manage_title">Grant / revoke badges</string>
+    <string name="participants_badge_revoke">Revoke</string>
+    <string name="participants_badge_grant">Grant</string>
+    <string name="participants_badge_select_placeholder">Select a badge</string>
 
     <!-- chat -->
     <string name="chat_title">Chat</string>
@@ -138,6 +143,8 @@
     <string name="errors_connection_failed_generic">Connection failed</string>
     <string name="errors_room_request_failed">Request failed (HTTP %1$d)</string>
     <string name="errors_ban_action_failed">Ban failed (HTTP %1$d)</string>
+    <!-- [2026-08-04・next action item4] Badge grant/revoke API error -->
+    <string name="errors_badge_action_failed">Badge action failed (HTTP %1$d)</string>
     <string name="errors_chat_send_failed">Failed to send message (HTTP %1$d)</string>
     <string name="errors_chat_attachment_upload_failed">Failed to upload the attachment</string>
     <string name="errors_chat_attachment_too_large">File size must be 100MB or less</string>

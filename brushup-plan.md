@@ -575,24 +575,23 @@ Guestロール追加（Phase10）で顕在化した課題。現状、role別の�
   閲覧自体を監査ログ(`logAdminAction`)に残すか、role×操作の対応表
   整理の一環としてここで方針を決める
 
-### Phase 13: バッジシステムの基本機能 → **旧Phase11から分離（2026-07-26）→ 大部分実装完了（2026-07-26、二十訂）→ Room owner委譲機能追加（2026-08-04、二十一訂）**
+### Phase 13: バッジシステムの基本機能 → **旧Phase11から分離（2026-07-26）→ 大部分実装完了（2026-07-26、二十訂）→ Room owner委譲機能追加（2026-08-04、二十一訂）→ 3クライアント完成（2026-08-04、二十二訂）**
 業種プロファイルに依存しない部分のみ先行実装する。業種プロファイル単位の
 自動付与条件・団体単位でのマスタ書き換えはPhase15（業界ラベリング層）側に
 分離し、Phase2の具体的な需要が見えてから着手する。
 
 - バッジの基本機能（詳細は「5.3 バッジシステム」参照）
   - ✅ **完了（2026-07-26、二十訂）**: アイコン表示、Owner手動付与・剥奪
-    （token-server + admin-dashboard。3クライアントのRoom内owner向けUIは
-    未実装、次アクション item4参照）
-  - ✅ **完了（Webのみ、2026-07-26、二十訂）**: 優先順位に基づく表示、
-    Room内・参加者一覧では最優先1個のみ表示。iOS/Androidは次アクション
-    item3参照
+    （token-server + admin-dashboard）
+  - ✅ **完了（2026-08-04、二十二訂で3クライアント完成）**: 優先順位に
+    基づく表示、Room内・参加者一覧では最優先1個のみ表示。iOS/Androidは
+    実は2026-07-26時点で既に実装済みだったことが判明した(下記「二十二訂
+    追記」参照)
   - ✅ **完了（2026-07-26、二十訂）**: Guestの役割バッジ（Guestである表示）
     付与。`badgeGrants`へ永続化しない仮想バッジとして実装
-  - ✅ **完了（Webのみ、2026-08-04、二十一訂）**: Room内owner向けの
-    付与/剥奪UI、およびバッジ単位の「Room owner委譲」フラグ。詳細は
-    Phase13欄末尾の追記・「6.1」item16参照。iOS/Androidは次アクション
-    item3・4参照
+  - ✅ **完了（2026-08-04、二十一訂→二十二訂で3クライアント完成）**:
+    Room内owner向けの付与/剥奪UI、およびバッジ単位の「Room owner委譲」
+    フラグ。詳細はPhase13欄末尾の追記・「6.1」item16・item17参照
 - バッジマスタは、Phase13時点では団体IDを持たないシンプルな1マスタ構成と
   する。**（2026-07-26 十九訂で訂正）** 従来「Phase11で導入する組織階層の
   うち最上位の団体単位で保持する」としていたが、(1)団体単位でマスタを
@@ -613,9 +612,26 @@ Guestロール追加（Phase10）で顕在化した課題。現状、role別の�
   ✅ **完了（2026-07-26、二十訂）**: `admin-dashboard/src/views/
   BadgesView.vue`として実装
 
-**残作業（次アクションitem3・4参照）**: iOS/Androidのバッジ表示UI、
-iOS/AndroidのRoom内owner向け付与/剥奪UI(token-server側API自体は
-実装済み、Web版は二十一訂で実装済み)。
+**残作業**: なし（バッジ表示・Room内owner向け付与/剥奪UIとも、Web/iOS/Android
+3クライアントすべてで完了。詳細は下記「二十二訂追記」参照）。
+
+**（2026-08-04、二十二訂追記）iOS/Androidバッジ表示UIは実は既に実装済み
+だった（次アクションitem3の記述誤り）**:
+本ドキュメントは二十訂以降、一貫して「iOS/Androidのバッジ表示UIは未実装」
+としてitem3に記載し続けていたが、アップロードされたリポジトリ一式の
+`git log`を確認したところ、`ptt-android/.../badges/PTTBadgesStore.kt`
+（コミット`f8828db`）・`ptt-ios/ptt-ios/PTTBadgeStore.swift`（コミット
+`344d112`）はいずれも**2026-07-27**に実装され、`PTTApp.kt`/`ContentView.swift`
+の参加者一覧に既に配線済みであることが判明した。これは二十訂（2026-07-26）の
+翌日に行われた作業であり、その後の二十一訂（2026-08-04）まで一度も
+本ドキュメントに反映されないまま「未実装」の next action として残り
+続けていた。六訂のiOS README、七訂のtoken-server/README.md録音UI記述と
+同種の「実コード変更のドキュメント未反映」だが、今回は README ではなく
+本ロードマップ・次アクション欄自体がその対象だった点が異なる。iOS/Android
+のバッジ表示は内容を確認した限り、Web版`ParticipantList.vue`と同じ設計
+（`GET /rooms/:roomId/badges`を20秒間隔でポーリングし、最優先1件の
+アイコンを表示）で問題なく実装されていたため、追加の実装作業は不要と
+判断した。次アクションitem3は削除し、「6.1」item17へ完了として記録する。
 
 **（2026-08-04、二十一訂追記）Room owner委譲フラグについて**:
 「5.3」の「付与経路: Owner手動」を、実運用（例: 当日のリーダーアサイン）で
@@ -627,6 +643,28 @@ iOS/AndroidのRoom内owner向け付与/剥奪UI(token-server側API自体は
 想定している。role単位の段階的な委譲（例: moderatorにも一部許可）は導入せず、
 バッジ単位の単純なON/OFFフラグとする方針をユーザーに確認済み。詳細は
 「6.1」item16参照。
+
+**（2026-08-04、二十二訂追記）iOS/AndroidのRoom内owner向け付与/剥奪UIを
+実装した**: 二十一訂でWeb版のみ実装していたRoom内owner向け付与/剥奪UI
+（`grantableBadges`の表示、`POST/DELETE /rooms/:roomId/members/:targetUid/
+badges*`の呼び出し）を、iOS(`PTTBadgeStore.swift`拡張・`ContentView.swift`
+配線)・Android(`PTTBadgesStore.kt`拡張・`PTTApp.kt`配線)双方に同じ設計で
+移植した。token-server側APIはバッジ単位の`grantableByRoomOwner`フラグに
+よる絞り込みも含めて二十一訂時点で両OS分も実装済みだったため、クライアント
+側の実装のみで完了した(ownerでなければサーバーが`grantableBadges: null`を
+返すため、クライアント側でrole判定を重複させていない)。
+
+**（2026-08-04、二十二訂追記）Web版のi18nキー欠落を発見・修正した**:
+上記の実装作業中、Web版(`ParticipantList.vue`)が参照している
+`participants.badgeManageTitle`/`badgeGrant`/`badgeRevoke`/
+`badgeSelectPlaceholder`が、`ja.json`/`en.json`いずれにも定義されていない
+ことに気づいた。二十一訂の記述は「i18nキー(`participants.badge*`)を
+ja/en両方に追加した」としていたが、実際にはキー定義の追加漏れがあり、
+UI上にはローカライズされない生のキー名がそのまま表示される状態だった。
+今回`ja.json`/`en.json`双方に該当キーを追加して修正した。これは実装内容の
+ドキュメント記述と実コードの不一致というより、実装そのものの一部の
+反映漏れだったが、記録のため次アクション欄の棚卸し対象（item5、旧item5）
+に類する事例として付記しておく。
 
 ### Phase 14: Phase2(ビジネスチーム)展開に向けた仕上げ → **旧Phase13を繰り下げ**
 - Firebase App Check導入
@@ -802,7 +840,7 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
 
 ---
 
-## 6. 次アクションの提案（2026-08-04 二十一訂で更新）
+## 6. 次アクションの提案（2026-08-04 二十二訂で更新）
 
 旧版の提案（項目1〜9）は全て完了済みのため「6.1 完了済みアクション
 （アーカイブ）」へ集約した。現行ロードマップ（Phase11〜13の土台整備を
@@ -821,8 +859,15 @@ schema.md`)を作成し完了したため「6.1」item 13へ移動した。十�
 token-server・admin-dashboard・ptt-client(Web)へ実装したため「6.1」
 item 15へ移動した。二十訂で判明した未実装部分のうち、「3クライアント共通の
 Room内owner向け付与/剥奪UI」は二十一訂でWeb版・バッジ単位のRoom owner委譲
-フラグとあわせて実装したため「6.1」item16へ移動した(iOS/Androidは引き続き
-未実装のため、下記item3・4として残す)。
+フラグとあわせて実装したため「6.1」item16へ移動した。
+
+旧item3「iOS/Androidにバッジ表示UIを実装する」は、実際にはコードを直接
+確認したところ2026-07-27時点で既に実装済みであることが判明した（二十訂〜
+二十一訂の間、一度も本ドキュメントに反映されないまま次アクションとして
+残り続けていた記述誤り。詳細はPhase13欄「二十二訂追記」参照）。
+旧item4「iOS/AndroidにRoom内owner向けバッジ付与/剥奪UIを実装する」は
+今回iOS/Android双方に実装し、あわせてWeb版の実装漏れ（i18nキー未定義）も
+発見・修正した。いずれも「6.1」item17へ移動した。
 
 1. **（低優先度・継続）** `UI_UX.md`・`SECURITY.md`・`AI.md`の空テンプレート
    整備：旧6.項目3で洗い出したまま未着手。転記元となる詳細記述が
@@ -835,31 +880,22 @@ Room内owner向け付与/剥奪UI」は二十一訂でWeb版・バッジ単位�
    隠す」事前チェックが無く、各画面はAPIを呼んで403が返ってから
    エラー表示する作りになっている。Room内roleの3クライアントとは
    設計思想が異なるため、揃えるかどうかを検討する（優先度は低い）
-3. **iOS/Androidにバッジ表示UIを実装する**：Web版(`ptt-client`)の
-   `ParticipantList.vue`(topBadgeアイコン表示、`GET /rooms/:roomId/badges`
-   をポーリング)を移植する形で、iOS/Android双方に参加者一覧のバッジ表示を
-   追加する。通報UI・録音UIをWeb版から移植した十訂と同じ進め方。
-   これが完了すると5.4「他参加者のGuest判定手段の欠如」が両OSでも解消される
-4. **iOS/AndroidにRoom内owner向けバッジ付与/剥奪UIを実装する**：
-   Web版は二十一訂で実装済み（`stores/badges.ts`の`grantBadgeTo`/
-   `revokeBadgeFrom`、`ParticipantList.vue`の付与/剥奪UI）。iOS/Androidにも
-   同じ設計（`GET /rooms/:roomId/badges`の`grantableBadges`をownerにのみ
-   表示、`POST/DELETE /rooms/:roomId/members/:targetUid/badges*`を呼ぶ）を
-   移植する。token-server側のRoom内owner専用APIはバッジ単位の
-   `grantableByRoomOwner`フラグによる絞り込み込みで実装済みのため、
-   クライアント側は「サーバーが返した選択肢をそのまま出す」以上の
-   権限判定ロジックを重複実装する必要はない
-5. **（低優先度）admin-dashboard・3クライアントの未反映ドキュメント差分の
-   棚卸し**：二十一訂の実装過程で、二十訂時点の本ドキュメントの記述と
-   実コードの間に、本ドキュメントで把握していなかった差分が複数見つかった
-   （admin-dashboard経由のバッジ付与/剥奪がRoomDetailView.vueから
-   UsersView.vueへ移設・BadgesView.vueのisForbidden判定調整、いずれも
-   2026-07-27/08-02日付のコードコメントから存在が判明。詳細は5.4参照）。
-   iOS README（六訂）と同種の「実コード変更がドキュメント側に反映され
-   ない」パターンの小規模な再発であり、実害は無かったが、他にも同種の
-   未反映差分が無いか一度棚卸しをしておくと安全（優先度は低い。次に
-   iOS/Android側の実装(item3・4)に着手するタイミングで、ついでに
-   Android/iOS側の未反映差分の有無も確認するのが効率的）
+3. **（優先度中・新規）admin-dashboard・3クライアントの未反映ドキュメント
+   差分の棚卸し**：二十一訂の実装過程で見つかった差分（admin-dashboard経由
+   のバッジ付与/剥奪がRoomDetailView.vueからUsersView.vueへ移設等、詳細は
+   5.4参照）に加え、今回（二十二訂）iOS/Androidのバッジ表示UIが2026-07-27
+   時点で既に実装済みだったにもかかわらず本ドキュメントの次アクションに
+   「未実装」のまま残り続けていたことが判明した。iOS README（六訂）・
+   token-server/README.md（七訂）は「READMEが実コードに追随していない」
+   パターンだったが、今回は本ロードマップ・次アクション欄自体が実コードに
+   追随できていなかった点で一段深刻（次にやるべき作業の判断を誤らせる
+   直接原因になるため）。原因は、実装作業（コミット）のたびに本ドキュメント
+   側を都度更新する運用にはなっておらず、大きな区切り（十訂・二十訂等）の
+   タイミングでまとめて反映する運用になっていること自体にあると考えられる。
+   再発防止として、実装作業を行った際は次アクション欄・完了扱いへの移動を
+   同じ改定の中で必ず行うことを徹底する（優先度は中。他にも同種の
+   未反映差分が無いか、次の大きめの実装に着手するタイミングで一度
+   棚卸しをしておくと安全）
 
 ### 6.1 完了済みアクション（アーカイブ）
 
@@ -1158,6 +1194,52 @@ Room内owner向け付与/剥奪UI」は二十一訂でWeb版・バッジ単位�
       移設済み）を踏まえて行ったため実装自体への影響は無かったが、
       記録の正確性の観点から次アクションitem5として棚卸しを提案した
       （詳細は5.4参照）
+    - **成果物の反映状況について**: 本改定の実装はアップロードされた
+      ZIPアーカイブ（`FirebaseRTC.zip`）に対して行ったものであり、
+      `tad-iizuka/FirebaseRTC`リポジトリ本体への実際のコミットは本
+      ドキュメント側では未確認。六訂・八訂で踏んだのと同じ確認プロセス
+      （`git show`等によるリポジトリ反映の直接検証）を次アクションとして
+      残す
+17. ✅ **完了（2026-08-04、二十二訂）**: 旧item3・item4の確認と対応を行った。
+    - **旧item3「iOS/Androidにバッジ表示UIを実装する」は記述誤りだった**:
+      アップロードされたリポジトリ一式の`git log`を確認したところ、
+      `PTTBadgesStore.kt`（コミット`f8828db`）・`PTTBadgeStore.swift`
+      （コミット`344d112`）はいずれも**2026-07-27**に実装され、
+      `PTTApp.kt`/`ContentView.swift`の参加者一覧に既に配線済みだった。
+      二十訂（2026-07-26）の翌日の作業でありながら、その後の二十一訂
+      （2026-08-04）まで一度も本ドキュメントへ反映されないまま「未実装」の
+      次アクションとして残り続けていた。六訂のiOS README・七訂の
+      token-server/README.mdと同種の「実コード変更のドキュメント未反映」
+      だが、今回は本ロードマップ・次アクション欄自体が対象だった点が
+      異なる（次にやるべき作業の判断を誤らせる直接原因になるため、
+      より注意が必要な部類として次アクションitem3に棚卸しを提案した）。
+      実装内容自体はWeb版`ParticipantList.vue`と同じ設計
+      （`GET /rooms/:roomId/badges`を20秒間隔でポーリングし最優先1件の
+      アイコンを表示）で問題なかったため、追加の実装作業は行っていない
+    - **旧item4「iOS/AndroidにRoom内owner向けバッジ付与/剥奪UIを実装する」
+      を実施**: Web版（二十一訂で実装済み）と同じ設計を移植した。
+      iOS: `PTTBadgeStore.swift`に`allBadges`（uid別の付与済みバッジ一覧）・
+      `grantableBadges`（owner向け選択肢、owner以外はnull）・
+      `grantBadge()`/`revokeBadge()`を追加し、`ContentView.swift`の
+      参加者一覧下に付与/剥奪UI（Menuからの選択＋剥奪ボタン）を配線した。
+      Android: `PTTBadgesStore.kt`に同等のStateFlow・関数を追加し、
+      `PTTApp.kt`の`ParticipantsSection`にDropdownMenuベースの
+      `BadgeManageRow`を新設して配線した（`FlowRow`はExperimentalLayoutApi
+      のopt-inが必要なため、ビルドの安定性を優先しColumnでの縦積み表示に
+      とどめた）。`strings.xml`（values/values-en）にも新規文言
+      （`participants_badge_manage_title`等）を追加した。token-server側
+      APIはバッジ単位の`grantableByRoomOwner`フラグによる絞り込みも含めて
+      二十一訂時点で両OS分も実装済みだったため、クライアント側は
+      「サーバーが返した選択肢(`grantableBadges`)をそのまま出す」設計に
+      徹し、role判定を重複実装していない
+    - **副次的に発見・修正したバグ（Web版のi18nキー欠落）**: 上記の作業中、
+      Web版`ParticipantList.vue`が参照している`participants.badgeManageTitle`/
+      `badgeGrant`/`badgeRevoke`/`badgeSelectPlaceholder`が、`ja.json`/
+      `en.json`いずれにも定義されていないことに気づいた。二十一訂の記述は
+      「i18nキーをja/en両方に追加した」としていたが、実際にはキー定義の
+      追加漏れがあり、UI上にはローカライズされない生のキー名がそのまま
+      表示される状態だった。今回`ja.json`/`en.json`双方に該当キーを追加して
+      修正した
     - **成果物の反映状況について**: 本改定の実装はアップロードされた
       ZIPアーカイブ（`FirebaseRTC.zip`）に対して行ったものであり、
       `tad-iizuka/FirebaseRTC`リポジトリ本体への実際のコミットは本

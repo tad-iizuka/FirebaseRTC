@@ -44,6 +44,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.weight
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -189,6 +191,11 @@ fun PTTApp(
     val reportError by reportStore.errorMessage.collectAsState()
     // [Phase13・次アクションitem3] 参加者一覧のバッジ表示(ポーリング)。
     val badgesByUid by badgesStore.byUid.collectAsState()
+    // [2026-08-04・次アクションitem4] Room owner向けバッジ付与/剥奪。ownerでなければ
+    // サーバー側からnullが返るため、role判定をここで重複させない(nullなら出さない)。
+    val grantableBadges by badgesStore.grantableBadges.collectAsState()
+    val badgeGranting by badgesStore.isGranting.collectAsState()
+    val badgeGrantError by badgesStore.grantErrorMessage.collectAsState()
     // [パンくず表示] 組織階層。入室時に1回だけ取得(ポーリングしない)。
     val orgContext by orgContextStore.context_.collectAsState()
     // [送話ロック連携] サーバー(routes/talk.js)がRoom Metadataに書き込むcurrentTalker(uid)。
@@ -372,6 +379,32 @@ fun PTTApp(
                 banStore.banParticipant(tokenServerUrl, idToken, roomId, target.identity)
             } catch (e: Exception) {
                 // banStore.errorMessage に理由がセットされているのでUIには既に反映済み
+            }
+        }
+    }
+
+    // [2026-08-04・次アクションitem4] Room owner向けバッジ付与。BANと異なり誤操作時の
+    // 被害が小さい(取消可能な役割表示にすぎない)ため、確認ダイアログは挟まず即実行する。
+    fun grantBadge(target: ParticipantInfo, badgeId: String) {
+        val roomId = activeRoomId ?: return
+        scope.launch {
+            try {
+                val idToken = authManager.fetchIdToken()
+                badgesStore.grantBadge(tokenServerUrl, idToken, roomId, target.identity, badgeId)
+            } catch (e: Exception) {
+                // badgesStore.grantErrorMessage に理由がセットされているのでUIには既に反映済み
+            }
+        }
+    }
+
+    fun revokeBadge(target: ParticipantInfo, badgeId: String) {
+        val roomId = activeRoomId ?: return
+        scope.launch {
+            try {
+                val idToken = authManager.fetchIdToken()
+                badgesStore.revokeBadge(tokenServerUrl, idToken, roomId, target.identity, badgeId)
+            } catch (e: Exception) {
+                // badgesStore.grantErrorMessage に理由がセットされているのでUIには既に反映済み
             }
         }
     }
@@ -571,6 +604,14 @@ fun PTTApp(
                     reportError = reportError,
                     // [Phase13・次アクションitem3] uid -> 最優先1件のバッジ。
                     topBadges = badgesByUid.mapValues { (_, entry) -> entry.topBadge },
+                    // [2026-08-04・次アクションitem4] Room owner向けバッジ付与/剥奪。
+                    // grantableBadgesがnullの間(=ownerでない、または未取得)は何も出さない。
+                    allBadges = badgesByUid.mapValues { (_, entry) -> entry.badges },
+                    grantableBadges = grantableBadges,
+                    isGrantingBadge = badgeGranting,
+                    badgeGrantError = badgeGrantError,
+                    onGrantBadge = { target, badgeId -> grantBadge(target, badgeId) },
+                    onRevokeBadge = { target, badgeId -> revokeBadge(target, badgeId) },
                 )
                 Spacer(Modifier.height(16.dp))
                 ChatSection(
@@ -1227,6 +1268,18 @@ private fun ParticipantsSection(
     // [Phase13・次アクションitem3] uid -> 最優先1件のバッジ。取得中/未取得のuidは
     // マップに存在しない(Web版ParticipantList.vueのtopBadgesと同じ扱い)。
     topBadges: Map<String, AssignedBadge?>,
+    // [2026-08-04・次アクションitem4] uid -> 現在付与されている全バッジ(剥奪ボタンの
+    // 表示用)。Guestの役割バッジ(source == "guest-role")は剥奪操作の対象外のため、
+    // 呼び出し側でsource == "grant"のもののみ表示に使う(ParticipantList.vueと同じ絞り込み)。
+    allBadges: Map<String, List<AssignedBadge>>,
+    // [2026-08-04・次アクションitem4] Room owner向けの付与できるバッジの選択肢。
+    // ownerでない場合はnullが渡り、その場合は付与/剥奪UI自体を出さない
+    // (サーバー側がowner以外にはnullを返すため、role判定をここで重複させない)。
+    grantableBadges: List<co.ubunifu.pttandroid.model.GrantableBadge>?,
+    isGrantingBadge: Boolean,
+    badgeGrantError: String?,
+    onGrantBadge: (ParticipantInfo, String) -> Unit,
+    onRevokeBadge: (ParticipantInfo, String) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth()) {
         Text(stringResource(R.string.participants_title), fontFamily = Mono, fontSize = 10.sp, color = PTTColors.Muted)
@@ -1299,6 +1352,115 @@ private fun ParticipantsSection(
         reportError?.let {
             Spacer(Modifier.height(6.dp))
             Text(it, fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Danger)
+        }
+
+        // [2026-08-04・次アクションitem4] Room owner向けバッジ付与/剥奪。Web版
+        // ParticipantList.vueの移植。grantableBadgesがnullの間は何も出さない。
+        if (grantableBadges != null && participants.isNotEmpty()) {
+            Spacer(Modifier.height(10.dp))
+            Text(
+                stringResource(R.string.participants_badge_manage_title),
+                fontFamily = Mono, fontSize = 10.sp, color = PTTColors.Muted,
+            )
+            Spacer(Modifier.height(6.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                participants.values.sortedBy { it.name }.forEach { info ->
+                    BadgeManageRow(
+                        info = info,
+                        assignedBadges = allBadges[info.identity].orEmpty().filter { it.source == "grant" },
+                        grantableBadges = grantableBadges,
+                        isGranting = isGrantingBadge,
+                        onGrant = { badgeId -> onGrantBadge(info, badgeId) },
+                        onRevoke = { badgeId -> onRevokeBadge(info, badgeId) },
+                    )
+                }
+            }
+            badgeGrantError?.let {
+                Spacer(Modifier.height(6.dp))
+                Text(it, fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Danger)
+            }
+        }
+    }
+}
+
+/**
+ * [2026-08-04・次アクションitem4] 1参加者分のバッジ付与/剥奪行。
+ * 現在付与済みのバッジは剥奪ボタン付きで表示し、未付与の付与可能バッジは
+ * DropdownMenu(Web版の<select>に相当)から選んで付与できるようにする。
+ */
+@Composable
+private fun BadgeManageRow(
+    info: ParticipantInfo,
+    assignedBadges: List<AssignedBadge>,
+    grantableBadges: List<co.ubunifu.pttandroid.model.GrantableBadge>,
+    isGranting: Boolean,
+    onGrant: (String) -> Unit,
+    onRevoke: (String) -> Unit,
+) {
+    var menuExpanded by remember { mutableStateOf(false) }
+    val owned = remember(assignedBadges) { assignedBadges.map { it.badgeId }.toSet() }
+    val selectable = remember(grantableBadges, owned) { grantableBadges.filter { it.badgeId !in owned } }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            info.name,
+            fontFamily = Mono,
+            fontSize = 10.sp,
+            color = PTTColors.Muted,
+            overflow = TextOverflow.Ellipsis,
+            maxLines = 1,
+            modifier = Modifier.widthIn(min = 64.dp),
+        )
+        // [注記] androidx.compose.foundation.layout.FlowRowはExperimentalLayoutApiの
+        // opt-inが必要なため、依存関係を増やさずビルドの安定性を優先しColumnで
+        // 縦積みにする(Web版のような折り返し表示ではないが、機能的には同等)。
+        Column(
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+            modifier = Modifier.weight(1f).padding(start = 6.dp),
+        ) {
+            assignedBadges.forEach { badge ->
+                Text(
+                    "${badge.icon} ${badge.name} [${stringResource(R.string.participants_badge_revoke)}]",
+                    fontFamily = Mono,
+                    fontSize = 10.sp,
+                    color = PTTColors.Danger,
+                    modifier = Modifier
+                        .pointerInput(badge.badgeId, isGranting) {
+                            if (!isGranting) detectTapGestures(onTap = { onRevoke(badge.badgeId) })
+                        },
+                )
+            }
+            if (selectable.isNotEmpty()) {
+                Box {
+                    Text(
+                        "+ ${stringResource(R.string.participants_badge_grant)}",
+                        fontFamily = Mono,
+                        fontSize = 10.sp,
+                        color = PTTColors.Accent,
+                        modifier = Modifier
+                            .pointerInput(isGranting) {
+                                if (!isGranting) detectTapGestures(onTap = { menuExpanded = true })
+                            },
+                    )
+                    androidx.compose.material3.DropdownMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false },
+                    ) {
+                        selectable.forEach { badge ->
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text("${badge.icon} ${badge.name}", fontFamily = Mono, fontSize = 12.sp) },
+                                onClick = {
+                                    menuExpanded = false
+                                    onGrant(badge.badgeId)
+                                },
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }

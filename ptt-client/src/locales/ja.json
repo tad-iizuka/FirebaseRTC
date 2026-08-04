@@ -123,7 +123,11 @@
     "title": "参加者(緑=送話中)",
     "none": "— なし —",
     "report": "通報",
-    "ban": "BAN"
+    "ban": "BAN",
+    "badgeManageTitle": "バッジの付与/剥奪",
+    "badgeRevoke": "剥奪",
+    "badgeGrant": "付与",
+    "badgeSelectPlaceholder": "バッジを選択"
   },
   "chat": {
     "title": "チャット",

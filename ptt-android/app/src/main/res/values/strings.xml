@@ -127,6 +127,11 @@
     <!-- participants -->
     <string name="participants_title">参加者(緑=送話中)</string>
     <string name="participants_none">— なし —</string>
+    <!-- [2026-08-04・次アクションitem4] Room owner向けバッジ付与/剥奪UI。Web版ParticipantList.vueの移植 -->
+    <string name="participants_badge_manage_title">バッジの付与/剥奪</string>
+    <string name="participants_badge_revoke">剥奪</string>
+    <string name="participants_badge_grant">付与</string>
+    <string name="participants_badge_select_placeholder">バッジを選択</string>
 
     <!-- chat -->
     <string name="chat_title">チャット</string>
@@ -152,6 +157,8 @@
     <string name="errors_connection_failed_generic">接続失敗</string>
     <string name="errors_room_request_failed">リクエストに失敗しました (HTTP %1$d)</string>
     <string name="errors_ban_action_failed">BAN処理に失敗しました (HTTP %1$d)</string>
+    <!-- [2026-08-04・次アクションitem4] バッジ付与/剥奪APIのエラー -->
+    <string name="errors_badge_action_failed">バッジ操作に失敗しました (HTTP %1$d)</string>
     <string name="errors_chat_send_failed">メッセージの送信に失敗しました (HTTP %1$d)</string>
     <string name="errors_chat_attachment_upload_failed">添付ファイルのアップロードに失敗しました</string>
     <string name="errors_chat_attachment_too_large">ファイルサイズは100MB以内にしてください</string>

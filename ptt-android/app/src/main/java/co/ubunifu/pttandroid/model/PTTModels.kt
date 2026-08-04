@@ -84,3 +84,15 @@ data class RoomMemberBadges(
     val badges: List<AssignedBadge>,
     val topBadge: AssignedBadge?,
 )
+
+/**
+ * [2026-08-04・次アクションitem4] Room内owner向け「付与できるバッジ」の選択肢。
+ * Web版(ptt-client/src/types/api.ts の GrantableBadge)と同じフィールド構成。
+ * owner以外にはサーバー側からnullが返る(lib/badges.js listRoomOwnerGrantableBadges参照)。
+ */
+data class GrantableBadge(
+    val badgeId: String,
+    val name: String,
+    val icon: String,
+    val category: String,
+)

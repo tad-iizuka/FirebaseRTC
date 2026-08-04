@@ -72,6 +72,9 @@ struct ContentView: View {
     @State private var currentRoomName: String?
     /// [BAN対応] BANボタン押下時の確認ダイアログの対象。
     @State private var banTarget: PTTParticipantInfo?
+    /// [2026-08-04・次アクションitem4] バッジ付与UIで選択中のバッジ(uid -> badgeId)。
+    /// Web版ParticipantList.vueのselectedBadgeId(<select>のv-model)に相当。
+    @State private var selectedBadgeId: [String: String] = [:]
     /// [BAN対応] 自分がBANされてルームを追い出された直後に表示する通知文言。
     @State private var banNotice: String?
     /// [録音UI] 録音開始ボタン押下時の確認ダイアログ表示フラグ。
@@ -864,8 +867,103 @@ struct ContentView: View {
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(.pttMuted)
             }
+
+            // [2026-08-04・次アクションitem4] Room owner向けバッジ付与/剥奪。
+            // Web版ParticipantList.vueの移植。grantableBadgesがnilの間
+            // (=ownerでない、または未取得)は何も出さない(サーバー側がowner以外には
+            // nullを返すため、role判定をここで重複させない)。
+            badgeManageSection
         }
         .padding(14)
+    }
+
+    @ViewBuilder
+    private var badgeManageSection: some View {
+        if let grantableBadges = badges.grantableBadges, !connection.participants.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("バッジの付与/剥奪")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.pttMuted)
+
+                if let grantError = badges.grantErrorMessage {
+                    Text(grantError)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.pttDanger)
+                }
+
+                ForEach(sortedParticipants) { info in
+                    badgeManageRow(info, grantableBadges: grantableBadges)
+                }
+            }
+            .padding(.top, 6)
+        }
+    }
+
+    /// [2026-08-04・次アクションitem4] 1参加者分のバッジ付与/剥奪行。
+    /// 現在付与済みのバッジ(source == "grant"のみ。Guestの役割バッジは対象外)を
+    /// 剥奪ボタン付きで表示し、未付与のバッジをMenuから選んで付与できるようにする。
+    private func badgeManageRow(_ info: PTTParticipantInfo, grantableBadges: [PTTGrantableBadge]) -> some View {
+        let owned = Set((badges.allBadges[info.uid] ?? []).map(\.badgeId))
+        let selectableBadges = grantableBadges.filter { !owned.contains($0.badgeId) }
+
+        return HStack(spacing: 6) {
+            Text(info.name)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(.pttMuted)
+                .lineLimit(1)
+                .frame(minWidth: 60, alignment: .leading)
+
+            ForEach((badges.allBadges[info.uid] ?? []).filter { $0.source == "grant" }, id: \.badgeId) { badge in
+                Button {
+                    confirmRevokeBadge(info, badgeId: badge.badgeId)
+                } label: {
+                    Text("\(badge.icon) \(badge.name) ✕")
+                        .font(.system(size: 10, design: .monospaced))
+                }
+                .disabled(badges.isGranting)
+            }
+
+            if !selectableBadges.isEmpty {
+                Menu {
+                    ForEach(selectableBadges) { badge in
+                        Button("\(badge.icon) \(badge.name)") {
+                            confirmGrantBadge(info, badgeId: badge.badgeId)
+                        }
+                    }
+                } label: {
+                    Text("付与...")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.pttAccent)
+                }
+                .disabled(badges.isGranting)
+            }
+        }
+    }
+
+    /// バッジ付与ボタン押下時に呼ばれる。BANと異なり誤操作時の被害が小さい
+    /// (取消可能な役割表示にすぎない)ため、確認ダイアログは挟まずMenu選択で即実行する。
+    private func confirmGrantBadge(_ target: PTTParticipantInfo, badgeId: String) {
+        guard let roomId = activeRoomId else { return }
+        Task {
+            do {
+                let idToken = try await auth.fetchIDToken()
+                try await badges.grantBadge(tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId, targetUid: target.uid, badgeId: badgeId)
+            } catch {
+                // badges.grantErrorMessage に理由がセットされているのでUIには既に反映済み
+            }
+        }
+    }
+
+    private func confirmRevokeBadge(_ target: PTTParticipantInfo, badgeId: String) {
+        guard let roomId = activeRoomId else { return }
+        Task {
+            do {
+                let idToken = try await auth.fetchIDToken()
+                try await badges.revokeBadge(tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId, targetUid: target.uid, badgeId: badgeId)
+            } catch {
+                // badges.grantErrorMessage に理由がセットされているのでUIには既に反映済み
+            }
+        }
     }
 
     private var sortedParticipants: [PTTParticipantInfo] {
