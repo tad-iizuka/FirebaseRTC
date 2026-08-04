@@ -62,7 +62,6 @@
     ]
   },
   "roomSelect": {
-    "joinOnlyHint": "ルームの作成は管理者が行います。招待コードを受け取ったら、下記から参加してください。",
     "roomIdLabel": "ルームID",
     "roomIdPlaceholder": "招待された側が入力",
     "inviteCodeLabel": "招待コード",

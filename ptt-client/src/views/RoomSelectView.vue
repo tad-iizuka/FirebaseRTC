@@ -17,6 +17,16 @@ import SavedRoomsList from '@/components/SavedRoomsList.vue'
 // 既存ルームへの参加(招待コードでのjoin)のみを行う画面になっている
 // (brushup-plan.md参照)。これにより、isAnonymous(Guest)によるボタン
 // 出し分けも不要になった。
+//
+// [案内文言の削除・2026-08-05] 上記の移管に伴い追加していた
+// 「ルームの作成は管理者が行います。招待コードを受け取ったら、下記から
+// 参加してください。」という案内文言(roomSelect.joinOnlyHint)は、
+// iOS版ContentView.swift(`a9694c8`、モバイルUI再編)で削除されている
+// ことがユーザーからの指摘・スクリーンショットで判明したため、Web版でも
+// 削除した(画面構成自体で「参加のみ」であることが自明になったための整理と
+// 判断。iOS側コミットのコメントでも本文言がWeb版roomSelect.joinOnlyHintと
+// 同一である旨が明記されていた)。ロケールキー自体(`ja.json`/`en.json`の
+// `roomSelect.joinOnlyHint`)も参照箇所が無くなったため削除した。
 
 const { t } = useI18n()
 const router = useRouter()
@@ -51,8 +61,6 @@ function openSavedRoom(saved: SavedRoom) {
 
 <template>
   <div class="grid gap-3.5 p-3.5">
-    <p class="text-[11px] text-muted-foreground">{{ t('roomSelect.joinOnlyHint') }}</p>
-
     <div class="grid grid-cols-2 gap-2.5">
       <div class="grid gap-1">
         <label class="text-[10px] uppercase tracking-[0.1em] text-muted-foreground">{{

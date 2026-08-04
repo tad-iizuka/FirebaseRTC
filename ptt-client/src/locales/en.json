@@ -62,7 +62,6 @@
     ]
   },
   "roomSelect": {
-    "joinOnlyHint": "Rooms are created by an administrator. Once you receive an invite code, join using it below.",
     "roomIdLabel": "Room ID",
     "roomIdPlaceholder": "Entered by the invited person",
     "inviteCodeLabel": "Invite code",
