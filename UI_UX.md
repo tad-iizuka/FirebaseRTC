@@ -81,6 +81,23 @@ Room Viewは以下の要素で構成される。
   考え方）。開始/停止操作自体は`owner`/`moderator`のみ。Web版のみ
   「自動録音: ON」トグルを追加で持つ（iOS/Androidはスコープ外、
   `brushup-plan.md` 2-E参照）
+- **開始/終了時刻(Room Schedule)による画面出し分け【2026-08-05追加】**：
+  Roomに`schedule.start`/`end`が設定されている場合、通常のRoom View（PTT
+  ボタン・参加者一覧・チャット）に加えて2種の代替画面を持つ。
+  - 開始前(`before_start`)：待機画面のみ表示。入室（membersドキュメント
+    作成）自体はできるが、送話・チャット送受信は不可
+  - 終了後(`after_end`)：チャット閲覧専用画面。新規入室・チャット履歴の
+    閲覧は可能だが、送話・チャット送信は不可
+  - 状態(`scheduleState`)は`POST /rooms/:roomId/join`・
+    `GET /rooms/:roomId/recording/status`のレスポンスに同居しており、
+    待機画面表示中は開始時刻への到達を検知するため短い間隔でポーリングする
+  - 現時点でWeb版(`ptt-client`の`RoomView.vue`)のみに実装済み。
+    iOS/Androidにはこの画面出し分け自体が存在しない（`brushup-plan.md`
+    五十三訂・「6. 次アクションの提案」参照）
+  - `admin-dashboard`側は、ルーム一覧・詳細画面の両方に開始/終了時刻の
+    設定フォーム（`<input type="datetime-local">`）と、現在の状態を示す
+    バッジ（待機中/実施中/終了、`ptt-design-system.md`のバッジ配色に準拠）
+    を持つ
 - **招待コード表示**：Room作成直後のみ、破線ボーダーの専用Box
   （`ptt-design-system.md` 4.7）で表示。以降はRoom作成者側の画面からも
   再確認する手段が無く、必要な場合はadmin-dashboard経由で`rooms:manage`

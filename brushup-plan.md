@@ -1,7 +1,7 @@
 # PTTアプリ ブラッシュアップ計画（改定版）
 
 対象リポジトリ: `tad-iizuka/FirebaseRTC`
-作成日: 2026-07-09 ／ 最終改定: 2026-08-05（五十三訂）
+作成日: 2026-07-09 ／ 最終改定: 2026-08-05（五十四訂）
 
 > **⚠️ 巻き戻り事故について（2026-08-04 発見・記録）**
 >
@@ -35,7 +35,7 @@
 定義するビジョンの要点」以降の本文と「6. 次アクションの提案」を読めば足りる。
 
 <details>
-<summary>改定履歴（初訂〜五十三訂、クリックで展開）</summary>
+<summary>改定履歴（初訂〜五十四訂、クリックで展開）</summary>
 
 改定: 2026-07-24（README.md「Vision」に基づき全面改定）
 再改定: 2026-07-25（Guestロール・バッジシステムの詳細仕様を検討し反映）
@@ -1717,6 +1717,47 @@ breadcrumb「東北警備株式会社 › 仙台支社 › 仙台駅現場」の
 「開始/終了時刻(Room Schedule)」行を追加し、「6. 次アクションの提案」を
 今回判明した内容に基づき刷新する（詳細は該当節参照）。
 
+五十四訂: 2026-08-05（「6. 次アクションの提案」item8「Room Schedule関連の
+残る文書反映」に対応。五十三訂で`API.md`・`DATA_MODEL.md`・`SECURITY.md`の
+3ファイルは更新済みだったが、残る`ARCHITECTURE.md`・`UI_UX.md`・
+`ROADMAP.md`・`phase12-role-operation-inventory.md`の4ファイルへ以下の
+通り反映した。
+
+- **`ARCHITECTURE.md`**（英語）: ERDの`ROOM`エンティティに`schedule`
+  フィールドを追加し、「Primary flows」に新規節
+  「Room schedule (start/end time gate)」を追加。role×操作(`lib/permissions.js`)
+  とAND条件で効く独立した時間軸である点、`firestore.rules`側の防御的な
+  実装（`schedule`未設定の既存Roomでもエラーにならない）、
+  `expireRoom()`による冪等な強制退出処理の2経路（同期変更・sweep）を記述。
+  「Current scope and future work」にもWeb/admin限定・iOS/Android未対応の
+  旨を追記した
+- **`UI_UX.md`**: 「Room」節に新規箇条書き「開始/終了時刻(Room Schedule)に
+  よる画面出し分け」を追加。待機画面(`before_start`)・チャット閲覧専用画面
+  (`after_end`)の2種の代替画面、状態のポーリング取得、Web版のみ実装済みで
+  iOS/Android未対応である旨、admin-dashboard側の設定フォーム・状態バッジを
+  記述
+- **`ROADMAP.md`**: このファイルは元々見出しのみで各Phaseの内容が一切
+  記入されていない空テンプレートだったことを確認した（`brushup-plan.md`の
+  「6. 次アクション」item2で棚卸し対象としていた6ファイルには含まれて
+  いなかったが、実質的には同じ状態）。Room Schedule単体だけを反映しても
+  全体の空白は解消しないため、冒頭に注記を追加し、(a)実際に運用中の
+  ロードマップは`brushup-plan.md`「3. 優先順位付きロードマップ案」であること、
+  (b)このファイルのPhase1〜4区切り（MVP/Security Industry/Business/Consumer）
+  はREADME.mdのTarget Roadmap（Phase1警備業→Phase2ビジネスチーム→
+  Phase3コンシューマー、3段階）と区切り方自体が異なり対応関係の整理が
+  未着手であることを明記した。そのうえで、警備現場のシフト運用に近いと
+  判断し「Phase 2 / Security Industry」にRoom Schedule機能を1件のみ追記した
+- **`phase12-role-operation-inventory.md`**: 「4. 対応表一元化に向けた論点
+  まとめ」に論点9として、schedule状態ゲートは`lib/permissions.js`の
+  role×操作の対応表とは意図的に別モジュール(`lib/roomSchedule.js`)として
+  独立させている設計であり、今後の対応表一元化(論点5〜7)を進める際も
+  この2軸は統合せず独立させたままにするのが妥当、という設計判断を記録した
+
+**この改定で新たに見つかった課題は無し**（既存の次アクション項目
+「iOS/Android移植」「ロードマップ上の位置づけ整理」「Cloud Scheduler実体
+確認」は`ROADMAP.md`への軽微な言及はしたものの実体としては未解消のまま
+残っている）。「6. 次アクションの提案」item8を「6.1」item34へ移動する。
+
 </details>
 
 ---
@@ -2346,7 +2387,7 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
 
 ---
 
-## 6. 次アクションの提案（2026-08-05 五十三訂で更新）
+## 6. 次アクションの提案（2026-08-05 五十四訂で更新）
 
 <details>
 <summary>この一覧のitem番号がどう変遷してきたか（クリックで展開）</summary>
@@ -2535,10 +2576,11 @@ item 6（`isForbidden`系フラグの機械的な棚卸し）に実際に着手�
    ジョブ自体が作成されているかはリポジトリのコードからは確認できない。
    管理者がスケジュールを変更しない限り「終了時刻を過ぎたRoomがsweepされず
    残り続ける」ため、ユーザーへの確認が必要
-8. **（新規）Room Schedule関連の残る文書反映**：`API.md`・`DATA_MODEL.md`・
-   `SECURITY.md`は本改定（五十三訂）で追記済みだが、`ARCHITECTURE.md`・
-   `UI_UX.md`・`ROADMAP.md`・`phase12-role-operation-inventory.md`には
-   まだ反映していない
+
+**（2026-08-05 五十四訂）** 旧item8「Room Schedule関連の残る文書反映」は、
+`ARCHITECTURE.md`・`UI_UX.md`・`ROADMAP.md`・`phase12-role-operation-inventory.md`
+への反映を行い「6.1」item34へ移動した（詳細は文書冒頭「五十四訂」参照）。
+現在有効な次アクションは上記1〜7のみ。
 
 ### 6.1 完了済みアクション（アーカイブ）
 
@@ -2938,5 +2980,16 @@ item 6（`isForbidden`系フラグの機械的な棚卸し）に実際に着手�
     前提に`ParticipantList`・`ChatPanel`を1画面内に縦積み表示する従来の
     レイアウトのままで、この再編の対象外と判断した（モバイル特有の狭い
     画面幅に対応するためのパターンであり、Web版の設計を変える必要はない）
+34. ✅ **完了（2026-08-05、五十四訂）**: Room開始/終了時刻(Schedule)機能を
+    `ARCHITECTURE.md`（ERD・「Primary flows」新規節・scope節への追記）・
+    `UI_UX.md`（「Room」節への待機画面/チャット閲覧専用画面の記述追加）・
+    `ROADMAP.md`（元々空テンプレートだった旨の注記＋「Phase 2 / Security
+    Industry」への1件追記）・`phase12-role-operation-inventory.md`
+    （論点9として、role×操作の対応表とは別モジュールとして独立させる
+    設計判断を記録）へ反映した。五十三訂で追記済みの`API.md`・
+    `DATA_MODEL.md`・`SECURITY.md`と合わせ、この機能に関する文書反映は
+    一通り完了した（iOS/Android移植・ロードマップ上の位置づけ整理・
+    Cloud Scheduler実体確認は引き続き「6. 次アクションの提案」item5〜7
+    として残る）
 
 </details>

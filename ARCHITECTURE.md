@@ -152,6 +152,7 @@ erDiagram
     number maxMembers
     object talkLock
     object recording
+    object schedule
   }
   MEMBER {
     string uid
@@ -237,6 +238,31 @@ LiveKit webhook is the authoritative completion signal: it finalizes recording
 state and writes history after `egress_ended`. This avoids declaring a recording
 finished merely because a stop request was accepted.
 
+### Room schedule (start/end time gate)
+
+*Added 2026-08-05.* A room can optionally carry a `schedule` of `{ start, end }`
+timestamps (either may be `null`, meaning open-ended / joinable immediately).
+`token-server/lib/roomSchedule.js` derives one of three states —
+`before_start`, `in_session`, `after_end` — and this is treated as an axis
+independent from, and ANDed with, room-role permissions
+(`lib/permissions.js`): a member with permission to send a chat message is
+still blocked outside `in_session`. `before_start` allows only joining and a
+waiting screen; `after_end` allows joining and reading chat history but not
+sending or talking. `firestore.rules` enforces the `before_start` chat-read
+restriction independently, defending against stale/legacy rooms that predate
+this field by defaulting to "no restriction" when `schedule` is absent.
+
+Expiry is detected two ways: synchronously when an admin edits the schedule to
+a time already in the past (`PATCH /admin/rooms/:roomId/schedule`), and via a
+periodic sweep (`POST /internal/rooms/sweep-expired`, protected by a shared
+secret, intended to be called by Cloud Scheduler). Both paths call the same
+idempotent `expireRoom()`, which force-disconnects active LiveKit participants
+and marks `schedule.expiredAt`.
+
+This feature is implemented in the web client and admin dashboard only; the
+iOS and Android clients do not yet have any schedule-aware UI (see
+`brushup-plan.md`, 五十三訂).
+
 ## Trust and security boundaries
 
 | Boundary | Enforcement |
@@ -261,8 +287,9 @@ organizations, badges, and users.
 
 The implemented architecture covers authentication, invite-only rooms, PTT
 voice, text chat, image/video/PDF attachments on the web client, moderation,
-recording, organization management, badges, and administration. Native
-attachment UI, AI participants, notifications, location events, reactions, and
+recording, organization management, badges, room scheduling (web/admin only),
+and administration. Native attachment UI parity aside, schedule-aware UI on
+iOS/Android, AI participants, notifications, location events, reactions, and
 broader event types remain future work.
 
 Future extensions should preserve the existing boundary: clients request an
