@@ -73,6 +73,10 @@ jobs:
       # 既にSecret Managerに登録済みのシークレット名(token-server/README.md参照)を
       # 指すだけなので、デプロイ用サービスアカウントにはSecret Manager自体への
       # アクセス権は不要(Cloud Runランタイム側のSAにのみ付与されていればよい)。
+      #
+      # [開始/終了時刻] INTERNAL_SWEEP_SECRET も同じ理由でSecret Manager経由。
+      # 事前に `echo -n "<生成した文字列>" | gcloud secrets create internal-sweep-secret --data-file=-`
+      # 等でシークレットを作成しておく必要がある(.env.example参照)。
       - name: Deploy to Cloud Run
         run: |
           gcloud run deploy ptt-token-server \
@@ -80,7 +84,7 @@ jobs:
             --region asia-northeast1 \
             --project "${{ vars.GCP_PROJECT_ID }}" \
             --allow-unauthenticated \
-            --set-secrets LIVEKIT_API_KEY=livekit-api-key:latest,LIVEKIT_API_SECRET=livekit-api-secret:latest,RECORDING_GCS_CREDENTIALS_JSON=recording-gcs-credentials:latest,ATTACHMENTS_GCS_CREDENTIALS_JSON=attachments-gcs-credentials:latest \
+            --set-secrets LIVEKIT_API_KEY=livekit-api-key:latest,LIVEKIT_API_SECRET=livekit-api-secret:latest,RECORDING_GCS_CREDENTIALS_JSON=recording-gcs-credentials:latest,ATTACHMENTS_GCS_CREDENTIALS_JSON=attachments-gcs-credentials:latest,INTERNAL_SWEEP_SECRET=internal-sweep-secret:latest \
             --set-env-vars "^@^LIVEKIT_HOST=https://ubunifu-talk-wy19xst3.livekit.cloud@FIREBASE_PROJECT_ID=fir-rtc-de1f4@ALLOWED_ORIGINS=https://fir-rtc-de1f4.web.app,https://fir-rtc-de1f4-admin.web.app@RECORDING_GCS_BUCKET=ptt-dev-recording-bucket@ATTACHMENTS_GCS_BUCKET=ptt-dev-attachments-bucket"
 
       - name: デプロイ後ヘルスチェック
