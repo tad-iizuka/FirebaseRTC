@@ -12,6 +12,7 @@ package co.ubunifu.pttandroid.invite
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -94,6 +95,7 @@ fun QrScannerDialog(onDismiss: () -> Unit, onDecoded: (PendingInvite) -> Unit) {
     )
 }
 
+@OptIn(ExperimentalGetImage::class)
 @Composable
 private fun QrCameraPreview(
     lifecycleOwner: androidx.lifecycle.LifecycleOwner,
