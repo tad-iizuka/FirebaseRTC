@@ -33,6 +33,17 @@
 | orgId | string \| null | 所属する団体ID。無所属はnull [Phase11] |
 | nodeId | string \| null | 団体内の所属node ID。無所属はnull [Phase11] |
 | nodeAncestorIds | string[] | 所属nodeの祖先ID。階層フィルター用 [Phase11] |
+| schedule | `{ start, end, expiredAt? }` | Room自体の開始/終了時刻。`start`/`end`はともに`Timestamp \| null`（未設定=無期限・即入室可）。`expiredAt`は`end`経過後の強制退出処理が実行済みであることの印（冪等性の担保。未処理なら未設定）[2026-08-05追加、`lib/roomSchedule.js`] |
+
+**Room Schedule（開始/終了時刻）について【2026-08-05追加】:** `schedule`の値から
+`before_start`（開始前・入室のみ可、送話/チャット送受信不可）／`in_session`
+（通常状態）／`after_end`（終了後・新規入室とチャット閲覧のみ可、送話/チャット
+送信不可）の3状態を`lib/roomSchedule.js#resolveScheduleState()`で判定する
+（詳細はSECURITY.mdの該当節・`token-server/lib/roomSchedule.js`のコメント参照）。
+`end`経過を検知する経路は2つ: (1) 管理者がPATCH `/admin/rooms/:roomId/schedule`
+でスケジュールを変更しその場で過去日時になった場合の同期処理、(2)
+`POST /internal/rooms/sweep-expired`によるCloud Scheduler経由の定期sweep
+（1分間隔を推奨）。いずれも内部的には同じ`expireRoom()`を呼ぶ。
 
 ---
 

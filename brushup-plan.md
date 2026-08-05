@@ -1,7 +1,7 @@
 # PTTアプリ ブラッシュアップ計画（改定版）
 
 対象リポジトリ: `tad-iizuka/FirebaseRTC`
-作成日: 2026-07-09 ／ 最終改定: 2026-08-05（五十二訂）
+作成日: 2026-07-09 ／ 最終改定: 2026-08-05（五十三訂）
 
 > **⚠️ 巻き戻り事故について（2026-08-04 発見・記録）**
 >
@@ -35,7 +35,7 @@
 定義するビジョンの要点」以降の本文と「6. 次アクションの提案」を読めば足りる。
 
 <details>
-<summary>改定履歴（初訂〜三十七訂、クリックで展開）</summary>
+<summary>改定履歴（初訂〜五十三訂、クリックで展開）</summary>
 
 改定: 2026-07-24（README.md「Vision」に基づき全面改定）
 再改定: 2026-07-25（Guestロール・バッジシステムの詳細仕様を検討し反映）
@@ -1608,6 +1608,115 @@ breadcrumb「東北警備株式会社 › 仙台支社 › 仙台駅現場」の
    ユーザー環境への反映有無をこちら側で直接確認する手段が無いため、
    確実な原因特定ではなく推測にとどまる旨をユーザーへ伝える
 
+五十三訂: 2026-08-05（アップロードされたリポジトリ一式（HEAD=`1d8614a`）を
+再取得し、`git log`で五十二訂以降に積まれた未棚卸しのコミット6件
+（`3ac7ba6`・`3b6642e`・`dd62068`・`3003d48`・`2ecf5c2`・`1d8614a`のうち
+`3b6642e`は本ドキュメント自体の編集、`dd62068`は次項参照）を`git show`で
+直接検証した。見つかった内容は大きく3件。
+
+**(1) 五十一訂・五十二訂の修正が実際にリポジトリへ反映されたことを確認**：
+`git show 3ac7ba6`により、`App.vue`/`AppHeader.vue`が五十一訂で記述した
+「`orgContext.orgName`のみを表示し、未設定時は何も表示しない」実装へ
+実際に書き換わっていることを直接確認した。ただし、五十二訂が
+「`roomSelect.joinOnlyHint`キー自体を`ja.json`/`en.json`から削除した」と
+記述していた点は誤りで、実際には**キーは削除されずファイルに残ったまま**
+だった（`RoomSelectView.vue`側のコメントは「削除した」と書いているにも
+関わらず、参照）。今回、残っていた`ja.json`/`en.json`の
+`roomSelect.joinOnlyHint`キーを実際に削除し、記述と実装を一致させた。
+六訂・八訂以来、「ドキュメントが完了と記述した内容が実際にはリポジトリに
+反映されていない」というパターンは繰り返し発生してきたが、今回は逆に
+「一部の変更（コード側のコメントも含め）は反映されているが、変更点の
+一部（ロケールJSONそのもの）だけが取りこぼされていた」という、より
+発見しにくい部分的な反映漏れだった
+
+**(2) iOS「タブ構成の再編」のAndroid移植が完了**：五十訂で棚卸しを持ち越して
+いた`8550395`・`35d6563`・`7df323a`（`ContentView.swift`への大規模な変更、
+コミットメッセージは`update`のみ）の内容を確認したところ、標準`TabView`の
+「Liquid Glass」選択ハイライトの不具合を避けるため、iOS版が独自描画の
+タブバー（talk/chat/people/settingsの4タブ）へ作り直したものだった。
+これに対応する形で`acad35b`・`07f6075`（Android、`PTTApp.kt`
+1000行超の書き換え・`ic_tab_chat`/`ic_tab_mic`/`ic_tab_people`の新規drawable
+追加・文言リソース追加）がAndroid側に同じタブ構成を実装済みであることを
+確認した。Web版(`ptt-client`)は`ParticipantList`・`ChatPanel`を1画面内に
+縦積みする従来からのレイアウトのままで、この再編の対象になっていない。
+これは意図的な差分と判断する（タブ切り替えは主にモバイルの狭い画面幅を
+補うためのパターンであり、`RoomView.vue`はデスクトップ幅を前提に両方を
+同時表示できる設計のままで問題ないため）。以上により、五十訂で追加した
+次アクション「`d463b14`〜`a9694c8`間の未棚卸しiOSコミット3件の内容確認」は
+解消したものとして「6.1」へ移動する
+
+**(3) 未着手の新機能「Room開始/終了時刻（Schedule）」を発見**：
+`dd62068`・`2ecf5c2`・`3003d48`・`1d8614a`の4コミットが、本ドキュメントの
+どの改定にも一度も記載されていない新機能一式を実装していた。README.mdの
+ビジョンとは直接紐づかない、警備現場のシフト運用（「この時間帯だけ
+このRoomを開けておく」）を想定した機能と見られる。
+
+- **サーバー**: `token-server/lib/roomSchedule.js`を新設。
+  `rooms/{roomId}.schedule`(`{ start, end, expiredAt? }`、いずれも
+  `Timestamp | null`)から`before_start`/`in_session`/`after_end`の3状態を
+  判定する`resolveScheduleState()`と、2種のExpressミドルウェア
+  （`requireInSession`・`requireNotBeforeStart`）を提供し、`token.js`
+  （LiveKit接続）・`talk.js`（送話ロック）・`messages.js`（チャット送受信）
+  に組み込み済み。`before_start`は入室と待機画面表示のみ、`after_end`は
+  新規入室とチャット閲覧のみ許可（送話・チャット送信は不可）。role側の
+  チェック（Phase12の`lib/permissions.js`）とは独立したAND条件として働く
+  設計になっている
+- **終了時刻の自然経過**: `PATCH /admin/rooms/:roomId/schedule`
+  （管理者がその場でスケジュールを変更し、結果として既に過去時刻になった
+  場合は同期的に強制退出まで完了させる）と、`POST /internal/rooms/sweep-expired`
+  （`INTERNAL_SWEEP_SECRET`ヘッダーで保護。Cloud Scheduler等からの定期呼び
+  出しを想定、推奨間隔1分）の2経路で検知し、いずれも`expireRoom()`
+  （LiveKitから該当メンバーを強制退出させ`schedule.expiredAt`に処理済みの
+  印を書き込む。冪等）を呼ぶ
+- **`firestore.rules`**: `messages`サブコレクションの読み取りルールに、
+  `schedule.start`未到達なら拒否する条件を追加（`end`側はこのルールでは
+  見ない。閲覧はafter_endでも許可する要件のため）。既存Room
+  （`schedule`フィールド自体を持たない）でもルール評価がエラーに
+  ならないよう`.data.get('schedule', {}).get('start', null)`という
+  デフォルト値付きの参照にしている
+- **`admin-dashboard`**: `RoomsListView.vue`のルーム新規作成フォーム・
+  `RoomDetailView.vue`の詳細画面の双方から開始/終了時刻(`datetime-local`)を
+  設定・変更できる。状態バッジ（待機中/実施中/終了）の表示・
+  `<input type="datetime-local">`⇔ミリ秒変換ロジックは
+  `src/lib/roomSchedule.ts`に共通化されている（`1d8614a`で重複実装を解消）
+- **`ptt-client`**: `RoomView.vue`が`scheduleState`に応じて待機画面
+  （`isWaitingBeforeStart`）・通常画面・チャット閲覧専用画面
+  （`isChatOnlyAfterEnd`）を出し分ける。`room.ts`ストアが
+  `POST /rooms/:roomId/join`・`GET /rooms/:roomId/recording/status`双方の
+  レスポンスから`schedule`/`scheduleState`を保持する（`autoRecording`・
+  ルーム名と同じ「再入室のたびに最新化する」パターンを踏襲）
+- **CI/CD**: `.github/workflows/token-server.yml`の`--set-secrets`に
+  `INTERNAL_SWEEP_SECRET=internal-sweep-secret:latest`を追加済み
+  （Secret Manager経由、他のシークレットと同じ運用）
+
+**未着手・要フォローの点**:
+- **iOS/Android版は完全に未対応**（`grep -ril schedule ptt-ios ptt-android`は
+  無関係な1件（`Timer.scheduledTimer`）のみヒット）。Web→iOS→Androidの
+  ロールアウト順に従うなら次はiOS。特に「開始前は待機画面」「終了後は
+  チャット閲覧専用画面」の2状態のUI実装が必要
+- **本ドキュメントの他章（0〜3節）にこの機能がまったく登場していない**：
+  README.mdのTarget Roadmap（Phase1〜3）のどこに位置づくかも未整理。
+  警備業のシフト運用に直結する機能のため、Phase1(警備業)の文脈で
+  ロードマップへ組み込むかどうかの検討が必要
+- **GCP側のCloud Scheduler実体が実際に作成されているかは未確認**：
+  `.env.example`・`token-server.yml`はSecret Manager登録・Cloud Runへの
+  シークレット受け渡しまでは準備済みだが、Cloud Scheduler側のジョブ
+  自体（`gcloud scheduler jobs create http ...`相当）が実際に作成された
+  かどうかは、リポジトリのコードからは確認できない（ユーザーへの確認事項）
+- **`API.md`・`DATA_MODEL.md`・`SECURITY.md`は本改定で追記済み**（後述）
+  だが、`ARCHITECTURE.md`・`UI_UX.md`・`ROADMAP.md`・
+  `phase12-role-operation-inventory.md`は未反映のまま残っている
+
+**（2026-08-05、五十三訂）ドキュメント更新内容**: 上記(3)を受けて、
+`API.md`（`PATCH /admin/rooms/:roomId/schedule`・
+`POST /internal/rooms/sweep-expired`の追加、`POST /admin/rooms`・
+`GET .../recording/status`のレスポンスにschedule/scheduleStateが
+同居する旨を追記）・`DATA_MODEL.md`（`rooms/{roomId}.schedule`フィールドの
+追加）・`SECURITY.md`（role軸とは独立した時間軸ゲートとして新規節を追加）を
+更新した。あわせて、本文「1. 実コード確認済みの現状」の機能差表に
+「開始/終了時刻(Room Schedule)」行を追加し、「6. 次アクションの提案」を
+今回判明した内容に基づき刷新する（詳細は該当節参照）。
+
 </details>
 
 ---
@@ -1683,6 +1792,7 @@ Message）はコード上どこにも見当たらず、依然として未着手�
 | **業界別ラベリング(UIのみ差し替え)** | ❌ | ❌ | ❌ | 「警備業向け」の文言・概念が全画面にハードコード |
 | **組織階層(Company/Branch/Site)** | ✅ | ✅ | ✅ | Phase11。管理画面で団体・再帰node・Room割当を管理。各ユーザー向けUIのパンくず表示も2026-08-03(四十五訂)で実装完了 |
 | **参加者一覧のバッジ表示** | ✅ | ✅ | ✅ | Phase13。Room APIを20秒間隔でポーリングし最優先1件を表示 |
+| **開始/終了時刻(Room Schedule)** | ✅ | ❌ | ❌ | 2026-08-05、五十三訂で発見。本ドキュメント未記載のまま実装が先行していた新機能。サーバー(`lib/roomSchedule.js`)・`firestore.rules`・`admin-dashboard`・`ptt-client`は実装済み。iOS/Androidは未着手（詳細は五十三訂・「6. 次アクションの提案」参照） |
 
 管理者サイトは`admin-dashboard/`(Vue 3+TS+Pinia)としてルーム一覧/詳細・
 監査ログ・管理者権限・録音履歴DLまで実装済み。閲覧専用だった旧
@@ -2236,7 +2346,7 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
 
 ---
 
-## 6. 次アクションの提案（2026-08-03 四十八訂で更新）
+## 6. 次アクションの提案（2026-08-05 五十三訂で更新）
 
 <details>
 <summary>この一覧のitem番号がどう変遷してきたか（クリックで展開）</summary>
@@ -2353,6 +2463,82 @@ item 6（`isForbidden`系フラグの機械的な棚卸し）に実際に着手�
    実行できず、目視確認のみで完了扱いとしている。ビルドが通ることの確認、
    および実際にリポジトリへコミットされたことの確認（六訂・八訂で踏んだ
    `git show`等による直接検証）がいずれも未実施
+
+**（2026-08-05 五十三訂）** アップロードされたリポジトリ一式
+（HEAD=`1d8614a`）を再取得し、五十二訂以降に積まれた未棚卸しコミットを
+`git show`で直接検証した結果、以下の通り更新する。
+
+- **item4は解消**：`8550395`・`35d6563`・`7df323a`はiOS版が標準`TabView`の
+  不具合を避けるための独自タブバー化（talk/chat/people/settingsの4タブ）
+  だったと判明。対応するAndroid版の移植（`acad35b`・`07f6075`、
+  `PTTApp.kt`の大規模書き換え・タブアイコン追加）が既に完了していることを
+  直接確認した。Web版はデスクトップ幅前提の縦積みレイアウトのままで
+  問題ないと判断し対象外とする。「6.1」item33へ移動する
+- **item5は一部解消**：`git show 3ac7ba6`により、`App.vue`/`AppHeader.vue`の
+  修正が実際にリポジトリへ反映済みであることを直接確認できた。ただし、
+  五十二訂が「削除した」としていた`ja.json`/`en.json`の
+  `roomSelect.joinOnlyHint`キーは実際には削除されておらず残っていた
+  （記述と実装の部分的な不一致）ため、今回改めて削除し一致させた。
+  `npm run build`・`eslint .`によるビルド確認はこの環境では依然として
+  未実施のため、その部分のみ引き続き次アクションとして残す（下記item5に
+  縮小して記録）
+- 加えて、本ドキュメントのどの改定にも記載のなかった新機能
+  「Room開始/終了時刻（Schedule）」（`dd62068`・`2ecf5c2`・`3003d48`・
+  `1d8614a`で実装済み）を発見した。詳細は文書冒頭「五十三訂」・「1. 実コード
+  確認済みの現状」の機能差表を参照。この機能に関する残課題を新規item6〜9
+  として追加する。
+
+現在有効な次アクションは以下の通り（1〜3は四十八訂までと同じ、4は
+「6.1」へ移動、5は範囲を縮小、6〜9が新規）。
+
+1. **Phase14への着手**：Phase9〜13が完了しロードマップ上は次のフェーズ。
+   Firebase App Check導入・プッシュ通知・自動テスト/E2Eテストの拡充の
+   3項目ともまだ手つかず。プッシュ通知は「Phase14基盤待ち」として
+   通知設計側からも参照されており、依存する側の実装が進むにつれて
+   優先度が上がる可能性がある
+2. **文書棚卸し漏れの解消**：`REQUIREMENTS.md`・`DECISIONS.md`・
+   `CHANGELOG.md`・`TESTING.md`・`CONTRIBUTING.md`・`DEPLOYMENT.md`の
+   6ファイルが、七訂の「他ドキュメントの棚卸し」および四十三訂の
+   `UI_UX.md`/`SECURITY.md`/`AI.md`整備のいずれの対象にも含まれておらず、
+   見出しのみの空テンプレートのまま残っている。優先度は低いが、
+   ドキュメント一式の完全性としては棚卸し漏れ
+3. **（優先度高）巻き戻り事故の再発防止策を検討する**：`bf6bfc7`は
+   Room owner向けバッジUIという正規のコード変更と、本ドキュメントの
+   誤った巻き戻りが同一コミットに混在していた。原因（どのような操作で
+   起きたか）は特定できていない。再発防止として、ドキュメント更新用の
+   コミットとコード変更用のコミットを分離する、コミット前に主要
+   ドキュメントの行数やリビジョン番号の急激な減少を機械的に検知する、
+   等の運用改善を検討する
+4. **今回のWeb版修正（App.vue/AppHeader.vue・ロケールキー削除）のビルド確認**：
+   リポジトリへの反映自体は`git show`で確認済み（五十三訂）。
+   `node_modules`未取得・ネットワーク遮断によりこの環境では
+   `vue-tsc -b`・`eslint .`が実行できておらず、目視確認のみで完了扱いに
+   している点が残課題
+5. **（優先度高・新規）Room開始/終了時刻(Schedule)機能のiOS/Android移植**：
+   Web版(`ptt-client`)・`admin-dashboard`のみに実装済みで、iOS/Androidは
+   `schedule`関連のコードが一切存在しない（Guestロール・組織階層・
+   バッジ・添付ファイルで踏襲してきたWeb→iOS→Androidの順に従うなら、
+   次はiOS）。特に「開始前は入室のみ可・送話/チャット不可の待機画面」
+   「終了後は新規入室とチャット閲覧のみ可・送話/チャット送信不可の画面」
+   という、通常のRoom画面とは異なる2状態のUI実装が必要になる
+6. **（新規）Room Scheduleのロードマップ上の位置づけ整理**：README.mdの
+   Target Roadmap（Phase1警備業→Phase2ビジネスチーム→Phase3コンシューマー）
+   のどこに位置づくかが本ドキュメントで一度も検討されていない。警備現場の
+   シフト運用（「この時間帯だけこのRoomを開けておく」）に直結する機能に
+   見えるため、Phase1(警備業)の文脈で扱うのが自然だが、次アクション5
+   （iOS/Android移植）と合わせて「3. 優先順位付きロードマップ案」への
+   組み込み方を検討する
+7. **（新規）GCP側Cloud Schedulerジョブの実在確認**：`.env.example`・
+   `.github/workflows/token-server.yml`はSecret Manager登録・Cloud Runへの
+   `INTERNAL_SWEEP_SECRET`受け渡しまでは準備済みだが、
+   `POST /internal/rooms/sweep-expired`を実際に定期実行するCloud Scheduler
+   ジョブ自体が作成されているかはリポジトリのコードからは確認できない。
+   管理者がスケジュールを変更しない限り「終了時刻を過ぎたRoomがsweepされず
+   残り続ける」ため、ユーザーへの確認が必要
+8. **（新規）Room Schedule関連の残る文書反映**：`API.md`・`DATA_MODEL.md`・
+   `SECURITY.md`は本改定（五十三訂）で追記済みだが、`ARCHITECTURE.md`・
+   `UI_UX.md`・`ROADMAP.md`・`phase12-role-operation-inventory.md`には
+   まだ反映していない
 
 ### 6.1 完了済みアクション（アーカイブ）
 
@@ -2728,5 +2914,29 @@ item 6（`isForbidden`系フラグの機械的な棚卸し）に実際に着手�
     「四十八訂」から「十三訂」相当へ巻き戻していたことが判明し、
     `git show af2f186:brushup-plan.md`により原本を復元した（詳細は文書
     冒頭「巻き戻り事故について」ブロック参照）
+32. ✅ **完了（2026-08-04、五十訂）**: iOS版のヘッダー表示不具合修正
+    （コミット`a9694c8`、モバイルUI再編の一部）をWeb版(`ptt-client`)へ
+    移植した。当初は「breadcrumb最下層ノード名→組織名→ルーム名」の
+    3段フォールバックをそのまま踏襲したが、これはiOS版`header()`が実際に
+    参照する`orgContext.orgName`単体とは異なる誤った移植だった（五十一訂で
+    発覚・訂正）。あわせて五十二訂で、ルーム未参加時の一覧画面から
+    「ルームの作成は管理者が行います…」という案内文言(`roomSelect.joinOnlyHint`)を
+    iOS版に合わせて削除した。五十三訂で`git show 3ac7ba6`により
+    `App.vue`/`AppHeader.vue`の修正がリポジトリへ反映済みであることを
+    確認したが、`joinOnlyHint`ロケールキー自体は削除されず残っていたため、
+    五十三訂で改めて`ja.json`/`en.json`から削除し記述と実装を一致させた
+    （ビルド確認`vue-tsc -b`/`eslint .`は環境上の制約により未実施のまま
+    「6. 次アクションの提案」item4として残る）
+33. ✅ **完了（2026-08-05、五十三訂）**: 五十訂で棚卸しを持ち越していた
+    iOS側3コミット（`8550395`・`35d6563`・`7df323a`）の内容を確認した。
+    標準`TabView`の「Liquid Glass」選択ハイライトの不具合を避けるため、
+    `ContentView.swift`を独自描画のタブバー（talk/chat/people/settingsの
+    4タブ）へ作り直したものだった。対応するAndroid版の移植
+    （`acad35b`・`07f6075`、`PTTApp.kt`の大規模書き換え・
+    `ic_tab_chat`/`ic_tab_mic`/`ic_tab_people`drawable追加）が既に
+    完了していることを直接確認した。Web版(`ptt-client`)はデスクトップ幅を
+    前提に`ParticipantList`・`ChatPanel`を1画面内に縦積み表示する従来の
+    レイアウトのままで、この再編の対象外と判断した（モバイル特有の狭い
+    画面幅に対応するためのパターンであり、Web版の設計を変える必要はない）
 
 </details>

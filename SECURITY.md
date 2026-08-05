@@ -52,6 +52,36 @@ admin-dashboard経由の代行API(`PATCH /admin/rooms/:roomId/members/:targetUid
 の両方から参照している。GuestはFirebase匿名認証由来で本人確認が無いため、
 moderatorへ任命できてしまう抜け道を塞ぐ目的で明示的に禁止している。
 
+### Room開始/終了時刻（`schedule`）による時間軸ゲート【2026-08-05追加】
+
+「room内roleで何ができるか」（上記）とは意図的に別軸として扱う、時間による
+アクセス制御。`token-server/lib/roomSchedule.js`の`resolveScheduleState()`が
+`rooms/{roomId}.schedule`から`before_start`/`in_session`/`after_end`の3状態を
+判定し、`requireInSession`（`token.js`・`talk.js`・`messages.js`の送受信系）・
+`requireNotBeforeStart`（`messages.js`の閲覧系。`after_end`でも閲覧のみは許可
+する要件のため`requireInSession`より緩い）の2種のミドルウェアとして
+`token.js`・`talk.js`・`messages.js`に組み込まれている。role側のチェックと
+AND条件で効く（例: `chat:send`はrole不問だが、`in_session`以外では時間軸側で
+一律拒否される）。
+
+`firestore.rules`側にも同様のゲートを追加している。`messages`サブコレクションの
+`read`ルールに、`rooms/{roomId}.schedule.start`未到達なら拒否する条件を追加した
+（`.data.get('schedule', {}).get('start', null)`という書き方で、本機能追加前に
+作成された既存Room=`schedule`フィールド自体を持たないRoomでもルール評価が
+エラーにならないよう防御している）。`end`側はこのルールでは見ていない
+（`after_end`後もチャット閲覧は許可する要件のため、閲覧の可否はrole側の
+条件のみで決まる。送信の拒否はtoken-server側のAPI(`requireInSession`)のみで
+強制している点に留意）。
+
+終了時刻の自然経過は、管理者による同期的な変更（`PATCH /admin/rooms/:roomId/schedule`）
+に加えて、`POST /internal/rooms/sweep-expired`（`INTERNAL_SWEEP_SECRET`ヘッダーで
+保護、Cloud Scheduler等からの定期呼び出しを想定）でも検知する。いずれも
+`expireRoom()`を通じてLiveKitから該当Roomの参加者を強制退出させたうえで
+`schedule.expiredAt`に処理済みの印を書き込む（冪等性の担保）。
+
+現時点でこの機能はWeb版(`ptt-client`)・`admin-dashboard`のみに実装されており、
+iOS/Android版クライアントは未対応（詳細は`brushup-plan.md`参照）。
+
 ### サイト管理者権限（`adminUsers/{uid}.permissions`）
 
 Room内roleと無関係に、uidごとに付与される権限文字列の配列

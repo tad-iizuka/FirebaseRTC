@@ -27,6 +27,7 @@ Firebase Admin SDK (`admin.auth().verifyIdToken()`) で検証し、得られる 
 | PATCH | `/rooms/:roomId/settings` | 必須(owner/moderatorのみ) | `autoRecording`設定を更新 **[Phase9]** |
 | PATCH | `/rooms/:roomId/nickname` | 必須(本人・メンバーのみ) | 自分の表示名を更新 **[Phase10]** |
 | GET | `/rooms/:roomId/org-context` | 必須(メンバーのみ) | Roomの組織階層コンテキストを取得 **[Phase11]** |
+| PATCH | `/admin/rooms/:roomId/schedule` | 必須(`rooms:manage`) | Roomの開始/終了時刻(`schedule.start`/`end`)を設定・変更 **[2026-08-05追加]** |
 
 **BANについて:** `AccessToken` のTTLは10分。Firestoreの`status`を`banned`に
 書き換えるだけでは既存接続が最大10分残ってしまうため、BAN処理では
@@ -40,6 +41,18 @@ Firebase Admin SDK (`admin.auth().verifyIdToken()`) で検証し、得られる 
 **Guestについて【Phase10】:** Firebase匿名認証で参加したユーザーはサーバー側で
 `guest`ロールとして判定される。Guestも送話・チャット・添付ファイル送受信はできるが、
 BAN・role変更・録音・Room設定などの管理操作は実行できない。
+
+**開始/終了時刻(Room Schedule)について【2026-08-05追加】:** `POST /admin/rooms`
+（ルーム作成）は`schedule: { start, end }`（ミリ秒 or ISO文字列、いずれも省略・
+`null`可）を任意で受け取れる。両方未指定なら従来通り「無期限・即入室可」。
+作成後は`PATCH /admin/rooms/:roomId/schedule`で変更できる。現在の状態
+(`before_start`/`in_session`/`after_end`)は`POST /rooms/:roomId/join`と
+`GET /rooms/:roomId/recording/status`のレスポンスに`schedule`/`scheduleState`
+として同居させている(自動録音設定・ルーム名と同じ理由。再入室のたびに
+最新化する必要があるため)。`before_start`では送話・チャット送受信ともに
+不可(入室と待機画面表示のみ)、`after_end`では新規入室とチャット閲覧のみ可能
+(送話・チャット送信は不可)。iOS/Android版クライアントはこの機能に
+まだ対応していない(Web版のみ実装済み。詳細は`brushup-plan.md`参照)。
 
 ---
 
@@ -86,6 +99,22 @@ GCSへ保存する。開始/停止はowner/moderatorのみ。**録音中であ�
 古いEgressの遅延イベントで新しい録音の状態を誤って消さないよう、
 Firestoreに保存された`egressId`とイベントの`egressId`が一致する場合のみ
 状態を更新する。
+
+---
+
+## Internal【2026-08-05追加】
+
+| Method | Path | 認証 | 説明 |
+|---|---|---|---|
+| POST | `/internal/rooms/sweep-expired` | `X-Internal-Sweep-Secret`ヘッダー(`INTERNAL_SWEEP_SECRET`と一致) | `schedule.end`を過ぎ未処理のRoomを検索し、順に強制退出処理(`expireRoom()`)を実行 |
+
+Firebase Authを使わない(Cloud Scheduler等の定期実行基盤から呼ばれる想定)。
+`INTERNAL_SWEEP_SECRET`は`.env.example`のコメントの通りSecret Manager経由で
+Cloud Runへ渡し、GitHub Actionsのsecrets/variablesには置かない
+(`LIVEKIT_API_SECRET`等と同じ運用)。推奨実行間隔は1分程度で、これは
+「誰も操作しないまま自然に終了時刻を迎えたRoom」を検知するための保険であり、
+管理者が明示的にスケジュールを変更した場合は`PATCH /admin/rooms/:roomId/schedule`
+側で同期的に即時反映される。
 
 ---
 
