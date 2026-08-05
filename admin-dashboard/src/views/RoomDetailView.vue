@@ -8,7 +8,7 @@ import { useAdminOrganizationsStore } from '@/stores/adminOrganizations'
 import { useAdminBadgesStore } from '@/stores/adminBadges'
 import { usePolling } from '@/composables/usePolling'
 import { formatTime } from '@/lib/format'
-import { resolveScheduleState, scheduleStateLabel, scheduleStateBadgeVariant } from '@/lib/roomSchedule'
+import { resolveScheduleState, scheduleStateLabel, scheduleStateBadgeVariant, msToDatetimeLocal, datetimeLocalToMs } from '@/lib/roomSchedule'
 import Button from '@/components/ui/Button.vue'
 import Badge from '@/components/ui/Badge.vue'
 import Input from '@/components/ui/Input.vue'
@@ -200,21 +200,8 @@ async function saveName() {
 }
 
 // --- [開始/終了時刻] admin-dashboardからの設定・変更(rooms:manage権限) ---
-// <input type="datetime-local">はローカルタイムゾーンでの
-// "YYYY-MM-DDTHH:mm"形式を扱うため、ミリ秒との相互変換をここで行う。
-// 空文字は「未設定(null) = 開始時刻なし即入室可 / 終了時刻なし無期限」。
-function msToDatetimeLocal(ms: number | null): string {
-  if (ms === null) return ''
-  const d = new Date(ms)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
-function datetimeLocalToMs(value: string): number | null {
-  if (!value) return null
-  const ms = new Date(value).getTime()
-  return Number.isNaN(ms) ? null : ms
-}
-
+// datetime-local⇔ミリ秒の変換は src/lib/roomSchedule.ts に共通化
+// (RoomsListView.vueの新規作成フォームと同じ関数を使う)。
 const scheduleStartDraft = ref('')
 const scheduleEndDraft = ref('')
 watch(

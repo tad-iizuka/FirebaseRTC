@@ -112,13 +112,18 @@ export const useAdminRoomsStore = defineStore('adminRooms', () => {
   const createRoomErrorMessage = ref<string | null>(null)
   const lastCreatedRoom = ref<AdminCreateRoomResponse | null>(null)
 
-  async function createRoom(baseUrl: string, name: string, maxMembers?: number) {
+  async function createRoom(
+    baseUrl: string,
+    name: string,
+    maxMembers?: number,
+    schedule?: { start: number | null; end: number | null },
+  ) {
     isCreatingRoom.value = true
     createRoomErrorMessage.value = null
     try {
       const room = await authedFetch<AdminCreateRoomResponse>(baseUrl, '/admin/rooms', {
         method: 'POST',
-        body: { name, maxMembers: maxMembers ?? undefined },
+        body: { name, maxMembers: maxMembers ?? undefined, schedule },
       })
       lastCreatedRoom.value = room
       // 一覧の先頭に反映しておくと、作成後すぐに一覧を見ても表示される

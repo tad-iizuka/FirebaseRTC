@@ -5,7 +5,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { useAdminRoomsStore } from '@/stores/adminRooms'
 import { usePolling } from '@/composables/usePolling'
 import { formatTime } from '@/lib/format'
-import { resolveScheduleState, scheduleStateLabel, scheduleStateBadgeVariant } from '@/lib/roomSchedule'
+import { resolveScheduleState, scheduleStateLabel, scheduleStateBadgeVariant, datetimeLocalToMs } from '@/lib/roomSchedule'
 import Button from '@/components/ui/Button.vue'
 import Input from '@/components/ui/Input.vue'
 import Badge from '@/components/ui/Badge.vue'
@@ -69,14 +69,23 @@ function openRoom(roomId: string) {
 // admin-dashboardの事前権限チェック要否は次アクション項目として別途検討中)。
 const newRoomName = ref('')
 const newRoomMaxMembers = ref('')
+// [開始/終了時刻] 空欄のままなら両方null(即入室可・無期限)で作成する。
+// 変換ロジックはRoomDetailView.vueと同じ src/lib/roomSchedule.ts を使う。
+const newRoomScheduleStart = ref('')
+const newRoomScheduleEnd = ref('')
 
 async function handleCreateRoom() {
   if (!newRoomName.value.trim()) return
   try {
     const maxMembers = newRoomMaxMembers.value.trim() ? Number(newRoomMaxMembers.value.trim()) : undefined
-    await rooms.createRoom(settings.tokenServerUrl, newRoomName.value.trim(), maxMembers)
+    await rooms.createRoom(settings.tokenServerUrl, newRoomName.value.trim(), maxMembers, {
+      start: datetimeLocalToMs(newRoomScheduleStart.value),
+      end: datetimeLocalToMs(newRoomScheduleEnd.value),
+    })
     newRoomName.value = ''
     newRoomMaxMembers.value = ''
+    newRoomScheduleStart.value = ''
+    newRoomScheduleEnd.value = ''
   } catch {
     // rooms.createRoomErrorMessage に反映済み
   }
@@ -114,6 +123,26 @@ function dismissCreatedRoom() {
         </p>
         <Input v-model="newRoomName" placeholder="ルーム名(例: 〇〇現場 巡回班)" />
         <Input v-model="newRoomMaxMembers" placeholder="定員(任意, 数値)" />
+        <!-- [開始/終了時刻] 両方空欄のままなら即入室可・無期限で作成される。
+             作成後もRoom詳細画面から変更できる(RoomDetailView.vue参照)。 -->
+        <div class="grid grid-cols-2 gap-2">
+          <label class="grid gap-1 text-[10px] text-muted-foreground">
+            開始時刻(任意)
+            <input
+              v-model="newRoomScheduleStart"
+              type="datetime-local"
+              class="h-8 rounded border border-border bg-white/5 px-2 text-xs text-foreground"
+            />
+          </label>
+          <label class="grid gap-1 text-[10px] text-muted-foreground">
+            終了時刻(任意)
+            <input
+              v-model="newRoomScheduleEnd"
+              type="datetime-local"
+              class="h-8 rounded border border-border bg-white/5 px-2 text-xs text-foreground"
+            />
+          </label>
+        </div>
         <Button size="sm" class="w-auto" :disabled="rooms.isCreatingRoom" @click="handleCreateRoom">
           {{ rooms.isCreatingRoom ? '作成中...' : 'ルームを作成' }}
         </Button>
