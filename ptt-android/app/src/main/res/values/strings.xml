@@ -30,6 +30,23 @@
     <string name="header_sign_out">サインアウト</string>
     <string name="header_app_name">PTT CLIENT</string>
 
+    <!-- [モバイルUI再編・2026-08-04] 通話/参加者/チャット/設定の4タブ構成。
+         iOS版ContentView.swift(customTabBar)・そのtabBarButtonのlabelと同じ文言。 -->
+    <string name="tab_talk">通話</string>
+    <string name="tab_members">参加者</string>
+    <string name="tab_chat">チャット</string>
+    <string name="tab_settings">設定</string>
+    <!-- 参加者/チャットタブを未入室中に開いた場合の空状態表示。iOS版emptyTabPlaceholderの移植。 -->
+    <string name="tab_members_empty">ルームに参加すると参加者一覧が表示されます</string>
+    <string name="tab_chat_empty">ルームに参加するとチャットが利用できます</string>
+    <!-- 設定タブ: プロフィール行(旧ヘッダーのLoginStatusIcon相当)・接続設定行(旧ヘッダーの
+         歯車アイコン相当)。iOS版profileSection・connectionSettingsSectionの移植。 -->
+    <string name="settings_profile_signed_in">ログイン中</string>
+    <string name="settings_profile_signed_in_as_guest">ゲストとしてログイン中</string>
+    <string name="settings_connection_row_label">接続設定(サーバー/LiveKit)</string>
+    <!-- 設定タブ内、入室中のみ表示する録音操作の見出し。iOS版recordingControlsSectionの移植。 -->
+    <string name="recording_controls_title">録音操作</string>
+
     <!-- auth -->
     <string name="auth_token_server_url">トークンサーバーURL</string>
     <string name="auth_livekit_url">LiveKit URL (wss://)</string>

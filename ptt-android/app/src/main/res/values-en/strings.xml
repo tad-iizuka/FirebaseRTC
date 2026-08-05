@@ -19,6 +19,18 @@
     <string name="header_sign_out">Sign out</string>
     <string name="header_app_name">PTT CLIENT</string>
 
+    <!-- [Mobile UI reorg, 2026-08-04] Talk/Members/Chat/Settings 4-tab layout. -->
+    <string name="tab_talk">Talk</string>
+    <string name="tab_members">Members</string>
+    <string name="tab_chat">Chat</string>
+    <string name="tab_settings">Settings</string>
+    <string name="tab_members_empty">Join a room to see the participant list</string>
+    <string name="tab_chat_empty">Join a room to use chat</string>
+    <string name="settings_profile_signed_in">Signed in</string>
+    <string name="settings_profile_signed_in_as_guest">Signed in as guest</string>
+    <string name="settings_connection_row_label">Connection settings (Server/LiveKit)</string>
+    <string name="recording_controls_title">Recording controls</string>
+
     <!-- auth -->
     <string name="auth_token_server_url">Token Server URL</string>
     <string name="auth_livekit_url">LiveKit URL (wss://)</string>

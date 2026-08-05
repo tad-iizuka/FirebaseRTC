@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    [不具合修正・2026-08-05] タブバー(通話タブ)用アイコン。従来は絵文字(🎙️)を
+    使っていたが、Android標準の絵文字フォントはカラー(COLR/CPAL)グリフのため、
+    Text(color=...)で指定した色が反映されず、他のタブアイコンだけ原色のまま
+    浮いて見えてしまう不具合があった。ic_notification_ptt.xmlと同じマイクの
+    シルエットパスを流用し、単色のvector drawableとして自前定義する
+    (material-icons-extendedへの依存を増やさない方針。PTTOnboardingScreen.kt・
+    ic_person.xml・ic_settings_gear.xmlのコメント参照)。塗り色はComposeの
+    Icon(tint=...)側でPTTColors.Accent/Mutedを指定する。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M12,14c1.66,0 3,-1.34 3,-3V5c0,-1.66 -1.34,-3 -3,-3S9,3.34 9,5v6C9,12.66 10.34,14 12,14z" />
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M17,11c0,2.76 -2.24,5 -5,5s-5,-2.24 -5,-5H5c0,3.53 2.61,6.43 6,6.92V21h2v-3.08c3.39,-0.49 6,-3.39 6,-6.92H17z" />
+</vector>

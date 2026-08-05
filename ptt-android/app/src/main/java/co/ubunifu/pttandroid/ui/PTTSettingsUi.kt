@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
@@ -71,6 +72,43 @@ fun SettingsIcon(settingsStore: PTTSettingsStore) {
             tint = PTTColors.Muted,
             modifier = Modifier.size(14.dp),
         )
+    }
+
+    if (open) {
+        SettingsDialog(settingsStore = settingsStore, onDismiss = { open = false })
+    }
+}
+
+/**
+ * [モバイルUI再編・2026-08-04] 設定タブ内の「接続設定(サーバー/LiveKit)」行。
+ * iOS版connectionSettingsSectionの移植。従来はヘッダーの歯車アイコン(SettingsIcon、
+ * 上記)から即シート表示していたが、設定タブ内の通常行としても同じダイアログ
+ * (SettingsDialog)を開けるようにする。ダイアログ自体は変更なく共有する。
+ */
+@Composable
+fun ConnectionSettingsRow(settingsStore: PTTSettingsStore) {
+    var open by remember { mutableStateOf(false) }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable { open = true }
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Icon(
+            painter = painterResource(R.drawable.ic_settings_gear),
+            contentDescription = null,
+            tint = PTTColors.Muted,
+            modifier = Modifier.size(16.dp),
+        )
+        Text(
+            stringResource(R.string.settings_connection_row_label),
+            fontFamily = Mono,
+            fontSize = 12.sp,
+            modifier = Modifier.weight(1f),
+        )
+        Text("\u203A", fontFamily = Mono, fontSize = 14.sp, color = PTTColors.Muted)
     }
 
     if (open) {
