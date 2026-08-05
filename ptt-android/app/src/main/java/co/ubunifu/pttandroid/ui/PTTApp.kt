@@ -102,6 +102,7 @@ import co.ubunifu.pttandroid.ban.PTTBanStore
 import co.ubunifu.pttandroid.ban.PTTRoomPermissions
 import co.ubunifu.pttandroid.chat.PTTChatStore
 import co.ubunifu.pttandroid.connection.PTTConnectionManager
+import co.ubunifu.pttandroid.invite.PendingInvite
 import co.ubunifu.pttandroid.model.AssignedBadge
 import co.ubunifu.pttandroid.model.AttachmentKind
 import co.ubunifu.pttandroid.model.ConnectionStatus
@@ -158,6 +159,8 @@ fun PTTApp(
     orgContextStore: PTTOrgContextStore,
     onboardingStore: PTTOnboardingStore,
     settingsStore: PTTSettingsStore,
+    pendingInvite: PendingInvite? = null,
+    onPendingInviteConsumed: () -> Unit = {},
     onRequestGoogleSignIn: () -> Unit,
 ) {
     // [オンボーディング] 初回起動時はサインイン前でもこの画面を最優先で表示する
@@ -238,6 +241,17 @@ fun PTTApp(
     }
     var joinRoomId by remember { mutableStateOf("") }
     var joinInviteCode by remember { mutableStateOf("") }
+
+    // [招待リンク/QR] MainActivityがApp Link起動時に検出したroom/codeを、
+    // 参加画面の入力欄へ反映するだけの処理(自動参加はしない)。
+    // deeplink-qr-join-plan.md参照。反映後はonPendingInviteConsumed()で
+    // MainActivity側の状態をクリアし、再コンポーズのたびに再適用されないようにする。
+    LaunchedEffect(pendingInvite) {
+        val invite = pendingInvite ?: return@LaunchedEffect
+        joinRoomId = invite.roomId
+        joinInviteCode = invite.inviteCode
+        onPendingInviteConsumed()
+    }
     var chatInput by remember { mutableStateOf("") }
     // [不具合調査・修正] ファイル選択画面から戻るとルーム内ではなくルーム選択画面に
     // 戻ってしまう不具合の原因調査用。activeRoomId/currentInviteCodeはこれまで
@@ -1559,6 +1573,18 @@ private fun RoomSelectionSection(
     onRejoinSaved: (SavedRoom) -> Unit,
     onRemoveSaved: (String) -> Unit,
 ) {
+    var isScannerOpen by remember { mutableStateOf(false) }
+    if (isScannerOpen) {
+        co.ubunifu.pttandroid.invite.QrScannerDialog(
+            onDismiss = { isScannerOpen = false },
+            onDecoded = { invite ->
+                isScannerOpen = false
+                onJoinRoomIdChange(invite.roomId)
+                onJoinInviteCodeChange(invite.inviteCode)
+            },
+        )
+    }
+
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         // [モバイルUI再編・2026-08-04] 「接続先: ...」の控えめテキストはここに置いていたが、
         // 設定タブに「接続設定(サーバー/LiveKit)」行として独立して常設されたため、
@@ -1593,6 +1619,9 @@ private fun RoomSelectionSection(
         }
         OutlinedButton(onClick = onJoinRoom, enabled = !isWorking, modifier = Modifier.fillMaxWidth()) {
             Text(stringResource(R.string.room_select_join_room), fontFamily = Mono)
+        }
+        OutlinedButton(onClick = { isScannerOpen = true }, modifier = Modifier.fillMaxWidth()) {
+            Text("QRコードを読み取る", fontFamily = Mono)
         }
 
         errorMessage?.let { Text(it, color = PTTColors.Danger, fontFamily = Mono, fontSize = 11.sp) }

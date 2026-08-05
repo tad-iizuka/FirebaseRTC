@@ -71,6 +71,13 @@
     "recentRooms": "— 最近使ったルーム —",
     "joinedRoomLabel": "招待コードで参加したルーム"
   },
+  "inviteLink": {
+    "redirecting": "読み込み中...",
+    "scanButton": "QRコードを読み取る",
+    "scanTitle": "招待QRコードを読み取る",
+    "scanHint": "招待QRコードをカメラに映してください。読み取ると入力欄に反映されます（自動では参加しません）。",
+    "cameraPermissionDenied": "カメラを利用できませんでした。ブラウザの設定でカメラへのアクセスを許可してください。"
+  },
   "room": {
     "leaveRoom": "ルームを退出する",
     "pttHint": "ボタンを押している間だけ音声が送信されます",

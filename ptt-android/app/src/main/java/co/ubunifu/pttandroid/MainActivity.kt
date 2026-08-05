@@ -45,6 +45,8 @@ import co.ubunifu.pttandroid.ban.PTTBanStore
 import co.ubunifu.pttandroid.chat.PTTChatStore
 import co.ubunifu.pttandroid.connection.PTTConnectionManager
 import co.ubunifu.pttandroid.connection.PTTForegroundService
+import co.ubunifu.pttandroid.invite.PendingInvite
+import co.ubunifu.pttandroid.invite.parseInviteUri
 import co.ubunifu.pttandroid.onboarding.PTTOnboardingStore
 import co.ubunifu.pttandroid.recording.PTTRecordingStore
 import co.ubunifu.pttandroid.report.PTTReportStore
@@ -79,6 +81,22 @@ class MainActivity : ComponentActivity() {
     private var connectionManagerState = mutableStateOf<PTTConnectionManager?>(null)
     private var foregroundServiceConnection: ServiceConnection? = null
 
+    // [招待リンク] App Link(https://.../r?room=...&code=...)経由で起動/復帰した場合の
+    // 一時保持。PTTApp側がLaunchedEffectで拾って入力欄へ反映したら
+    // consumePendingInvite()でnullに戻す(反映後に再度同じ値が適用され続けないようにするため)。
+    private var pendingInviteState = mutableStateOf<PendingInvite?>(null)
+
+    private fun handleIntent(intent: Intent?) {
+        val invite = parseInviteUri(intent?.data) ?: return
+        Log.d(TAG, "handleIntent: 招待リンクを検出 roomId=${invite.roomId}")
+        pendingInviteState.value = invite
+    }
+
+    /** PTTApp側が入力欄へ反映し終えたタイミングで呼ばれる。 */
+    fun consumePendingInvite() {
+        pendingInviteState.value = null
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -97,6 +115,9 @@ class MainActivity : ComponentActivity() {
             context = applicationContext,
             webClientId = getString(R.string.default_web_client_id),
         )
+
+        // [招待リンク] MAINでの起動(通常起動)・VIEWでの起動(App Link)いずれもここで拾う。
+        handleIntent(intent)
 
         micPermissionGranted.value = ContextCompat.checkSelfPermission(
             this, Manifest.permission.RECORD_AUDIO
@@ -162,6 +183,7 @@ class MainActivity : ComponentActivity() {
                         // [Phase9] PTTForegroundServiceへのbindはほぼ即時だが、
                         // 理論上は最初の1フレームだけnullになりうるため空描画で待つ。
                         if (connectionManager != null) {
+                        val pendingInvite = pendingInviteState.value
                         PTTApp(
                             authManager = authManager,
                             roomManager = roomManager,
@@ -175,6 +197,8 @@ class MainActivity : ComponentActivity() {
                             orgContextStore = orgContextStore,
                             onboardingStore = onboardingStore,
                             settingsStore = settingsStore,
+                            pendingInvite = pendingInvite,
+                            onPendingInviteConsumed = { consumePendingInvite() },
                             onRequestGoogleSignIn = { signInLauncher.launch(authManager.signInIntent()) },
                         )
                         }
@@ -182,6 +206,14 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // [招待リンク] launchMode="singleTask"のため、アプリ起動中に別のApp Linkを
+        // 開いた場合は新規onCreateではなくこちらが呼ばれる。
+        setIntent(intent)
+        handleIntent(intent)
     }
 
     override fun onStart() {

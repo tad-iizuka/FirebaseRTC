@@ -9,6 +9,7 @@ import { resolveScheduleState, scheduleStateLabel, scheduleStateBadgeVariant, da
 import Button from '@/components/ui/Button.vue'
 import Input from '@/components/ui/Input.vue'
 import Badge from '@/components/ui/Badge.vue'
+import InviteLinkQr from '@/components/InviteLinkQr.vue'
 import { cn } from '@/lib/utils'
 
 const route = useRoute()
@@ -160,6 +161,10 @@ function dismissCreatedRoom() {
           >
           <span>招待コード(この画面を離れてもRoom詳細画面から常に再確認できます。参加者に共有してください):</span>
           <span class="text-lg tracking-[0.15em] text-primary">{{ rooms.lastCreatedRoom.inviteCode }}</span>
+          <InviteLinkQr
+            :room-id="rooms.lastCreatedRoom.roomId"
+            :invite-code="rooms.lastCreatedRoom.inviteCode"
+          />
           <div class="flex items-center gap-2">
             <button
               type="button"

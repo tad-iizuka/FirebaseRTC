@@ -9,6 +9,14 @@ const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     {
+      // [招待リンク] admin-dashboardが生成するUniversal/App Linkの着地点。
+      // Room ID/招待コードをsessionStorageへ一時保存して room-select へreplaceするだけの
+      // 経由地点なので、requiresAuthは付けない(未サインイン状態でも即座に到達させる)。
+      path: '/r',
+      name: 'join-redirect',
+      component: () => import('@/views/RedirectJoinView.vue'),
+    },
+    {
       path: '/',
       name: 'room-select',
       component: () => import('@/views/RoomSelectView.vue'),

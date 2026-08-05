@@ -12,6 +12,7 @@ import { resolveScheduleState, scheduleStateLabel, scheduleStateBadgeVariant, ms
 import Button from '@/components/ui/Button.vue'
 import Badge from '@/components/ui/Badge.vue'
 import Input from '@/components/ui/Input.vue'
+import InviteLinkQr from '@/components/InviteLinkQr.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -325,6 +326,12 @@ async function copyInviteCode() {
       <p v-if="rooms.inviteCodeErrorMessage" class="mb-2 text-[11px] text-destructive">
         {{ rooms.inviteCodeErrorMessage }}
       </p>
+
+      <!-- [招待リンク/QR] 招待コードが表示済みの場合のみ、その隣に生成ボタンを出す
+           (権限チェック・監査ログは上のrooms.inviteCode取得側に既に乗っている)。 -->
+      <div v-if="rooms.inviteCode" class="mb-4">
+        <InviteLinkQr :room-id="roomId" :invite-code="rooms.inviteCode" />
+      </div>
 
       <div class="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-muted-foreground">
         <span>owner={{ rooms.detail.ownerUid }}</span>

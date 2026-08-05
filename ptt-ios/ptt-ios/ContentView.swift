@@ -75,6 +75,10 @@ struct ContentView: View {
     @State private var joinRoomId: String = ""
     @State private var joinInviteCode: String = ""
     @State private var chatInputText: String = ""
+    /// [招待リンク/QR] ptt_iosApp.swiftのonOpenURL(Universal Link)経由で受け取った
+    /// room/codeの橋渡し。deeplink-qr-join-plan.md参照。
+    @ObservedObject private var pendingInviteStore = PTTPendingInviteStore.shared
+    @State private var isQrScannerPresented = false
 
     /// [モバイルUI再編・2026-08-04] 入室後に表示中のタブ。
     @State private var selectedTab: RootTab = .talk
@@ -168,6 +172,16 @@ struct ContentView: View {
         .onAppear {
             // [Phase9] 1回だけ実行すればよい(attach内部でも二重呼び出しをガードしている)。
             backgroundControl.attach(to: connection)
+        }
+        .onChange(of: pendingInviteStore.pendingInvite, initial: true) { _, invite in
+            // [招待リンク/QR] onOpenURL(Universal Link)またはQRスキャナーが検出した
+            // room/codeを入力欄へ反映するだけ(自動参加はしない)。initial: trueにより、
+            // サインイン前にリンクを開いていた場合(pendingInviteが既にセット済みの状態で
+            // ContentViewが初めて描画される場合)も取りこぼさない。
+            guard let invite else { return }
+            joinRoomId = invite.roomId
+            joinInviteCode = invite.inviteCode
+            pendingInviteStore.consume()
         }
         .onChange(of: auth.currentUser?.uid, initial: true) { _, newUid in
             savedRooms.load(forUid: newUid)
@@ -661,6 +675,26 @@ struct ContentView: View {
             .buttonStyle(.glassProminent)
             .tint(.pttAccent)
             .disabled(roomManager.isWorking)
+
+            // [招待リンク/QR] アプリ内QRスキャナーの起動ボタン。読み取り結果は
+            // 入力欄への反映のみ(自動参加はしない。deeplink-qr-join-plan.md参照)。
+            Button(action: { isQrScannerPresented = true }) {
+                Text("QRコードを読み取る")
+                    .font(.system(size: 13, design: .monospaced))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+            }
+            .buttonStyle(.glass)
+            .sheet(isPresented: $isQrScannerPresented) {
+                QRScannerView(
+                    onDecoded: { invite in
+                        joinRoomId = invite.roomId
+                        joinInviteCode = invite.inviteCode
+                        isQrScannerPresented = false
+                    },
+                    onCancel: { isQrScannerPresented = false }
+                )
+            }
 
             if let message = roomManager.lastErrorMessage {
                 Text(message)

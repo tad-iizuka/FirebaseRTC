@@ -73,4 +73,12 @@ dependencies {
 
     // 通話中の画面点灯維持等で使うことがあるため保持(未使用なら削除可)
     implementation("androidx.core:core-splashscreen:1.0.1")
+
+    // [招待リンク/QR] アプリ内QRスキャナー用。CameraXでプレビュー取得しML Kitで
+    // デコードする(deeplink-qr-join-plan.md参照)。Web版jsQR/iOS版AVFoundationに相当。
+    implementation("androidx.camera:camera-core:1.3.4")
+    implementation("androidx.camera:camera-camera2:1.3.4")
+    implementation("androidx.camera:camera-lifecycle:1.3.4")
+    implementation("androidx.camera:camera-view:1.3.4")
+    implementation("com.google.mlkit:barcode-scanning:17.3.0")
 }

@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "co.ubunifu.pttandroid",
+      "sha256_cert_fingerprints": [
+        "ED:5C:12:A0:65:87:B8:0C:43:D3:77:54:FA:0E:84:D9:47:75:A9:5F:E5:D2:F4:C7:61:39:CB:C1:B5:6F:CA:7A"
+      ]
+    }
+  }
+]

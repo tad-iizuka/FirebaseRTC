@@ -15,6 +15,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <!-- Android 13+ ではフォアグラウンド通知の表示自体に実行時許可が必要 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- [招待リンク/QR] アプリ内QRスキャナー用。deeplink-qr-join-plan.md参照 -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application
         android:name=".PTTApplication"
@@ -27,10 +30,27 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:configChanges="orientation|screenSize|keyboardHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- [招待リンク] admin-dashboardが生成するApp Linkの受け口。
+                 android:autoVerify="true" によりインストール時にAndroidが
+                 https://fir-rtc-de1f4.web.app/.well-known/assetlinks.json を検証し、
+                 検証が通れば同ドメインのリンクをブラウザを介さず直接このActivityへ渡す。
+                 deeplink-qr-join-plan.md参照。自動参加はしない(MainActivity側で
+                 Room ID/招待コードを入力欄へ反映するだけ)。 -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="fir-rtc-de1f4.web.app"
+                    android:pathPrefix="/r" />
             </intent-filter>
         </activity>
 

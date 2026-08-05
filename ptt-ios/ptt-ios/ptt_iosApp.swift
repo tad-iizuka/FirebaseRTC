@@ -46,10 +46,16 @@ struct ptt_iosApp: App {
         WindowGroup {
             ContentView()
                 .onOpenURL { url in
-                    // Googleサインインのリダイレクトを受け取るために必要。
-                    // Info.plistのCFBundleURLTypesにREVERSED_CLIENT_IDを
-                    // 登録しておかないとリダイレクトが戻ってこない。
-                    GIDSignIn.sharedInstance.handle(url)
+                    // [招待リンク] SwiftUIのonOpenURLはカスタムURLスキーム(Googleサインイン
+                    // のリダイレクト)とUniversal Link(https://.../r?room=...&code=...)の
+                    // 両方をこの1箇所で受け取る。まずGoogleサインインとして処理させ、
+                    // 該当しなければ招待リンクとしてパースを試みる(deeplink-qr-join-plan.md参照)。
+                    if GIDSignIn.sharedInstance.handle(url) {
+                        return
+                    }
+                    if let invite = parseInviteURL(url) {
+                        PTTPendingInviteStore.shared.set(invite)
+                    }
                 }
         }
     }

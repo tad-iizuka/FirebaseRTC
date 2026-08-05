@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/stores/settings'
@@ -9,6 +9,8 @@ import Button from '@/components/ui/Button.vue'
 import Input from '@/components/ui/Input.vue'
 import InviteBox from '@/components/InviteBox.vue'
 import SavedRoomsList from '@/components/SavedRoomsList.vue'
+import QrScannerDialog from '@/components/QrScannerDialog.vue'
+import { consumePendingJoin, type ParsedInvite } from '@/lib/inviteLink'
 
 // [ルーム作成のadmin-dashboard移管]
 // 以前はここに「新しいルームを作成する」ボタン(owner以外はグレーアウト、
@@ -36,6 +38,27 @@ const savedRooms = useSavedRoomsStore()
 
 const joinRoomId = ref('')
 const joinInviteCode = ref('')
+const isScannerOpen = ref(false)
+
+// [招待リンク/QR対応] RedirectJoinView('/r')が一時保存したRoom ID・招待コードを
+// ここで入力欄へ反映するだけで、自動参加はしない(deeplink-qr-join-plan.md参照)。
+// このビューはサインイン後にのみマウントされる(App.vueのAuthView/RouterView分岐)ため、
+// 未サインインでリンクを開いた場合もサインイン完了後にここで拾える。
+onMounted(() => {
+  const pending = consumePendingJoin()
+  if (pending) applyParsedInvite(pending)
+})
+
+function applyParsedInvite(invite: ParsedInvite) {
+  joinRoomId.value = invite.roomId
+  joinInviteCode.value = invite.inviteCode
+  roomStore.clearError()
+}
+
+function handleScanned(invite: ParsedInvite) {
+  isScannerOpen.value = false
+  applyParsedInvite(invite)
+}
 
 async function handleJoinRoom() {
   const roomId = joinRoomId.value.trim()
@@ -75,14 +98,21 @@ function openSavedRoom(saved: SavedRoom) {
         <Input v-model="joinInviteCode" :placeholder="t('roomSelect.inviteCodePlaceholder')" />
       </div>
     </div>
-    <Button variant="secondary" :disabled="roomStore.isWorking" @click="handleJoinRoom">
-      {{ roomStore.isWorking ? t('roomSelect.joining') : t('roomSelect.joinRoom') }}
-    </Button>
+    <div class="grid grid-cols-2 gap-2.5">
+      <Button variant="secondary" :disabled="roomStore.isWorking" @click="handleJoinRoom">
+        {{ roomStore.isWorking ? t('roomSelect.joining') : t('roomSelect.joinRoom') }}
+      </Button>
+      <Button variant="ghost" type="button" @click="isScannerOpen = true">
+        {{ t('inviteLink.scanButton') }}
+      </Button>
+    </div>
 
     <p v-if="roomStore.errorMessage" class="text-[11px] text-destructive">{{ roomStore.errorMessage }}</p>
 
     <InviteBox :invite-code="roomStore.currentInviteCode" :room-id="roomStore.currentRoomId" />
 
     <SavedRoomsList :rooms="savedRooms.rooms" @open="openSavedRoom" @remove="savedRooms.remove" />
+
+    <QrScannerDialog :open="isScannerOpen" @close="isScannerOpen = false" @decoded="handleScanned" />
   </div>
 </template>

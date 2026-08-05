@@ -71,6 +71,13 @@
     "recentRooms": "— Recently used rooms —",
     "joinedRoomLabel": "Room joined with an invite code"
   },
+  "inviteLink": {
+    "redirecting": "Loading...",
+    "scanButton": "Scan QR code",
+    "scanTitle": "Scan invite QR code",
+    "scanHint": "Point your camera at the invite QR code. It only fills in the fields below (it will not join automatically).",
+    "cameraPermissionDenied": "Couldn't access the camera. Please allow camera access in your browser settings."
+  },
   "room": {
     "leaveRoom": "Leave room",
     "pttHint": "Audio is sent only while the button is pressed",
