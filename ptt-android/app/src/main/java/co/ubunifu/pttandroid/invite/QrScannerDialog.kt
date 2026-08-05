@@ -95,7 +95,6 @@ fun QrScannerDialog(onDismiss: () -> Unit, onDecoded: (PendingInvite) -> Unit) {
     )
 }
 
-@OptIn(ExperimentalGetImage::class)
 @Composable
 private fun QrCameraPreview(
     lifecycleOwner: androidx.lifecycle.LifecycleOwner,
@@ -126,27 +125,34 @@ private fun QrCameraPreview(
                 val analysis = ImageAnalysis.Builder()
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .build()
-                analysis.setAnalyzer(ContextCompat.getMainExecutor(ctx)) { imageProxy: ImageProxy ->
-                    if (decoded) {
-                        imageProxy.close()
-                        return@setAnalyzer
-                    }
-                    val mediaImage = imageProxy.image
-                    if (mediaImage == null) {
-                        imageProxy.close()
-                        return@setAnalyzer
-                    }
-                    val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
-                    scanner.process(image)
-                        .addOnSuccessListener { barcodes ->
-                            val value = barcodes.firstOrNull()?.rawValue
-                            if (value != null && !decoded) {
-                                decoded = true
-                                onDecoded(value)
+                analysis.setAnalyzer(
+                    ContextCompat.getMainExecutor(ctx),
+                    object : ImageAnalysis.Analyzer {
+                        @ExperimentalGetImage
+                        override fun analyze(imageProxy: ImageProxy) {
+                            if (decoded) {
+                                imageProxy.close()
+                                return
                             }
+                            val mediaImage = imageProxy.image
+                            if (mediaImage == null) {
+                                imageProxy.close()
+                                return
+                            }
+                            val image =
+                                InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
+                            scanner.process(image)
+                                .addOnSuccessListener { barcodes ->
+                                    val value = barcodes.firstOrNull()?.rawValue
+                                    if (value != null && !decoded) {
+                                        decoded = true
+                                        onDecoded(value)
+                                    }
+                                }
+                                .addOnCompleteListener { imageProxy.close() }
                         }
-                        .addOnCompleteListener { imageProxy.close() }
-                }
+                    },
+                )
                 try {
                     cameraProvider.unbindAll()
                     cameraProvider.bindToLifecycle(
