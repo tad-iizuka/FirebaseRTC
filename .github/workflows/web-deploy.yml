@@ -59,6 +59,7 @@ jobs:
           name: ptt-client-dist
           path: ptt-client/dist
           retention-days: 1
+          include-hidden-files: true
 
   deploy-preview:
     if: github.event_name == 'pull_request'
