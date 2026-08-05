@@ -32,6 +32,9 @@ import android.provider.OpenableColumns
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -836,15 +839,22 @@ fun PTTApp(
  * (material-icons-extendedへの依存を増やさない)で、単色のvector drawable
  * (ic_tab_mic/ic_tab_people/ic_tab_chat、設定タブは既存のic_settings_gearを流用)を
  * 新設し、Icon(tint=...)で明示的に色指定する形へ差し替えた。
+ * [不具合修正・2026-08-05(2)] iOS版は`.glassEffect(..., in: Capsule())`で完全な
+ * カプセル形にしているが、こちらは固定角丸(24dp)のため高さによっては完全な
+ * カプセルにならなかった。`RoundedCornerShape(percent = 50)`(高さに応じて
+ * 動的に丸める指定)に変更し、形状をカプセルに揃えた。半透明+ぼかし
+ * (Liquid Glass)自体は新規ライブラリ(Haze等)の追加が前提になるため、
+ * 今回のスコープには含めていない(ユーザー確認済み、2026-08-05)。
  */
 @Composable
 private fun RootTabBar(selectedTab: RootTab, onSelect: (RootTab) -> Unit) {
+    val capsuleShape = androidx.compose.foundation.shape.RoundedCornerShape(percent = 50)
     Row(
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp, vertical = 8.dp)
-            .background(PTTColors.Panel, shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp))
-            .border(BorderStroke(1.dp, PTTColors.Line), androidx.compose.foundation.shape.RoundedCornerShape(24.dp))
+            .background(PTTColors.Panel, shape = capsuleShape)
+            .border(BorderStroke(1.dp, PTTColors.Line), capsuleShape)
             .padding(6.dp),
     ) {
         TabBarButton(RootTab.TALK, R.drawable.ic_tab_mic, stringResource(R.string.tab_talk), selectedTab, onSelect)
@@ -864,17 +874,19 @@ private fun androidx.compose.foundation.layout.RowScope.TabBarButton(
 ) {
     val isSelected = tab == selectedTab
     val tint = if (isSelected) PTTColors.Accent else PTTColors.Muted
+    // [不具合修正・2026-08-05(2)] iOS版`.animation(.easeOut(duration: 0.15), value: isSelected)`
+    // の移植。従来は選択ハイライト(カプセル背景)の表示/非表示が瞬時に切り替わっていたが、
+    // 透明色からPTTColors.AccentDimへ150msでフェードするアニメーションを追加した。
+    val highlightColor by animateColorAsState(
+        targetValue = if (isSelected) PTTColors.AccentDim.copy(alpha = 0.55f) else Color.Transparent,
+        animationSpec = tween(durationMillis = 150, easing = LinearOutSlowInEasing),
+        label = "tabHighlight",
+    )
     Column(
         Modifier
             .weight(1f)
             .clip(androidx.compose.foundation.shape.CircleShape)
-            .then(
-                if (isSelected) {
-                    Modifier.background(PTTColors.AccentDim.copy(alpha = 0.55f))
-                } else {
-                    Modifier
-                },
-            )
+            .background(highlightColor)
             .clickable { onSelect(tab) }
             .padding(vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
