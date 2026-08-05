@@ -81,4 +81,9 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.3.4")
     implementation("androidx.camera:camera-view:1.3.4")
     implementation("com.google.mlkit:barcode-scanning:17.3.0")
+    // CameraXの`ProcessCameraProvider.getInstance()`はGuavaの`ListenableFuture`を返す。
+    // 他のGoogle系ライブラリ(Firebase等)との依存解決順序によっては、Guavaが
+    // classpath上で解決されず"Cannot access class 'ListenableFuture'"という
+    // コンパイルエラーになることがあるため、明示的にGuava本体を指定して固定する。
+    implementation("com.google.guava:guava:33.3.1-android")
 }
