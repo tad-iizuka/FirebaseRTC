@@ -70,11 +70,19 @@ final class QRScannerViewController: UIViewController, AVCaptureMetadataOutputOb
 
     private let session = AVCaptureSession()
     private var didDetect = false
+    private var previewLayer: AVCaptureVideoPreviewLayer?
 
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
         configureSession()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // CALayer.autoresizingMask はmacOS(AppKit)専用APIでiOSでは使用不可のため、
+        // レイアウト変更のたびにここでフレームを追従させる。
+        previewLayer?.frame = view.layer.bounds
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -109,8 +117,8 @@ final class QRScannerViewController: UIViewController, AVCaptureMetadataOutputOb
         let previewLayer = AVCaptureVideoPreviewLayer(session: session)
         previewLayer.videoGravity = .resizeAspectFill
         previewLayer.frame = view.layer.bounds
-        previewLayer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
         view.layer.addSublayer(previewLayer)
+        self.previewLayer = previewLayer
     }
 
     func metadataOutput(
