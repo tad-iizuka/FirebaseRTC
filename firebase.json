@@ -3,6 +3,7 @@
     {
       "target": "client",
       "public": "ptt-client/dist",
+      "appAssociation": "NONE",
       "ignore": [
         "firebase.json",
         "**/.*",
