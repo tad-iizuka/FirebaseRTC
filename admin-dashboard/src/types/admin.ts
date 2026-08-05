@@ -4,6 +4,11 @@
 // GET /rooms/:roomId/recordings* も扱う。
 // [Phase11] 組織階層(organizations/nodes)関連の型もここに追加している。
 
+export interface RoomSchedule {
+  start: number | null
+  end: number | null
+}
+
 export interface AdminRoomSummary {
   roomId: string
   // [ルーム名] admin-dashboardから設定・変更できるルーム名。未設定はnull。
@@ -21,6 +26,8 @@ export interface AdminRoomSummary {
   talkLock: { uid: string; expiresAt: number } | null
   recording: { active: boolean; startedAt: number | null }
   live: { isLive: boolean; numParticipants: number }
+  // [開始/終了時刻] start/endともにnullなら「即入室可・無期限」。
+  schedule: RoomSchedule
 }
 
 export interface AdminRoomListResponse {
@@ -73,6 +80,8 @@ export interface AdminRoomDetail {
   // [設定] rooms/:roomId/settings/autoRecording (Firestore) を表す。
   // 参加者が集まったら自動的に録音を開始するかどうかのルーム単位フラグ。
   settings: { autoRecording: boolean }
+  // [開始/終了時刻] PATCH /admin/rooms/:roomId/schedule (rooms:manage権限)で変更する。
+  schedule: RoomSchedule
 }
 
 // [ルーム作成のadmin-dashboard移管]
@@ -93,6 +102,7 @@ export interface AdminCreateRoomResponse {
   ownerUid: string
   createdAt: number | null
   maxMembers: number | null
+  schedule: RoomSchedule
 }
 
 // [Phase8] GET /admin/audit-logs

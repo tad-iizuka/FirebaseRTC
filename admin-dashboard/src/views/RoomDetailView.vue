@@ -8,6 +8,7 @@ import { useAdminOrganizationsStore } from '@/stores/adminOrganizations'
 import { useAdminBadgesStore } from '@/stores/adminBadges'
 import { usePolling } from '@/composables/usePolling'
 import { formatTime } from '@/lib/format'
+import { resolveScheduleState, scheduleStateLabel, scheduleStateBadgeVariant } from '@/lib/roomSchedule'
 import Button from '@/components/ui/Button.vue'
 import Badge from '@/components/ui/Badge.vue'
 import Input from '@/components/ui/Input.vue'
@@ -198,6 +199,46 @@ async function saveName() {
   }
 }
 
+// --- [開始/終了時刻] admin-dashboardからの設定・変更(rooms:manage権限) ---
+// <input type="datetime-local">はローカルタイムゾーンでの
+// "YYYY-MM-DDTHH:mm"形式を扱うため、ミリ秒との相互変換をここで行う。
+// 空文字は「未設定(null) = 開始時刻なし即入室可 / 終了時刻なし無期限」。
+function msToDatetimeLocal(ms: number | null): string {
+  if (ms === null) return ''
+  const d = new Date(ms)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+function datetimeLocalToMs(value: string): number | null {
+  if (!value) return null
+  const ms = new Date(value).getTime()
+  return Number.isNaN(ms) ? null : ms
+}
+
+const scheduleStartDraft = ref('')
+const scheduleEndDraft = ref('')
+watch(
+  () => rooms.detail?.roomId,
+  () => {
+    scheduleStartDraft.value = msToDatetimeLocal(rooms.detail?.schedule.start ?? null)
+    scheduleEndDraft.value = msToDatetimeLocal(rooms.detail?.schedule.end ?? null)
+  },
+  { immediate: true },
+)
+
+// [開始/終了時刻] 状態判定・表示ラベルは src/lib/roomSchedule.ts に共通化
+// (RoomsListView.vueと同じロジックを使う)。
+async function saveSchedule() {
+  if (!rooms.detail) return
+  const start = datetimeLocalToMs(scheduleStartDraft.value)
+  const end = datetimeLocalToMs(scheduleEndDraft.value)
+  try {
+    await rooms.updateSchedule(settings.tokenServerUrl, roomId.value, { start, end })
+  } catch {
+    // rooms.scheduleErrorMessage に反映済み
+  }
+}
+
 // --- [招待コードのadmin-dashboard移管] ---
 // 以前はptt-clientの入室後画面(InviteBox.vue)に表示していたが、それは
 // 「入室に使ったコードをその場で覚えている」だけの表示で、以降は誰も
@@ -328,6 +369,41 @@ async function copyInviteCode() {
         </Badge>
         <span v-if="rooms.isUpdatingAutoRecording" class="text-muted-foreground">更新中...</span>
       </div>
+
+      <!-- [開始/終了時刻] rooms:manage権限で設定・変更する(Room内owner向けの経路は用意しない)。
+           空欄=開始時刻なし(即入室可)/終了時刻なし(無期限)。 -->
+      <h3 class="mb-2 text-[12px] font-medium">
+        開始/終了時刻
+        <Badge class="ml-1" :variant="scheduleStateBadgeVariant(resolveScheduleState(rooms.detail.schedule))">
+          {{ scheduleStateLabel(resolveScheduleState(rooms.detail.schedule)) }}
+        </Badge>
+      </h3>
+      <div class="mb-2 flex flex-wrap items-center gap-2 text-xs">
+        <span class="text-muted-foreground">開始</span>
+        <input
+          v-model="scheduleStartDraft"
+          type="datetime-local"
+          class="h-8 rounded border border-border bg-white/5 px-2 text-xs"
+        />
+        <span class="text-muted-foreground">終了</span>
+        <input
+          v-model="scheduleEndDraft"
+          type="datetime-local"
+          class="h-8 rounded border border-border bg-white/5 px-2 text-xs"
+        />
+        <Button size="sm" class="w-auto" :disabled="rooms.isUpdatingSchedule" @click="saveSchedule">
+          {{ rooms.isUpdatingSchedule ? '保存中...' : '保存' }}
+        </Button>
+      </div>
+      <p class="mb-2 text-[11px] text-muted-foreground">
+        両方空欄のままにすると、即入室可・無期限のルームになります。
+        終了時刻を過ぎると新規入室者を含め全員が「チャット閲覧のみ」の状態になり、
+        接続中の参加者は自動的に退出されます。
+      </p>
+      <p v-if="rooms.scheduleErrorMessage" class="mb-6 text-[11px] text-destructive">
+        {{ rooms.scheduleErrorMessage }}
+      </p>
+      <div v-else class="mb-6"></div>
 
       <h3 class="mb-2 text-[12px] font-medium">組織</h3>
       <div class="mb-6">

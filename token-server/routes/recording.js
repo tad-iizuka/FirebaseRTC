@@ -30,6 +30,7 @@ const { syncRoomMetadata } = require('../lib/roomMetadata');
 const { logAdminAction } = require('../lib/auditLog');
 const { requireFirebaseAuth, requireRoomMembership } = require('../middleware/requireAuth');
 const { requireRoomPermission } = require('../lib/permissions');
+const { resolveScheduleState } = require('../lib/roomSchedule');
 const { loadGcsCredentials } = require('../lib/gcsCredentials');
 
 const router = express.Router();
@@ -318,6 +319,13 @@ router.get(
         autoRecording: !!room.settings?.autoRecording,
         // [ルーム名] admin-dashboardで設定された名前。未設定はnull。
         name: room.name ?? null,
+        // [開始/終了時刻] /join を経由しない再入室時にも待機画面/チャット閲覧専用
+        // 画面へ正しく振り分けられるよう、ここにも持たせる(room.ts参照)。
+        schedule: {
+          start: room.schedule?.start?.toMillis?.() ?? null,
+          end: room.schedule?.end?.toMillis?.() ?? null,
+        },
+        scheduleState: resolveScheduleState(room.schedule),
       });
     } catch (e) {
       console.error('[録音状態取得エラー]', e.message);

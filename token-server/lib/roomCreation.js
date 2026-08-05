@@ -19,6 +19,7 @@
 
 const crypto = require('crypto');
 const { db } = require('./firebaseAdmin');
+const { normalizeSchedule } = require('./roomSchedule');
 
 const DEFAULT_MAX_MEMBERS = 20;
 const MAX_ROOM_NAME_LENGTH = 100;
@@ -71,9 +72,17 @@ function resolveMaxMembers(rawMaxMembers) {
  * @param {string} params.ownerDisplayName
  * @param {string | null} [params.name]
  * @param {number} [params.maxMembers]
- * @returns {Promise<{roomId: string, inviteCode: string, name: string|null, maxMembers: number, createdAt: Date}>}
+ * @param {{start?: string|number|null, end?: string|number|null}} [params.schedule]
+ *   未指定(呼び出し側でキー自体を渡さない)なら開始時刻・終了時刻ともに
+ *   無し(即入室可・無期限)として扱う。
+ * @returns {Promise<{error: string} | {roomId: string, inviteCode: string, name: string|null, maxMembers: number, createdAt: Date}>}
  */
-async function createRoomAndOwnerMember({ ownerUid, ownerDisplayName, name, maxMembers }) {
+async function createRoomAndOwnerMember({ ownerUid, ownerDisplayName, name, maxMembers, schedule }) {
+  const scheduleResult = normalizeSchedule(schedule || {});
+  if ('error' in scheduleResult) {
+    return { error: scheduleResult.error };
+  }
+
   const roomRef = db.collection('rooms').doc();
   const inviteCode = generateInviteCode();
   const resolvedName = normalizeRoomName(name);
@@ -86,6 +95,10 @@ async function createRoomAndOwnerMember({ ownerUid, ownerDisplayName, name, maxM
     visibility: 'invite_only',
     inviteCode,
     maxMembers,
+    // [開始/終了時刻] start/endともにnullなら「無期限・即入室可」。
+    // expiredAtはafter_end処理(lib/roomSchedule.js#expireRoom)が
+    // 一度だけ実行されたことの印(冪等性の担保)で、作成時は書かない。
+    schedule: { start: scheduleResult.value.start, end: scheduleResult.value.end },
     // [Phase9] ルームがアクティブになった瞬間(room_startedイベント)に
     // 自動で録音を開始するかどうか。デフォルトはfalse(従来通り手動開始)。
     settings: { autoRecording: false },
@@ -98,7 +111,14 @@ async function createRoomAndOwnerMember({ ownerUid, ownerDisplayName, name, maxM
     joinedAt: createdAt,
   });
 
-  return { roomId: roomRef.id, inviteCode, name: resolvedName, maxMembers, createdAt };
+  return {
+    roomId: roomRef.id,
+    inviteCode,
+    name: resolvedName,
+    maxMembers,
+    createdAt,
+    schedule: scheduleResult.value,
+  };
 }
 
 module.exports = {

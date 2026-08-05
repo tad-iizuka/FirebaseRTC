@@ -49,9 +49,20 @@ async function syncRoomMetadata(roomId) {
       ? { active: true, startedAt: room.recording.startedAt?.toMillis?.() ?? null }
       : { active: false };
 
+    // [開始/終了時刻] 管理者がスケジュールを変更した際、接続中クライアントへ
+    // 即時反映するためここにも載せる(routes/admin.jsのPATCH .../schedule参照)。
+    // 自然経過による終了はここではなくsweep処理(lib/roomSchedule.js#expireRoom)
+    // 側で検知するため、この値はあくまで「現在保存されているschedule設定」を
+    // そのまま伝えるだけで、in_session判定そのものはクライアント側の
+    // ローカル時計と突き合わせて行う想定。
+    const schedule = {
+      start: room.schedule?.start?.toMillis?.() ?? null,
+      end: room.schedule?.end?.toMillis?.() ?? null,
+    };
+
     await roomService.updateRoomMetadata(
       roomId,
-      JSON.stringify({ currentTalker, recording, updatedAt: at })
+      JSON.stringify({ currentTalker, recording, schedule, updatedAt: at })
     );
   } catch (e) {
     console.warn(`[roomMetadata] 同期スキップ room=${roomId}: ${e.message}`);

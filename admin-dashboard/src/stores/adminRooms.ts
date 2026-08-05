@@ -137,6 +137,7 @@ export const useAdminRoomsStore = defineStore('adminRooms', () => {
           talkLock: null,
           recording: { active: false, startedAt: null },
           live: { isLive: false, numParticipants: 0 },
+          schedule: room.schedule,
         },
         ...rooms.value,
       ]
@@ -251,6 +252,44 @@ export const useAdminRoomsStore = defineStore('adminRooms', () => {
     }
   }
 
+  // [開始/終了時刻] PATCH /admin/rooms/:roomId/schedule (rooms:manage権限)。
+  // updateRoomNameと同じ楽観的更新+失敗時ロールバック方針。
+  // start/endはUI側からミリ秒(number)またはnullで渡す想定
+  // (Date型はJSONへ直列化できないため、ここでは扱わない)。
+  const isUpdatingSchedule = ref(false)
+  const scheduleErrorMessage = ref<string | null>(null)
+
+  async function updateSchedule(
+    baseUrl: string,
+    roomId: string,
+    schedule: { start: number | null; end: number | null },
+  ) {
+    if (!detail.value || detail.value.roomId !== roomId) return
+    const before = detail.value.schedule
+    detail.value.schedule = schedule
+    isUpdatingSchedule.value = true
+    scheduleErrorMessage.value = null
+    try {
+      const result = await authedFetch<{ roomId: string; schedule: { start: number | null; end: number | null } }>(
+        baseUrl,
+        `/admin/rooms/${encodeURIComponent(roomId)}/schedule`,
+        { method: 'PATCH', body: schedule },
+      )
+      if (detail.value && detail.value.roomId === roomId) {
+        detail.value.schedule = result.schedule
+      }
+      rooms.value = rooms.value.map((r) => (r.roomId === roomId ? { ...r, schedule: result.schedule } : r))
+    } catch (e) {
+      if (detail.value && detail.value.roomId === roomId) {
+        detail.value.schedule = before
+      }
+      scheduleErrorMessage.value = (e as Error).message
+      throw e
+    } finally {
+      isUpdatingSchedule.value = false
+    }
+  }
+
   // --- [招待コードのadmin-dashboard移管] ---
   // GET /admin/rooms/:roomId/invite-code(rooms:manage権限)。招待コードの
   // 閲覧は監査ログに記録されるため(token-server/routes/admin.js参照)、
@@ -308,6 +347,9 @@ export const useAdminRoomsStore = defineStore('adminRooms', () => {
     lastCreatedRoom,
     isUpdatingName,
     nameErrorMessage,
+    isUpdatingSchedule,
+    scheduleErrorMessage,
+    updateSchedule,
     inviteCode,
     isRevealingInviteCode,
     inviteCodeErrorMessage,

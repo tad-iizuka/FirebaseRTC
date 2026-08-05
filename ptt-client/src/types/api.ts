@@ -75,6 +75,13 @@ export interface RecordingStopResponse {
   stopped?: true
 }
 
+export type ScheduleState = 'before_start' | 'in_session' | 'after_end'
+
+export interface RoomSchedule {
+  start: number | null
+  end: number | null
+}
+
 export interface RecordingStatusResponse {
   active: boolean
   startedAt: number | null
@@ -82,6 +89,10 @@ export interface RecordingStatusResponse {
   // [ルーム名] /join を経由しない再入室時にもルーム名を最新化できるよう、
   // このエンドポイントにも同居させている(autoRecordingと同じ理由。room.ts参照)。
   name: string | null
+  // [開始/終了時刻] 同じ理由で、再入室のたびに待機画面/通常画面/
+  // チャット閲覧専用画面のどれを出すか判定し直せるようにしている。
+  schedule: RoomSchedule
+  scheduleState: ScheduleState
 }
 
 export interface RoomSettingsResponse {

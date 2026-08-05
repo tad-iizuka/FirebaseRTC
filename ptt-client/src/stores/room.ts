@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { authedFetch } from '@/lib/api'
-import type { RecordingStatusResponse, RoomSettingsResponse } from '@/types/api'
+import type { RecordingStatusResponse, RoomSettingsResponse, RoomSchedule, ScheduleState } from '@/types/api'
 
 // [招待制ルーム対応]
 // token-server は「ルームIDを知っていれば誰でも入れる」設計ではなく、
@@ -37,6 +37,13 @@ export const useRoomStore = defineStore('room', () => {
   const autoRecordingLoading = ref(false)
   const autoRecordingErrorMessage = ref<string | null>(null)
 
+  // [開始/終了時刻]
+  // scheduleState: 'before_start'(待機画面) / 'in_session'(通常のRoom画面) /
+  // 'after_end'(チャット閲覧専用画面)。null = まだ取得できていない(入室直後の一瞬)。
+  // RoomView.vue はこの値を見て3画面を出し分ける(WaitingRoomView.vue等)。
+  const schedule = ref<RoomSchedule | null>(null)
+  const scheduleState = ref<ScheduleState | null>(null)
+
   function clearError() {
     errorMessage.value = null
   }
@@ -50,6 +57,8 @@ export const useRoomStore = defineStore('room', () => {
         joined: true
         autoRecording: boolean
         name: string | null
+        schedule: RoomSchedule
+        scheduleState: ScheduleState
       }>(baseUrl, `/rooms/${encodeURIComponent(roomId)}/join`, {
         method: 'POST',
         body: { inviteCode },
@@ -59,6 +68,8 @@ export const useRoomStore = defineStore('room', () => {
       currentInviteCode.value = inviteCode
       autoRecording.value = data.autoRecording
       currentRoomName.value = data.name
+      schedule.value = data.schedule
+      scheduleState.value = data.scheduleState
     } catch (e) {
       errorMessage.value = (e as Error).message
       throw e
@@ -75,12 +86,19 @@ export const useRoomStore = defineStore('room', () => {
     // fetchAutoRecording() を呼んで最新値を取り直す想定(RoomView#enter参照)。
     autoRecording.value = null
     currentRoomName.value = null
+    schedule.value = null
+    scheduleState.value = null
   }
 
   /**
-   * 現在の autoRecording 設定値・ルーム名をサーバーから取得し直す。
-   * /join を経由しない再入室時や、他のowner/moderatorやadmin-dashboardが
-   * 設定を変更した可能性がある場合の最新化に使う(GET /recording/status に相乗り)。
+   * 現在の autoRecording 設定値・ルーム名・開始/終了時刻の状態をサーバーから
+   * 取得し直す。/join を経由しない再入室時や、他のowner/moderatorや
+   * admin-dashboardが設定を変更した可能性がある場合の最新化に使う
+   * (GET /recording/status に相乗り)。
+   *
+   * [開始/終了時刻] 待機画面(before_start)表示中は、開始時刻に達したかどうかを
+   * 検知するためにこの関数を短い間隔で呼び直すポーリング用途にも使う
+   * (RoomView.vue参照)。
    */
   async function fetchAutoRecording(baseUrl: string, roomId: string) {
     autoRecordingLoading.value = true
@@ -91,6 +109,8 @@ export const useRoomStore = defineStore('room', () => {
       )
       autoRecording.value = data.autoRecording
       currentRoomName.value = data.name
+      schedule.value = data.schedule
+      scheduleState.value = data.scheduleState
     } catch (e) {
       // 取得失敗してもPTT自体の利用は継続できるため、エラーはログ用途に留める
       autoRecordingErrorMessage.value = (e as Error).message
@@ -127,6 +147,8 @@ export const useRoomStore = defineStore('room', () => {
     currentRoomName.value = null
     autoRecording.value = null
     autoRecordingErrorMessage.value = null
+    schedule.value = null
+    scheduleState.value = null
   }
 
   return {
@@ -138,6 +160,8 @@ export const useRoomStore = defineStore('room', () => {
     autoRecording,
     autoRecordingLoading,
     autoRecordingErrorMessage,
+    schedule,
+    scheduleState,
     clearError,
     joinRoom,
     reenter,

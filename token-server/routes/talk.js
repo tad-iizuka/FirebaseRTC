@@ -39,6 +39,7 @@ const { db } = require('../lib/firebaseAdmin');
 const { syncRoomMetadata } = require('../lib/roomMetadata');
 const { requireFirebaseAuth, requireRoomMembership } = require('../middleware/requireAuth');
 const { requireRoomPermission } = require('../lib/permissions');
+const { requireInSession } = require('../lib/roomSchedule');
 
 const router = express.Router();
 
@@ -70,6 +71,7 @@ router.post(
   '/:roomId/talk/start',
   requireFirebaseAuth,
   requireRoomMembership,
+  requireInSession, // [開始/終了時刻] in_session以外では送話ロックの取得/延長/解放を拒否
   requireRoomPermission('talk:control'),
   async (req, res) => {
   const uid = req.firebaseUser.uid;
@@ -127,6 +129,7 @@ router.post(
   '/:roomId/talk/heartbeat',
   requireFirebaseAuth,
   requireRoomMembership,
+  requireInSession, // [開始/終了時刻] in_session以外では送話ロックの取得/延長/解放を拒否
   requireRoomPermission('talk:control'),
   async (req, res) => {
   const uid = req.firebaseUser.uid;
@@ -174,6 +177,7 @@ router.post(
   '/:roomId/talk/stop',
   requireFirebaseAuth,
   requireRoomMembership,
+  requireInSession, // [開始/終了時刻] in_session以外では送話ロックの取得/延長/解放を拒否
   requireRoomPermission('talk:control'),
   async (req, res) => {
   const uid = req.firebaseUser.uid;

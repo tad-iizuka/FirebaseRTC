@@ -16,6 +16,7 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 const { AccessToken } = require('livekit-server-sdk');
 const { requireFirebaseAuth, requireRoomMembership } = require('../middleware/requireAuth');
+const { requireInSession } = require('../lib/roomSchedule');
 
 const router = express.Router();
 
@@ -63,6 +64,10 @@ router.get(
     next();
   },
   requireRoomMembership,
+  // [開始/終了時刻] in_session以外(開始前/終了後)ではLiveKitトークンそのものを
+  // 発行しない。接続自体をさせないことで、終了後は「チャット閲覧のみ」を
+  // 音声レイヤーで確実に担保する(lib/roomSchedule.js参照)。
+  requireInSession,
   async (req, res) => {
     const room = req.params.roomId;
     const uid = req.firebaseUser.uid;

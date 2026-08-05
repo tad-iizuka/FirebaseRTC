@@ -15,6 +15,10 @@
  *      Roomへの割り当て・Roomからの参照 (routes/organizations.js) [Phase 11で追加]
  *  10. バッジ基本機能: マスタ管理(/admin配下)・Room内での付与/剥奪/閲覧
  *      (routes/badges.js, routes/roomBadges.js) [Phase 13で追加]
+ *  11. 開始/終了時刻: 待機/実施中/終了後の状態判定・アクセス制御は
+ *      lib/roomSchedule.js に集約。終了時刻の自然経過による強制退出は
+ *      Cloud Scheduler等から定期的に叩かれる内部エンドポイント
+ *      (routes/internal.js)が担う
  *
  * [経緯]
  * 旧 ptt-server/server.js (WS制御 + Opusミキシング) はLiveKitサーバー本体に
@@ -43,6 +47,7 @@ const organizationsRouter = require('./routes/organizations'); // [Phase11] GET 
 const badgesRouter = require('./routes/badges'); // [Phase13] /admin/badges*, /admin/config/badge-display, /admin/rooms/:roomId/badges*
 const roomBadgesRouter = require('./routes/roomBadges'); // [Phase13] GET/POST/DELETE /rooms/:roomId/(members/:uid/)badges*
 const usersRouter = require('./routes/users'); // [2026-07-27] /admin/users*, /admin/users/:uid/badges* (ユーザー管理画面)
+const internalRouter = require('./routes/internal'); // [開始/終了時刻] POST /internal/rooms/sweep-expired (Cloud Scheduler専用)
 
 const PORT = process.env.PORT || 8080;
 
@@ -108,6 +113,7 @@ app.use('/admin', adminRouter); // GET /admin/rooms, GET /admin/rooms/:roomId [P
 app.use('/admin', organizationsRouter); // [Phase11] /admin/organizations*, PATCH /admin/rooms/:roomId/org-assignment
 app.use('/admin', badgesRouter); // [Phase13] /admin/badges*, /admin/config/badge-display, /admin/rooms/:roomId/badges*
 app.use('/admin', usersRouter); // [2026-07-27] /admin/users*, /admin/users/:uid/badges*
+app.use('/internal', internalRouter); // [開始/終了時刻] POST /internal/rooms/sweep-expired (Cloud Scheduler専用、requireInternalSecretで保護)
 
 app.listen(PORT, () => {
   console.log(`ptt-token-server listening on :${PORT}`);

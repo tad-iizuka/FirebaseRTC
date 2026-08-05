@@ -62,6 +62,7 @@
     ]
   },
   "roomSelect": {
+    "joinOnlyHint": "ルームの作成は管理者が行います。招待コードを受け取ったら、下記から参加してください。",
     "roomIdLabel": "ルームID",
     "roomIdPlaceholder": "招待された側が入力",
     "inviteCodeLabel": "招待コード",
@@ -75,6 +76,10 @@
     "leaveRoom": "ルームを退出する",
     "pttHint": "ボタンを押している間だけ音声が送信されます",
     "banNotice": "このルームから排除されました",
+    "waitingTitle": "まもなく開始します",
+    "waitingBodyWithTime": "開始予定時刻: {time}",
+    "waitingBodyNoTime": "開始時刻が未定です。しばらくお待ちください",
+    "afterEndNotice": "このルームは終了時刻を過ぎています。チャットの閲覧のみ可能です",
     "banConfirmTitle": "BANしますか?",
     "banConfirmDescription": "{name} をこのルームからBANしますか?\nこの操作は取り消せません。",
     "banConfirmLabel": "BANする",
@@ -138,7 +143,8 @@
     "attachmentSend": "送信",
     "attachmentCancel": "キャンセル",
     "attachmentOpen": "添付ファイルを開く",
-    "attachmentLoading": "読み込み中..."
+    "attachmentLoading": "読み込み中...",
+    "readOnlyNotice": "このルームは終了時刻を過ぎているため、チャットの閲覧のみ可能です"
   },
   "errors": {
     "notSignedIn": "サインインしていません",

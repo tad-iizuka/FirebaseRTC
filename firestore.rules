@@ -50,6 +50,13 @@ service cloud.firestore {
         // BANされてstatusが'banned'に変わった瞬間、この条件が false になり
         // 読み取り権限も自動的に失う(LiveKit即時キックと同様、二重の強制力を持たせる設計)。
         //
+        // [開始/終了時刻] 開始時刻前(before_start)はチャットも閲覧不可という
+        // 要件のため、rooms/{roomId}.schedule.start と比較する条件を追加した。
+        // 終了時刻後(after_end)は「チャット閲覧のみ」が要件のため、endは
+        // ここでは一切見ない(制限しているのはtoken-server側の送信APIのみ)。
+        // ルーム本体(rooms/{roomId})への直接readは拒否したままだが、
+        // messages配下のルール内からの get() によるフィールド参照は許可される。
+        //
         // [Phase16: チャット添付ファイル] 画像/動画/PDFのメタデータ(storagePath等)は
         // このドキュメントに `attachment` フィールドとして同居させているだけであり、
         // 読み取り可否のルールはテキストメッセージと完全に同じ(role不問、
@@ -57,9 +64,17 @@ service cloud.firestore {
         // Firestore外にあるため、実際の閲覧はtoken-server経由の短期署名付きURL
         // 発行API(GET .../attachment-url, .../thumbnail-url)を通す
         // (lib/attachments.js参照)。
+        // [開始/終了時刻] .data.get('schedule', {}).get('start', null) という
+        // 形にしているのは、本機能追加前に作成された既存Room(schedule
+        // フィールド自体を持たない)でルール評価がエラーにならないようにする
+        // ための防御(Map.get(key, default)はキー不在時にエラーにならない)。
         allow read: if request.auth != null &&
           exists(/databases/$(database)/documents/rooms/$(roomId)/members/$(request.auth.uid)) &&
-          get(/databases/$(database)/documents/rooms/$(roomId)/members/$(request.auth.uid)).data.status == 'active';
+          get(/databases/$(database)/documents/rooms/$(roomId)/members/$(request.auth.uid)).data.status == 'active' &&
+          (
+            get(/databases/$(database)/documents/rooms/$(roomId)).data.get('schedule', {}).get('start', null) == null ||
+            request.time >= get(/databases/$(database)/documents/rooms/$(roomId)).data.get('schedule', {}).get('start', null)
+          );
         // 書き込みはtoken-server(Admin SDK経由)のみ。クライアントからの直接書き込みは禁止
         // (本文の長さチェック・レート制限・添付ファイル実体の検証をサーバー側で強制するため)。
         allow write: if false;

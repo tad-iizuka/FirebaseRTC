@@ -10,6 +10,10 @@ const props = defineProps<{
   messages: ChatMessage[]
   myUid?: string | null
   errorMessage?: string | null
+  // [開始/終了時刻] after_end(終了時刻超過)では閲覧のみ許可し、
+  // 送信フォーム自体を表示しない。token-server側もchat:send操作を
+  // in_session以外で拒否するため、これは二重の防御(表示上の親切さ)。
+  readOnly?: boolean
   // [Phase16] 添付ファイルの短期署名付きURL発行。呼び出し元(RoomView.vue)が
   // baseUrl/roomIdを束縛した関数を渡す(topBadgesと同様、propとして注入する設計)。
   getAttachmentUrl: (messageId: string) => Promise<string>
@@ -128,7 +132,7 @@ function cancelPendingFile() {
     <p v-if="errorMessage" class="mb-2 text-[11px] text-destructive">{{ errorMessage }}</p>
 
     <div
-      v-if="pendingFile"
+      v-if="!readOnly && pendingFile"
       class="mb-2 flex items-center gap-1.5 rounded-sm border border-border px-2 py-1.5 text-[11px]"
     >
       <span>📎</span>
@@ -140,13 +144,15 @@ function cancelPendingFile() {
     </div>
 
     <input
+      v-if="!readOnly"
       ref="fileInputRef"
       type="file"
       accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/webm,application/pdf"
       class="hidden"
       @change="onFileSelected"
     />
-    <div v-if="!pendingFile" class="flex gap-1.5">
+    <p v-if="readOnly" class="text-[11px] text-muted-foreground">{{ t('chat.readOnlyNotice') }}</p>
+    <div v-else-if="!pendingFile" class="flex gap-1.5">
       <Button
         size="sm"
         variant="ghost"

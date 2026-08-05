@@ -56,6 +56,8 @@ const { requireFirebaseAuth, isValidRoomId } = require('../middleware/requireAut
 const { requireAdminPermission } = require('../middleware/requireAdmin');
 const { checkRoleAssignmentTarget } = require('../lib/permissions');
 const { resolveMaxMembers, createRoomAndOwnerMember, normalizeRoomName } = require('../lib/roomCreation');
+const { normalizeSchedule, resolveScheduleState, expireRoom } = require('../lib/roomSchedule');
+const { syncRoomMetadata } = require('../lib/roomMetadata');
 
 const router = express.Router();
 
@@ -67,6 +69,16 @@ const roomService = new RoomServiceClient(
 
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;
+
+// [開始/終了時刻] Firestoreの Timestamp|null をレスポンス用のミリ秒|nullへ
+// 変換する。room.scheduleフィールド自体が無い(本機能追加前に作成された
+// 既存Room)場合も { start: null, end: null } として返す。
+function serializeSchedule(room) {
+  return {
+    start: room.schedule?.start?.toMillis?.() ?? null,
+    end: room.schedule?.end?.toMillis?.() ?? null,
+  };
+}
 
 /**
  * GET /admin/rooms?limit=50&cursor=<roomId>
@@ -151,6 +163,7 @@ router.get('/rooms', requireFirebaseAuth, requireAdminPermission('rooms:monitor'
             isLive: !!live,
             numParticipants: live ? Number(live.numParticipants) : 0,
           },
+          schedule: serializeSchedule(room),
         };
       })
     );
@@ -242,6 +255,8 @@ router.get('/rooms/:roomId', requireFirebaseAuth, requireAdminPermission('rooms:
       // [Phase9] routes/rooms.js の PATCH /rooms/:roomId/settings と同じ
       // rooms/{roomId}.settings.autoRecording を参照する。
       settings: { autoRecording: !!room.settings?.autoRecording },
+      // [開始/終了時刻] PATCH /admin/rooms/:roomId/schedule で変更する。
+      schedule: serializeSchedule(room),
     });
   } catch (e) {
     console.error('[管理者ダッシュボード: ルーム詳細エラー]', e.message);
@@ -337,18 +352,24 @@ router.post('/rooms', requireFirebaseAuth, requireAdminPermission('rooms:create'
   }
 
   try {
+    // [開始/終了時刻] body: { schedule?: { start?: string|number|null, end?: string|number|null } }
+    // 未指定なら無期限・即入室可(lib/roomSchedule.js#normalizeSchedule参照)。
     const created = await createRoomAndOwnerMember({
       ownerUid: uid,
       ownerDisplayName: req.firebaseUser.name || req.firebaseUser.email || uid,
       name,
       maxMembers: maxMembersResult.value,
+      schedule: req.body?.schedule,
     });
+    if ('error' in created) {
+      return res.status(400).json({ error: created.error });
+    }
 
     await logAdminAction({
       actorUid: uid,
       action: 'room:create',
       targetRoomId: created.roomId,
-      detail: { name: created.name, maxMembers: created.maxMembers, via: 'admin_dashboard' },
+      detail: { name: created.name, maxMembers: created.maxMembers, schedule: created.schedule, via: 'admin_dashboard' },
     });
 
     console.log(`[管理者ダッシュボード: ルーム作成] roomId=${created.roomId} name=${created.name} owner=${uid}`);
@@ -359,6 +380,10 @@ router.post('/rooms', requireFirebaseAuth, requireAdminPermission('rooms:create'
       ownerUid: uid,
       createdAt: created.createdAt.getTime(),
       maxMembers: created.maxMembers,
+      schedule: {
+        start: created.schedule.start ? created.schedule.start.getTime() : null,
+        end: created.schedule.end ? created.schedule.end.getTime() : null,
+      },
     });
   } catch (e) {
     console.error('[管理者ダッシュボード: ルーム作成エラー]', e.message);
@@ -469,6 +494,86 @@ router.patch(
     } catch (e) {
       console.error('[管理者ダッシュボード: 設定更新エラー]', e.message);
       res.status(500).json({ error: '設定の更新に失敗しました' });
+    }
+  }
+);
+
+/**
+ * PATCH /admin/rooms/:roomId/schedule
+ * body: { start?: string|number|null, end?: string|number|null }
+ *
+ * [開始/終了時刻] 開始・終了時刻の設定・変更はサイト管理者(rooms:manage)
+ * のみに許可する(brushup-planでの決定。Room内owner向けの経路は用意しない)。
+ * start/end とも未指定または null で「即入室可/無期限」に戻せる。
+ *
+ * [即時反映] Room内role同様、変更を接続中クライアントへ即座に伝えたいため、
+ * 保存直後に syncRoomMetadata を呼ぶ(talk.js/recording.jsと同じパターン)。
+ * さらに、変更の結果「新しいendが既に過去」になった場合(＝今すぐ終了させたい
+ * ケース)は、sweep処理(routes/internal.js)の次回実行を待たず、この場で
+ * 同期的に lib/roomSchedule.js#expireRoom を呼んで強制退出まで完了させる。
+ */
+router.patch(
+  '/rooms/:roomId/schedule',
+  requireFirebaseAuth,
+  requireAdminPermission('rooms:manage'),
+  async (req, res) => {
+    const { roomId } = req.params;
+
+    if (!isValidRoomId(roomId)) {
+      return res.status(400).json({ error: 'roomId が不正です' });
+    }
+
+    const scheduleResult = normalizeSchedule(req.body || {});
+    if ('error' in scheduleResult) {
+      return res.status(400).json({ error: scheduleResult.error });
+    }
+
+    try {
+      const roomRef = db.collection('rooms').doc(roomId);
+      const roomSnap = await roomRef.get();
+      if (!roomSnap.exists) {
+        return res.status(404).json({ error: 'ルームが見つかりません' });
+      }
+
+      // expiredAt(sweepの冪等性の印)は毎回リセットする。延長によって
+      // in_sessionへ戻った後、再度endを過ぎたら改めて強制退出処理が
+      // 必要になるため。
+      await roomRef.update({
+        schedule: { start: scheduleResult.value.start, end: scheduleResult.value.end },
+      });
+
+      await logAdminAction({
+        actorUid: req.firebaseUser.uid,
+        action: 'room:schedule_update',
+        targetRoomId: roomId,
+        detail: {
+          start: scheduleResult.value.start ? scheduleResult.value.start.getTime() : null,
+          end: scheduleResult.value.end ? scheduleResult.value.end.getTime() : null,
+        },
+      });
+
+      syncRoomMetadata(roomId);
+
+      const newState = resolveScheduleState({
+        start: scheduleResult.value.start ? admin.firestore.Timestamp.fromDate(scheduleResult.value.start) : null,
+        end: scheduleResult.value.end ? admin.firestore.Timestamp.fromDate(scheduleResult.value.end) : null,
+      });
+      if (newState === 'after_end') {
+        await expireRoom(roomId); // ポーリングを待たず即時に強制退出させる
+      }
+
+      console.log(`[管理者ダッシュボード: スケジュール更新] roomId=${roomId} by=${req.firebaseUser.uid} state=${newState}`);
+      res.json({
+        roomId,
+        schedule: {
+          start: scheduleResult.value.start ? scheduleResult.value.start.getTime() : null,
+          end: scheduleResult.value.end ? scheduleResult.value.end.getTime() : null,
+        },
+        scheduleState: newState,
+      });
+    } catch (e) {
+      console.error('[管理者ダッシュボード: スケジュール更新エラー]', e.message);
+      res.status(500).json({ error: 'スケジュールの更新に失敗しました' });
     }
   }
 );

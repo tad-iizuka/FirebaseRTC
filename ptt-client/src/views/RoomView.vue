@@ -47,6 +47,14 @@ const banNotice = ref<string | null>(null)
 const canBan = computed(() => canManageRoom(ban.myRole))
 const canControlRecording = computed(() => canManageRoom(ban.myRole))
 const pttDisabled = computed(() => connection.pttDisabledFor(auth.currentUser?.uid))
+// [開始/終了時刻]
+const isWaitingBeforeStart = computed(() => roomStore.scheduleState === 'before_start')
+const isChatOnlyAfterEnd = computed(() => roomStore.scheduleState === 'after_end')
+const waitingStartTimeLabel = computed(() => {
+  const start = roomStore.schedule?.start
+  if (!start) return null
+  return new Date(start).toLocaleString()
+})
 const lockedByName = computed(() => {
   const uid = connection.currentTalkerUid
   if (!uid || uid === auth.currentUser?.uid) return null
@@ -79,15 +87,42 @@ const allBadges = computed(() =>
 
 async function enter() {
   banNotice.value = null
+  // [開始/終了時刻] LiveKit接続(connection.connect)より前に、現在の状態を
+  // 取得し直す。/join 直後の遷移ならこの呼び出しは冗長だが、保存済みルームへの
+  // 再入室(roomStore.reenter経由)ではこれが唯一の取得手段になる。
+  await roomStore.fetchAutoRecording(settings.tokenServerUrl, roomId.value)
+
+  if (roomStore.scheduleState === 'before_start') {
+    // 待機画面のみ。LiveKit接続・チャット購読とも行わず、開始時刻に達したかを
+    // 一定間隔でポーリングして検知する(startScheduleWaitPolling参照)。
+    startScheduleWaitPolling()
+    return
+  }
+
+  await enterSession()
+}
+
+/**
+ * [開始/終了時刻] in_session / after_end の場合に実際に入室処理を行う部分。
+ * before_startのポーリングが完了した際にも呼ばれる(enter()から分離)。
+ */
+async function enterSession() {
   await ban.start(roomId.value, auth.currentUser?.uid ?? '')
+  // [開始/終了時刻] チャット閲覧はbefore_start以外(in_session・after_end)で
+  // 許可される。送信可否(in_sessionのみ)はChatPanelへreadOnlyとして渡し、
+  // 実際の拒否はtoken-server側(routes/messages.js)が最終的に担保する。
   chat.start(roomId.value)
-  // [Phase9] /join を経由しない再入室や、入室後に他のowner/moderatorが
-  // 設定を変更した場合にも対応できるよう、入室のたびに最新値を取り直す。
-  roomStore.fetchAutoRecording(settings.tokenServerUrl, roomId.value)
   // [パンくず表示] 変化頻度が低いため入室時に1回だけ取得する(badges.startの
   // ようなポーリングはしない。stores/orgContext.ts参照)。
   orgContext.fetchOnce(settings.tokenServerUrl, roomId.value)
   badges.start(settings.tokenServerUrl, roomId.value)
+
+  if (roomStore.scheduleState === 'after_end') {
+    // [開始/終了時刻] token.js が in_session 以外ではトークンを発行しないため、
+    // ここでLiveKit接続自体を試みない(接続してもエラーになるだけのため)。
+    return
+  }
+
   await connection.connect({
     tokenServerUrlValue: settings.tokenServerUrl,
     livekitUrlValue: settings.livekitUrl,
@@ -95,7 +130,31 @@ async function enter() {
   })
 }
 
+// [開始/終了時刻] 待機画面中、開始時刻に達したかどうかをポーリングで検知する。
+// Room Metadata経由のリアルタイム反映はLiveKit接続が前提のため、
+// LiveKit接続前であるbefore_start中はこの方式に頼る(brushup-plan.md参照)。
+const SCHEDULE_WAIT_POLL_INTERVAL_MS = 15000
+let scheduleWaitTimer: ReturnType<typeof setInterval> | null = null
+
+function startScheduleWaitPolling() {
+  stopScheduleWaitPolling()
+  scheduleWaitTimer = setInterval(async () => {
+    await roomStore.fetchAutoRecording(settings.tokenServerUrl, roomId.value)
+    if (roomStore.scheduleState !== 'before_start') {
+      stopScheduleWaitPolling()
+      await enterSession()
+    }
+  }, SCHEDULE_WAIT_POLL_INTERVAL_MS)
+}
+function stopScheduleWaitPolling() {
+  if (scheduleWaitTimer !== null) {
+    clearInterval(scheduleWaitTimer)
+    scheduleWaitTimer = null
+  }
+}
+
 async function leaveRoom() {
+  stopScheduleWaitPolling()
   await connection.disconnect()
   chat.stop()
   ban.stop()
@@ -220,6 +279,7 @@ async function revokeBadge(p: ParticipantInfo, badgeId: string) {
 
 onMounted(enter)
 onUnmounted(() => {
+  stopScheduleWaitPolling()
   connection.disconnect()
   chat.stop()
   ban.stop()
@@ -232,6 +292,23 @@ onUnmounted(() => {
   <div>
     <p v-if="banNotice" class="px-5 py-2 text-xs text-destructive">{{ banNotice }}</p>
 
+    <!-- [開始/終了時刻] 待機画面(before_start)。他の要素は一切表示しない
+         (5.4方針: チャットも閲覧不可のため何も見せられる情報が無い)。 -->
+    <div v-if="isWaitingBeforeStart" class="flex flex-col items-center gap-2 px-5 py-16 text-center">
+      <p class="text-[15px] font-semibold">{{ t('room.waitingTitle') }}</p>
+      <p class="text-[13px] text-muted-foreground">
+        {{
+          waitingStartTimeLabel
+            ? t('room.waitingBodyWithTime', { time: waitingStartTimeLabel })
+            : t('room.waitingBodyNoTime')
+        }}
+      </p>
+      <div class="px-5 pt-6">
+        <Button variant="secondary" class="w-full" @click="leaveRoom">{{ t('room.leaveRoom') }}</Button>
+      </div>
+    </div>
+
+    <template v-else>
     <!-- [見出し・不具合修正] 組織(orgId)に紐づくRoomは最下層のノード名(無ければ組織名)を、
          無所属Roomはルーム名を表示する。いずれも未設定の場合は表示しない。
          接続状態(room=付き)は以前ここでStatusRowとして重複表示していたが、
@@ -252,6 +329,14 @@ onUnmounted(() => {
       :error-message="ban.nicknameErrorMessage"
       @update-nickname="updateNickname"
     />
+
+    <!-- [開始/終了時刻] 終了時刻超過(after_end)は「チャット閲覧のみ」のため、
+         録音バー・PTTボタンごと非表示にする(LiveKit未接続でconnection.*系の値も
+         すべて初期値のままのため、表示しても意味がない)。 -->
+    <p v-if="isChatOnlyAfterEnd" class="px-5 py-2 text-xs text-muted-foreground">
+      {{ t('room.afterEndNotice') }}
+    </p>
+    <template v-else>
     <RecordingBar
       :is-recording="connection.isRecording"
       :started-at="connection.recordingStartedAt"
@@ -266,11 +351,12 @@ onUnmounted(() => {
       @stop="stopRecording"
       @update-auto-recording="toggleAutoRecording"
     />
+    </template>
     <div class="px-5 pb-0 pt-2">
       <Button variant="secondary" class="w-full" @click="leaveRoom">{{ t('room.leaveRoom') }}</Button>
     </div>
 
-    <div class="flex flex-col items-center gap-3.5 px-5 pb-6 pt-6">
+    <div v-if="!isChatOnlyAfterEnd" class="flex flex-col items-center gap-3.5 px-5 pb-6 pt-6">
       <PttButton
         :disabled="pttDisabled"
         :is-sending="connection.isSending"
@@ -283,7 +369,7 @@ onUnmounted(() => {
 
     <ParticipantList
       :participants="participantList"
-      :can-ban="canBan"
+      :can-ban="canBan && !isChatOnlyAfterEnd"
       :top-badges="topBadges"
       :all-badges="allBadges"
       :grantable-badges="badges.grantableBadges"
@@ -298,6 +384,7 @@ onUnmounted(() => {
       :messages="chat.messages"
       :my-uid="auth.currentUser?.uid"
       :error-message="chat.errorMessage"
+      :read-only="isChatOnlyAfterEnd"
       :get-attachment-url="getChatAttachmentUrl"
       :get-thumbnail-url="getChatThumbnailUrl"
       @send="sendChat"
@@ -317,5 +404,6 @@ onUnmounted(() => {
       @confirm="confirmBan"
       @cancel="banTarget = null"
     />
+    </template>
   </div>
 </template>

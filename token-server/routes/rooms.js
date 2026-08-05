@@ -21,6 +21,7 @@ const { requireFirebaseAuth, isValidRoomId, requireRoomMembership } = require('.
 const { requireAdminPermission } = require('../middleware/requireAdmin');
 const { hasRoomPermission, requireRoomPermission, checkRoleAssignmentTarget } = require('../lib/permissions');
 const { resolveMaxMembers, createRoomAndOwnerMember } = require('../lib/roomCreation');
+const { resolveScheduleState } = require('../lib/roomSchedule');
 
 const router = express.Router();
 
@@ -74,7 +75,11 @@ router.post('/', requireFirebaseAuth, requireAdminPermission('rooms:create'), as
       ownerDisplayName: req.firebaseUser.name || req.firebaseUser.email || uid,
       name: req.body?.name,
       maxMembers: maxMembersResult.value,
+      schedule: req.body?.schedule,
     });
+    if ('error' in created) {
+      return res.status(400).json({ error: created.error });
+    }
 
     console.log(`[ルーム作成] roomId=${created.roomId} owner=${uid}`);
     res.status(201).json({ roomId: created.roomId, name: created.name, inviteCode: created.inviteCode });
@@ -157,6 +162,12 @@ router.post('/:roomId/join', requireFirebaseAuth, async (req, res) => {
     // 再入室時は GET /recording/status 側にも同じフィールドを持たせている
     // (room.ts の fetchAutoRecording 参照)。
     const finalMemberSnap = memberSnap.exists ? memberSnap : await memberRef.get();
+    // [開始/終了時刻] クライアントが待機画面/通常画面/チャット閲覧専用画面の
+    // いずれを出すかをこのレスポンス1回で判断できるようにする。
+    // before_start中の正確なカウントダウンが必要な場合、クライアント側は
+    // この /join を短い間隔でポーリングし直してscheduleStateの遷移
+    // (before_start→in_session)を検知する想定(rooms.js冒頭コメント参照)。
+    const scheduleState = resolveScheduleState(room.schedule);
     res.json({
       roomId,
       joined: true,
@@ -164,6 +175,11 @@ router.post('/:roomId/join', requireFirebaseAuth, async (req, res) => {
       autoRecording: !!room.settings?.autoRecording,
       // [ルーム名] admin-dashboardで設定された名前。未設定はnull。
       name: room.name ?? null,
+      schedule: {
+        start: room.schedule?.start ? room.schedule.start.toMillis() : null,
+        end: room.schedule?.end ? room.schedule.end.toMillis() : null,
+      },
+      scheduleState,
     });
   } catch (e) {
     console.error('[ルーム参加エラー]', e.message);

@@ -27,6 +27,7 @@ const rateLimit = require('express-rate-limit');
 const { db } = require('../lib/firebaseAdmin');
 const { requireFirebaseAuth, requireRoomMembership } = require('../middleware/requireAuth');
 const { requireRoomPermission } = require('../lib/permissions');
+const { requireInSession, requireNotBeforeStart } = require('../lib/roomSchedule');
 const attachments = require('../lib/attachments');
 
 const router = express.Router();
@@ -60,6 +61,9 @@ router.post(
   '/:roomId/attachments/upload-url',
   requireFirebaseAuth,
   requireRoomMembership,
+  // [開始/終了時刻] アップロードは「送信」の一部とみなし、in_session限定とする
+  // (開始前は何もできない・終了後はチャット閲覧のみのため)。
+  requireInSession,
   requireRoomPermission('chat:attachment_upload'),
   chatRateLimiter,
   async (req, res) => {
@@ -106,6 +110,9 @@ router.post(
   '/:roomId/messages',
   requireFirebaseAuth,
   requireRoomMembership,
+  // [開始/終了時刻] 送信はin_session限定。開始前は何もできず、終了後は
+  // 「チャット閲覧のみ」(送信不可)のため(lib/roomSchedule.js参照)。
+  requireInSession,
   requireRoomPermission('chat:send'),
   chatRateLimiter,
   async (req, res) => {
@@ -198,6 +205,9 @@ router.get(
   '/:roomId/messages/:messageId/attachment-url',
   requireFirebaseAuth,
   requireRoomMembership,
+  // [開始/終了時刻] 閲覧系はafter_endでも許可するためrequireNotBeforeStartを使う
+  // (requireInSessionはafter_endも拒否してしまうため使わない)。
+  requireNotBeforeStart,
   requireRoomPermission('chat:attachment_read'),
   async (req, res) => {
     await issueAttachmentDownloadUrl(req, res, 'storagePath');
@@ -208,6 +218,7 @@ router.get(
   '/:roomId/messages/:messageId/thumbnail-url',
   requireFirebaseAuth,
   requireRoomMembership,
+  requireNotBeforeStart,
   requireRoomPermission('chat:attachment_read'),
   async (req, res) => {
     await issueAttachmentDownloadUrl(req, res, 'thumbnailPath');

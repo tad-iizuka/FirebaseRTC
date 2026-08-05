@@ -5,6 +5,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { useAdminRoomsStore } from '@/stores/adminRooms'
 import { usePolling } from '@/composables/usePolling'
 import { formatTime } from '@/lib/format'
+import { resolveScheduleState, scheduleStateLabel, scheduleStateBadgeVariant } from '@/lib/roomSchedule'
 import Button from '@/components/ui/Button.vue'
 import Input from '@/components/ui/Input.vue'
 import Badge from '@/components/ui/Badge.vue'
@@ -219,7 +220,17 @@ function dismissCreatedRoom() {
               <div class="flex flex-wrap gap-1">
                 <Badge v-if="room.recording.active" variant="destructive">録音中</Badge>
                 <Badge v-if="room.talkLock" variant="accent">発話中: {{ room.talkLock.uid }}</Badge>
-                <span v-if="!room.recording.active && !room.talkLock" class="text-muted-foreground">—</span>
+                <Badge
+                  v-if="resolveScheduleState(room.schedule) !== 'in_session'"
+                  :variant="scheduleStateBadgeVariant(resolveScheduleState(room.schedule))"
+                >
+                  {{ scheduleStateLabel(resolveScheduleState(room.schedule)) }}
+                </Badge>
+                <span
+                  v-if="!room.recording.active && !room.talkLock && resolveScheduleState(room.schedule) === 'in_session'"
+                  class="text-muted-foreground"
+                  >—</span
+                >
               </div>
             </td>
           </tr>

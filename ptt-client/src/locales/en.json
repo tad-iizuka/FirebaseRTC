@@ -62,6 +62,7 @@
     ]
   },
   "roomSelect": {
+    "joinOnlyHint": "Rooms are created by an administrator. Once you receive an invite code, join using it below.",
     "roomIdLabel": "Room ID",
     "roomIdPlaceholder": "Entered by the invited person",
     "inviteCodeLabel": "Invite code",
@@ -75,6 +76,10 @@
     "leaveRoom": "Leave room",
     "pttHint": "Audio is sent only while the button is pressed",
     "banNotice": "You have been removed from this room",
+    "waitingTitle": "Starting soon",
+    "waitingBodyWithTime": "Scheduled start: {time}",
+    "waitingBodyNoTime": "The start time hasn't been set yet. Please wait.",
+    "afterEndNotice": "This room is past its end time. Chat is view-only.",
     "banConfirmTitle": "Ban this participant?",
     "banConfirmDescription": "Ban {name} from this room?\nThis action cannot be undone.",
     "banConfirmLabel": "Ban",
@@ -138,7 +143,8 @@
     "attachmentSend": "Send",
     "attachmentCancel": "Cancel",
     "attachmentOpen": "Open attachment",
-    "attachmentLoading": "Loading..."
+    "attachmentLoading": "Loading...",
+    "readOnlyNotice": "This room is past its end time, so chat is view-only."
   },
   "errors": {
     "notSignedIn": "Not signed in",
