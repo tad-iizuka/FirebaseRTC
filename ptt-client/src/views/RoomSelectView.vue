@@ -67,9 +67,10 @@ async function handleJoinRoom() {
   roomStore.clearError()
   try {
     await roomStore.joinRoom(settings.tokenServerUrl, roomId, inviteCode)
-    // ルーム名が取得できていればそれを履歴の表示ラベルに使い、
-    // 未設定の場合のみ従来通りの汎用ラベルにフォールバックする。
-    savedRooms.upsert(roomId, roomStore.currentRoomName ?? t('roomSelect.joinedRoomLabel'), inviteCode)
+    // [表示仕様・2026-08-06] ルーム名未設定時の汎用ラベルへのフォールバックは廃止。
+    // 未設定の場合はnameをnullのまま保存し、一覧側(SavedRoomsList.vue)で
+    // roomIdを表示する。開始/終了時刻も履歴に保存しておき、一覧の下段に出す。
+    savedRooms.upsert(roomId, roomStore.currentRoomName, inviteCode, roomStore.schedule)
     router.push({ name: 'room', params: { roomId } })
   } catch {
     // roomStore.errorMessage に理由がセットされているのでUIには既に反映済み

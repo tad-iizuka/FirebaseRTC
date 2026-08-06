@@ -73,7 +73,6 @@
     <string name="room_select_invite_code_label">Invite code</string>
     <string name="room_select_join_room">Join with invite code</string>
     <string name="room_select_recent_rooms">— Recently used rooms —</string>
-    <string name="room_select_joined_room_label">Room joined with an invite code</string>
 
     <!-- room -->
     <string name="room_leave_room">Leave room</string>

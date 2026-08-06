@@ -30,11 +30,19 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 /**
+ * [開始/終了時刻] Web版 types/api.ts の RoomSchedule・iOS版 PTTRoomManager.RoomSchedule と
+ * 同じ形。start/endはそれぞれ未設定の場合nullでありうる(エポックミリ秒)。Android側は
+ * 現時点では待機画面等のUIまでは実装しておらず(brushup-plan.md参照)、履歴一覧
+ * (PTTSavedRoomsStore)への表示用途のみでこの値を使う。
+ */
+data class RoomSchedule(val start: Long?, val end: Long?)
+
+/**
  * POST /rooms/:roomId/join のレスポンス。
  * [ルーム名] admin-dashboardで設定されたルーム名(name)。未設定の場合はnull
  * (token-server/routes/rooms.js・Web版JoinRoomResponse型と同じ形)。
  */
-data class JoinedRoom(val roomId: String, val name: String?)
+data class JoinedRoom(val roomId: String, val name: String?, val schedule: RoomSchedule?)
 
 class RoomApiException(val statusCode: Int, message: String) : Exception(message)
 
@@ -66,7 +74,17 @@ class PTTRoomManager(
         null
     }
 
-    /** 招待コードを検証してルームのmembersに参加する。戻り値にはルームID・ルーム名(name)を含む。 */
+    /** "schedule": { "start": number|null, "end": number|null } を解釈する。
+     *  schedule自体が欠落している場合はnullを返す(旧サーバー等との後方互換)。 */
+    private fun parseSchedule(json: JSONObject): RoomSchedule? {
+        if (!json.has("schedule") || json.isNull("schedule")) return null
+        val scheduleJson = json.getJSONObject("schedule")
+        val start = if (scheduleJson.has("start") && !scheduleJson.isNull("start")) scheduleJson.getLong("start") else null
+        val end = if (scheduleJson.has("end") && !scheduleJson.isNull("end")) scheduleJson.getLong("end") else null
+        return RoomSchedule(start, end)
+    }
+
+    /** 招待コードを検証してルームのmembersに参加する。戻り値にはルームID・ルーム名(name)・開始/終了時刻を含む。 */
     suspend fun joinRoom(tokenServerUrl: String, idToken: String, roomId: String, inviteCode: String): JoinedRoom =
         withContext(Dispatchers.IO) {
             _isWorking.value = true
@@ -95,7 +113,7 @@ class PTTRoomManager(
                     } else {
                         null
                     }
-                    JoinedRoom(json.optString("roomId", roomId), name)
+                    JoinedRoom(json.optString("roomId", roomId), name, parseSchedule(json))
                 }
             } finally {
                 _isWorking.value = false
@@ -103,15 +121,15 @@ class PTTRoomManager(
         }
 
     /**
-     * [ルーム名の再取得]
-     * 保存済みルームから再入室する場合(/joinを経由しない)、ルーム名は
+     * [ルーム名・開始/終了時刻の再取得]
+     * 保存済みルームから再入室する場合(/joinを経由しない)、ルーム名・開始/終了時刻は
      * joinRoom()のレスポンスからは取得できない。iOS版(fetchRoomName)・
      * Web版(roomStore.fetchAutoRecording)と同じく、GET /recording/status
-     * (token-server/routes/recording.js)に相乗りする形でルーム名だけ取り直す。
+     * (token-server/routes/recording.js)に相乗りする形で取り直す。
      * 取得に失敗してもPTT自体の利用は妨げないため、例外は握りつぶしnullを返す
      * (呼び出し元でエラー表示等はしない)。
      */
-    suspend fun fetchRoomName(tokenServerUrl: String, idToken: String, roomId: String): String? =
+    suspend fun fetchRoomName(tokenServerUrl: String, idToken: String, roomId: String): FetchedRoomStatus? =
         withContext(Dispatchers.IO) {
             try {
                 val encodedRoomId = java.net.URLEncoder.encode(roomId, "UTF-8")
@@ -127,11 +145,12 @@ class PTTRoomManager(
                         null
                     } else {
                         val json = JSONObject(text)
-                        if (json.has("name") && !json.isNull("name")) {
+                        val name = if (json.has("name") && !json.isNull("name")) {
                             json.getString("name").takeIf { it.isNotEmpty() }
                         } else {
                             null
                         }
+                        FetchedRoomStatus(name, parseSchedule(json))
                     }
                 }
             } catch (e: Exception) {
@@ -139,3 +158,6 @@ class PTTRoomManager(
             }
         }
 }
+
+/** GET /rooms/:roomId/recording/status のうち、ここで使うのはname/scheduleのみ。 */
+data class FetchedRoomStatus(val name: String?, val schedule: RoomSchedule?)

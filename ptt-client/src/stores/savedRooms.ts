@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import type { RoomSchedule } from '@/types/api'
 
 // [設計方針]
 // token-serverにはルーム一覧を返すAPIが無い(招待制のため「一覧」という概念が薄い)。
@@ -9,11 +10,18 @@ import { ref } from 'vue'
 // 複数のFirebaseアカウントで同じブラウザを使うケースを考慮し、uidごとに
 // 別のlocalStorageキーに保存する(サインアウト/別アカウントでの汚染を防ぐため)。
 
+// [表示仕様・2026-08-06] 以前は名前未設定時に「招待コードで参加したルーム」という
+// 固定文言をlabelとして保存していたが、一覧上での見分けが付きにくいため廃止。
+// 上段はルーム名(未設定ならroomIdをそのまま表示、コンポーネント側で判定)、
+// 下段は開始/終了時刻(未設定なら空欄)を表示する方針に変更した。そのため
+// ここでは「名前が無い」状態をnullのまま保持する(呼び出し側でフォールバック
+// 文言を生成しない)。
 export interface SavedRoom {
   roomId: string
-  label: string
+  name: string | null
   inviteCode: string | null
   lastUsedAt: number
+  schedule: RoomSchedule | null
 }
 
 const MAX_SAVED_ROOMS = 20
@@ -46,10 +54,15 @@ export const useSavedRoomsStore = defineStore('savedRooms', () => {
     }
   }
 
-  function upsert(roomId: string, label: string, inviteCode: string | null) {
+  function upsert(
+    roomId: string,
+    name: string | null,
+    inviteCode: string | null,
+    schedule: RoomSchedule | null = null,
+  ) {
     if (!storageKey) return
     const filtered = rooms.value.filter((r) => r.roomId !== roomId)
-    filtered.unshift({ roomId, label, inviteCode, lastUsedAt: Date.now() })
+    filtered.unshift({ roomId, name, inviteCode, lastUsedAt: Date.now(), schedule })
     rooms.value = filtered.slice(0, MAX_SAVED_ROOMS)
     persist()
   }

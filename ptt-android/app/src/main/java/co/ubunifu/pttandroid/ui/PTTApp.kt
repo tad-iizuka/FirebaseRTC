@@ -113,17 +113,38 @@ import co.ubunifu.pttandroid.recording.PTTRecordingStore
 import co.ubunifu.pttandroid.report.PTTReportStore
 import co.ubunifu.pttandroid.room.PTTRoomManager
 import co.ubunifu.pttandroid.room.PTTSavedRoomsStore
+import co.ubunifu.pttandroid.room.RoomSchedule
 import co.ubunifu.pttandroid.room.SavedRoom
 import co.ubunifu.pttandroid.settings.PTTServerPreset
 import co.ubunifu.pttandroid.settings.PTTSettingsStore
 import co.ubunifu.pttandroid.ui.theme.PTTColors
 import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
+import java.text.DateFormat
+import java.util.Date
 
 private val Mono = FontFamily.Monospace
 
 /** [不具合調査用] ファイル選択画面から戻ると在室中のルームが失われる件のログタグ。 */
 private const val TAG = "PTTApp"
+
+/**
+ * [表示仕様・2026-08-06] 開始/終了時刻をローカル履歴一覧の下段用に整形する。
+ * どちらも未指定なら空文字(行自体は残すが空欄表示)。Web版SavedRoomsList.vueの
+ * scheduleLabel()・iOS版ContentView.scheduleLabel()と同じ考え方
+ * (start/endどちらか片方だけの場合も考慮)。
+ */
+private fun scheduleLabel(schedule: RoomSchedule?): String {
+    if (schedule == null || (schedule.start == null && schedule.end == null)) return ""
+    val formatter = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
+    fun format(ms: Long) = formatter.format(Date(ms))
+    return when {
+        schedule.start != null && schedule.end != null -> "${format(schedule.start)} – ${format(schedule.end)}"
+        schedule.start != null -> format(schedule.start)
+        schedule.end != null -> format(schedule.end)
+        else -> ""
+    }
+}
 
 /**
  * [モバイルUI再編・2026-08-04] iOS版ContentView.swiftのRootTab(private enum)の移植。
@@ -177,9 +198,6 @@ fun PTTApp(
     // [多言語化] LaunchedEffect/scope.launchのブロックは@Composableコンテキストではないため、
     // stringResource()はここ(コンポーザブル本体)であらかじめ解決しておく必要がある。
     val banNoticeText = stringResource(R.string.room_ban_notice)
-    // [ルーム名] admin-dashboardで設定された名前が無い場合に履歴欄で使うフォールバックラベル
-    // (Web版RoomSelectView.vueの roomSelect.joinedRoomLabel と同じ役割)。
-    val joinedRoomLabel = stringResource(R.string.room_select_joined_room_label)
 
     val currentUser by authManager.currentUser.collectAsState()
     val authError by authManager.lastErrorMessage.collectAsState()
@@ -374,8 +392,8 @@ fun PTTApp(
         scope.launch {
             val idToken = try { authManager.fetchIdToken() } catch (e: Exception) { null }
             if (idToken == null || activeRoomId != roomId) return@launch
-            roomManager.fetchRoomName(tokenServerUrl, idToken, roomId)?.let { name ->
-                currentRoomName = name
+            roomManager.fetchRoomName(tokenServerUrl, idToken, roomId)?.let { fetched ->
+                fetched.name?.let { currentRoomName = it }
             }
         }
     }
@@ -626,10 +644,11 @@ fun PTTApp(
                                         // (以前はnullで潰していたため招待コード欄が表示されなかった)。
                                         currentInviteCode = inviteCode
                                         currentRoomName = joined.name
-                                        // ルーム名が取得できていればそれを履歴の表示ラベルに使い、
-                                        // 未設定の場合のみ従来通りの汎用ラベルにフォールバックする
-                                        // (Web版RoomSelectView.vueと同じ方針)。
-                                        savedRoomsStore.upsert(roomId, joined.name ?: joinedRoomLabel, inviteCode)
+                                        // [表示仕様・2026-08-06] ルーム名未設定時の汎用ラベルへの
+                                        // フォールバックは廃止。未設定の場合はnameをnullのまま保存し、
+                                        // 一覧側(SavedRoomRow)でroomIdを表示する。開始/終了時刻も
+                                        // 履歴に保存しておき、一覧の下段に出す(Web版・iOS版と同じ方針)。
+                                        savedRoomsStore.upsert(roomId, joined.name, inviteCode, joined.schedule)
                                         enterRoom(roomId)
                                     } catch (e: Exception) {
                                         // roomManager.lastErrorMessage に理由がセットされている
@@ -1653,9 +1672,15 @@ private fun SavedRoomRow(saved: SavedRoom, onOpen: (SavedRoom) -> Unit, onRemove
             modifier = Modifier.weight(1f),
         ) {
             Column(horizontalAlignment = Alignment.Start) {
-                Text(saved.label, fontFamily = Mono, fontSize = 12.sp, maxLines = 1)
+                // [表示仕様・2026-08-06] 上段: ルーム名があればルーム名、無ければroomId。
                 Text(
-                    "(${saved.roomId})",
+                    saved.name ?: saved.roomId,
+                    fontFamily = Mono, fontSize = 12.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+                // 下段: 開始/終了時刻。どちらも未指定なら空欄。
+                Text(
+                    scheduleLabel(saved.schedule),
                     fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Muted,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )

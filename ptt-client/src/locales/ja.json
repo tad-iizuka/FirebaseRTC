@@ -68,8 +68,7 @@
     "inviteCodePlaceholder": "8文字のコード",
     "joinRoom": "招待コードで参加する",
     "joining": "参加中...",
-    "recentRooms": "— 最近使ったルーム —",
-    "joinedRoomLabel": "招待コードで参加したルーム"
+    "recentRooms": "— 最近使ったルーム —"
   },
   "inviteLink": {
     "redirecting": "読み込み中...",

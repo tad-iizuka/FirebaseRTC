@@ -20,10 +20,14 @@ import org.json.JSONObject
 
 data class SavedRoom(
     val roomId: String,
-    val label: String,
+    /** [表示仕様・2026-08-06] 未設定の場合はnull(以前は「招待コードで参加したルーム」という
+     *  固定文言をフォールバックとして保存していたが廃止。一覧側でnullならroomIdを表示する)。 */
+    val name: String?,
     /** 自分がowner(作成者)の場合のみ非null。再入室時に招待コードを再表示するために保持する。 */
     val inviteCode: String?,
     val lastUsedAtMillis: Long,
+    /** [開始/終了時刻] 未設定の場合はnull。一覧の下段表示に使う。 */
+    val schedule: RoomSchedule? = null,
 )
 
 class PTTSavedRoomsStore(context: Context) {
@@ -53,10 +57,10 @@ class PTTSavedRoomsStore(context: Context) {
     }
 
     /** ルーム作成/参加のたびに呼ぶ。同じroomIdが既にあれば更新して先頭に移動する。 */
-    fun upsert(roomId: String, label: String, inviteCode: String?) {
+    fun upsert(roomId: String, name: String?, inviteCode: String?, schedule: RoomSchedule? = null) {
         if (storageKey == null) return
         val updated = mutableListOf(
-            SavedRoom(roomId, label, inviteCode, System.currentTimeMillis())
+            SavedRoom(roomId, name, inviteCode, System.currentTimeMillis(), schedule)
         )
         updated.addAll(_rooms.value.filter { it.roomId != roomId })
         _rooms.value = updated.take(maxCount)
@@ -76,9 +80,21 @@ class PTTSavedRoomsStore(context: Context) {
             array.put(
                 JSONObject().apply {
                     put("roomId", room.roomId)
-                    put("label", room.label)
+                    put("name", room.name ?: JSONObject.NULL)
                     put("inviteCode", room.inviteCode ?: JSONObject.NULL)
                     put("lastUsedAt", room.lastUsedAtMillis)
+                    val schedule = room.schedule
+                    put(
+                        "schedule",
+                        if (schedule == null) {
+                            JSONObject.NULL
+                        } else {
+                            JSONObject().apply {
+                                put("start", schedule.start ?: JSONObject.NULL)
+                                put("end", schedule.end ?: JSONObject.NULL)
+                            }
+                        }
+                    )
                 }
             )
         }
@@ -89,11 +105,27 @@ class PTTSavedRoomsStore(context: Context) {
         val array = JSONArray(raw)
         (0 until array.length()).map { i ->
             val obj = array.getJSONObject(i)
+            // [後方互換] 旧フォーマットは "label"(常にString)のみを持っていた。
+            // 新フォーマットの"name"が無ければ"label"にフォールバックする
+            // (どちらも無い/読めない場合はnullのままroomIdの表示に任せる)。
+            val name = if (obj.has("name") && !obj.isNull("name")) {
+                obj.getString("name")
+            } else {
+                obj.optString("label", null)
+            }
+            val scheduleObj = obj.optJSONObject("schedule")
+            val schedule = scheduleObj?.let {
+                RoomSchedule(
+                    start = if (it.has("start") && !it.isNull("start")) it.getLong("start") else null,
+                    end = if (it.has("end") && !it.isNull("end")) it.getLong("end") else null,
+                )
+            }
             SavedRoom(
                 roomId = obj.getString("roomId"),
-                label = obj.getString("label"),
+                name = name,
                 inviteCode = obj.optString("inviteCode", null).takeIf { it != "null" },
                 lastUsedAtMillis = obj.optLong("lastUsedAt", 0L),
+                schedule = schedule,
             )
         }
     } catch (e: Exception) {

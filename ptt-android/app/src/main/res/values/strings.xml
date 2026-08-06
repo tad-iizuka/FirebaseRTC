@@ -91,7 +91,6 @@
     <string name="room_select_invite_code_label">招待コード</string>
     <string name="room_select_join_room">招待コードで参加する</string>
     <string name="room_select_recent_rooms">— 最近使ったルーム —</string>
-    <string name="room_select_joined_room_label">招待コードで参加したルーム</string>
 
     <!-- room -->
     <string name="room_leave_room">ルームを退出する</string>

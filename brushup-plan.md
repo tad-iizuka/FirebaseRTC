@@ -1,7 +1,7 @@
 # PTTアプリ ブラッシュアップ計画（改定版）
 
 対象リポジトリ: `tad-iizuka/FirebaseRTC`
-作成日: 2026-07-09 ／ 最終改定: 2026-08-05（五十四訂）
+作成日: 2026-07-09 ／ 最終改定: 2026-08-06（五十五訂）
 
 > **⚠️ 巻き戻り事故について（2026-08-04 発見・記録）**
 >
@@ -35,7 +35,7 @@
 定義するビジョンの要点」以降の本文と「6. 次アクションの提案」を読めば足りる。
 
 <details>
-<summary>改定履歴（初訂〜五十四訂、クリックで展開）</summary>
+<summary>改定履歴（初訂〜五十五訂、クリックで展開）</summary>
 
 改定: 2026-07-24（README.md「Vision」に基づき全面改定）
 再改定: 2026-07-25（Guestロール・バッジシステムの詳細仕様を検討し反映）
@@ -1758,6 +1758,71 @@ breadcrumb「東北警備株式会社 › 仙台支社 › 仙台駅現場」の
 確認」は`ROADMAP.md`への軽微な言及はしたものの実体としては未解消のまま
 残っている）。「6. 次アクションの提案」item8を「6.1」item34へ移動する。
 
+五十五訂: 2026-08-06（ユーザーからスクリーンショット2枚（Web版・iOS版の
+「最近使ったルーム」履歴一覧。Room Schedule機能そのものではなく履歴一覧
+UIの表示仕様についての依頼）を添えて、各行の表示仕様変更を依頼された：
+上段はルーム名（無ければroomId）、下段は開始/終了時刻（未指定なら空欄）
+とする。
+
+実装のためWeb版(`ptt-client`)のコードを確認したところ、五十三訂で発見した
+Room Schedule機能のschedule値(start/end)は`roomStore.schedule`として
+既に取得できていたが、iOS/Android側は「6. 次アクションの提案」item5
+（Schedule機能のiOS/Android移植）が実装着手前のまま残っていた通り、
+`PTTRoomManager`が`schedule`フィールドをレスポンスから一切パースして
+いなかったことを実装時に直接確認した（前掲の機能差表の❌はこの意味
+だったことが、今回のような別目的の実装作業を通じて具体的に裏付けられた
+形になる）。
+
+**実装内容（3クライアント共通で「保存済みルーム履歴」欄のみが対象。
+待機画面/チャット閲覧専用画面等の本体UIの状態出し分けはitem5のまま
+未着手）:**
+
+- **Web(`ptt-client`)**: `stores/savedRooms.ts`の`SavedRoom`型から
+  `label: string`（ルーム名未設定時は`t('roomSelect.joinedRoomLabel')`
+  という固定文言でフォールバックしていた）を廃止し、
+  `name: string | null`（フォールバックなし）＋
+  `schedule: RoomSchedule | null`を追加した。`RoomSelectView.vue`の
+  呼び出し元も追従させ、未使用になった`joinedRoomLabel`ロケールキーを
+  `ja.json`/`en.json`から削除した。`SavedRoomsList.vue`を2行表示（上段:
+  名前 or roomId、下段: `toLocaleString()`で整形した開始–終了、
+  無ければ空欄）に変更し、`savedRooms.spec.ts`にschedule保存・
+  name未設定時の挙動のテストを追加した
+- **iOS(`ptt-ios`)**: `PTTRoomManager`に`RoomSchedule`構造体を新設し、
+  `JoinRoomResponse`/`RoomStatusResponse`のデコード対象に追加した
+  （前述の通り、これが本改定で判明したiOS側の未着手箇所そのもの）。
+  `joinRoom()`/`fetchRoomName()`の戻り値を`(name, schedule)`のタプルに
+  変更し、`PTTSavedRoomsStore.SavedRoom`にも同様に`name`/`schedule`を
+  追加（`label`廃止）。`ContentView.swift`の`savedRoomRow`を2行表示に
+  変更し、`DateFormatter`ベースの`scheduleLabel()`ヘルパーを追加した
+- **Android(`ptt-android`)**: 同じ設計をKotlinへ移植した。
+  `PTTRoomManager.kt`に`RoomSchedule`/`FetchedRoomStatus`データクラスを
+  新設し、`joinRoom()`/`fetchRoomName()`のレスポンス解釈に追加した。
+  `PTTSavedRoomsStore.kt`は`label`→`name`+`schedule`化する際、旧
+  フォーマット（`label`のみ）で永続化済みのSharedPreferencesデータを
+  `name`へフォールバック解釈する後方互換処理を`parse()`に追加した
+  （Web/iOSは`localStorage`/`UserDefaults`のいずれも古いキーが単に
+  無視されるだけでクラッシュしないため、Android版のような明示的な
+  移行コードは持たせていない）。`PTTApp.kt`の`SavedRoomRow`を2行表示に
+  変更し、`joinedRoomLabel`相当の`room_select_joined_room_label`文字列
+  リソースを`strings.xml`/`values-en/strings.xml`から削除した
+
+**成果物の反映状況について**: 十訂と同じ方針で、今回はアップロードされた
+リポジトリ一式（HEAD=`a47e5c4`）に対してファイルを直接編集し、更新版ZIP
+（`ptt-client.zip`・`ptt-ios.zip`・`ptt-android.zip`）と、変更差分のみを
+抽出した`recent-rooms-schedule-display.patch`として返却した。リポジトリ
+本体へのコミット・実機/ブラウザでのビルド確認は本ドキュメント側では
+未実施のため、次アクションとして残す（「6. 次アクションの提案」参照）。
+
+**次アクションitem5への影響**: item5（Schedule機能のiOS/Android移植）
+自体は未解消のまま。今回追加したのは「保存済みルーム履歴」欄の表示用途に
+限定した最小限のschedule値取得のみであり、待機画面(`before_start`)・
+チャット閲覧専用画面(`after_end`)という本体のUI状態出し分けはiOS/Android
+とも依然として未実装。ただし`PTTRoomManager`がscheduleを一切パースして
+いなかった状態は解消されたため、item5着手時に最初に必要となる
+「サーバーレスポンスの構造体化」というステップ自体は、今回の別目的の
+作業の副産物として前倒しで完了したと言える。前掲「1. 実コード確認済みの
+現状」機能差表の該当行にこの旨を追記する。
+
 </details>
 
 ---
@@ -1833,7 +1898,7 @@ Message）はコード上どこにも見当たらず、依然として未着手�
 | **業界別ラベリング(UIのみ差し替え)** | ❌ | ❌ | ❌ | 「警備業向け」の文言・概念が全画面にハードコード |
 | **組織階層(Company/Branch/Site)** | ✅ | ✅ | ✅ | Phase11。管理画面で団体・再帰node・Room割当を管理。各ユーザー向けUIのパンくず表示も2026-08-03(四十五訂)で実装完了 |
 | **参加者一覧のバッジ表示** | ✅ | ✅ | ✅ | Phase13。Room APIを20秒間隔でポーリングし最優先1件を表示 |
-| **開始/終了時刻(Room Schedule)** | ✅ | ❌ | ❌ | 2026-08-05、五十三訂で発見。本ドキュメント未記載のまま実装が先行していた新機能。サーバー(`lib/roomSchedule.js`)・`firestore.rules`・`admin-dashboard`・`ptt-client`は実装済み。iOS/Androidは未着手（詳細は五十三訂・「6. 次アクションの提案」参照） |
+| **開始/終了時刻(Room Schedule)** | ✅ | ❌ | ❌ | 2026-08-05、五十三訂で発見。本体UIの状態出し分け（待機画面/チャット閲覧専用画面）はサーバー(`lib/roomSchedule.js`)・`firestore.rules`・`admin-dashboard`・`ptt-client`のみ実装済みで、iOS/Androidは未着手のまま（「6. 次アクションの提案」item5参照）。ただし2026-08-06(五十五訂)で、保存済みルーム履歴欄の表示用途に限り`PTTRoomManager`のschedule値パース自体はiOS/Androidにも追加済み（詳細は五十五訂参照。本体UIの未実装状態は変わらないためこの行のiOS/Android列は❌のまま） |
 
 管理者サイトは`admin-dashboard/`(Vue 3+TS+Pinia)としてルーム一覧/詳細・
 監査ログ・管理者権限・録音履歴DLまで実装済み。閲覧専用だった旧
@@ -2387,7 +2452,7 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
 
 ---
 
-## 6. 次アクションの提案（2026-08-05 五十四訂で更新）
+## 6. 次アクションの提案（2026-08-06 五十五訂で更新）
 
 <details>
 <summary>この一覧のitem番号がどう変遷してきたか（クリックで展開）</summary>
@@ -2555,13 +2620,17 @@ item 6（`isForbidden`系フラグの機械的な棚卸し）に実際に着手�
    `node_modules`未取得・ネットワーク遮断によりこの環境では
    `vue-tsc -b`・`eslint .`が実行できておらず、目視確認のみで完了扱いに
    している点が残課題
-5. **（優先度高・新規）Room開始/終了時刻(Schedule)機能のiOS/Android移植**：
-   Web版(`ptt-client`)・`admin-dashboard`のみに実装済みで、iOS/Androidは
-   `schedule`関連のコードが一切存在しない（Guestロール・組織階層・
-   バッジ・添付ファイルで踏襲してきたWeb→iOS→Androidの順に従うなら、
-   次はiOS）。特に「開始前は入室のみ可・送話/チャット不可の待機画面」
-   「終了後は新規入室とチャット閲覧のみ可・送話/チャット送信不可の画面」
-   という、通常のRoom画面とは異なる2状態のUI実装が必要になる
+5. **（優先度高）Room開始/終了時刻(Schedule)機能のiOS/Android移植**：
+   本体UI（「開始前は入室のみ可・送話/チャット不可の待機画面」「終了後は
+   新規入室とチャット閲覧のみ可・送話/チャット送信不可の画面」という、
+   通常のRoom画面とは異なる2状態のUI）はWeb版(`ptt-client`)・
+   `admin-dashboard`のみに実装済みのままで、iOS/Androidは依然として
+   未着手。**（2026-08-06 五十五訂で一部前進）** 「保存済みルーム履歴」欄の
+   表示仕様変更という別目的の作業の過程で、iOS/Androidの`PTTRoomManager`が
+   `schedule`フィールドを一切パースしていなかった状態自体は解消された
+   （`joinRoom()`/`fetchRoomName()`がschedule値を返せるようになった）。
+   本体UIの状態出し分けに必要なのはこの値を使った待機画面/チャット閲覧
+   専用画面の実装であり、その部分は変わらず未着手のまま残る
 6. **（新規）Room Scheduleのロードマップ上の位置づけ整理**：README.mdの
    Target Roadmap（Phase1警備業→Phase2ビジネスチーム→Phase3コンシューマー）
    のどこに位置づくかが本ドキュメントで一度も検討されていない。警備現場の
@@ -2581,6 +2650,25 @@ item 6（`isForbidden`系フラグの機械的な棚卸し）に実際に着手�
 `ARCHITECTURE.md`・`UI_UX.md`・`ROADMAP.md`・`phase12-role-operation-inventory.md`
 への反映を行い「6.1」item34へ移動した（詳細は文書冒頭「五十四訂」参照）。
 現在有効な次アクションは上記1〜7のみ。
+
+**（2026-08-06 五十五訂）** ユーザー依頼（保存済みルーム履歴欄の表示仕様
+変更）に対応する過程で、item5の一部（`PTTRoomManager`のschedule値パース
+自体の欠落）を解消した。item5は本体UI未着手のため完了扱いにはせず、
+上記の通り範囲を明確化した文言に更新した。あわせて、今回の変更について
+以下2件を新たな次アクションとして追加する。
+
+8. **（新規）五十五訂の変更のビルド確認**：Web版は`vue-tsc -b`・`eslint .`、
+   iOS版はXcodeビルド、Android版はGradleビルドのいずれも、この環境では
+   `node_modules`/SDK未取得・ネットワーク遮断のため実行できておらず、
+   目視でのコード確認のみで完了扱いにしている。特にiOS/Androidは戻り値の
+   型をタプル/データクラスに変更する等、既存の呼び出し元との整合が
+   必要な変更を含むため、実際のビルド確認の優先度は高い
+9. **（新規）五十五訂の変更のリポジトリへの反映確認**：十訂と同じく、
+   今回はアップロードされたZIPアーカイブに対する直接編集・返却のみで、
+   `tad-iizuka/FirebaseRTC`リポジトリへの実際のコミット・反映は本
+   ドキュメント側では確認できていない。六訂・八訂・三十七訂等で踏んだ
+   `git show`による直接検証を、次回リポジトリ一式が再アップロードされた
+   際に行う
 
 ### 6.1 完了済みアクション（アーカイブ）
 

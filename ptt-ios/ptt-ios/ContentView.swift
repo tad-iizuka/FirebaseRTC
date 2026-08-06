@@ -738,20 +738,45 @@ struct ContentView: View {
         .padding(14)
     }
 
+    /// [表示仕様・2026-08-06] 開始/終了時刻をローカル履歴一覧の下段用に整形する。
+    /// どちらも未指定なら空文字(行自体は残すが空欄表示)。Web版SavedRoomsList.vueの
+    /// scheduleLabel()と同じ考え方(start/endどちらか片方だけの場合も考慮)。
+    private func scheduleLabel(_ schedule: PTTRoomManager.RoomSchedule?) -> String {
+        guard let schedule, (schedule.start != nil || schedule.end != nil) else { return "" }
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        func format(_ ms: Double) -> String {
+            formatter.string(from: Date(timeIntervalSince1970: ms / 1000))
+        }
+        switch (schedule.start, schedule.end) {
+        case let (.some(start), .some(end)):
+            return "\(format(start)) – \(format(end))"
+        case let (.some(start), nil):
+            return format(start)
+        case let (nil, .some(end)):
+            return format(end)
+        default:
+            return ""
+        }
+    }
+
     private func savedRoomRow(_ saved: PTTSavedRoomsStore.SavedRoom) -> some View {
         Button {
             rejoinSavedRoom(saved)
         } label: {
             HStack(spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(saved.label)
+                    // [表示仕様・2026-08-06] 上段: ルーム名があればルーム名、無ければroomId。
+                    Text(saved.name ?? saved.roomId)
                         .font(.system(size: 13, design: .monospaced))
                         .lineLimit(1)
-                    Text("(\(saved.roomId))")
+                        .truncationMode(.middle)
+                    // 下段: 開始/終了時刻。どちらも未指定なら空欄。
+                    Text(scheduleLabel(saved.schedule))
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundColor(.pttMuted)
                         .lineLimit(1)
-                        .truncationMode(.middle)
                 }
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.right")
@@ -1090,9 +1115,9 @@ struct ContentView: View {
         Task {
             do {
                 let idToken = try await auth.fetchIDToken()
-                let name = try await roomManager.joinRoom(tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId, inviteCode: inviteCode)
-                currentRoomName = name
-                savedRooms.upsert(roomId: roomId, label: name ?? String(localized: "招待コードで参加したルーム"), inviteCode: inviteCode)
+                let joined = try await roomManager.joinRoom(tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId, inviteCode: inviteCode)
+                currentRoomName = joined.name
+                savedRooms.upsert(roomId: roomId, name: joined.name, inviteCode: inviteCode, schedule: joined.schedule)
                 enterRoom(roomId)
             } catch {
                 // roomManager.lastErrorMessage に理由がセットされているのでUIには既に反映済み
@@ -1140,7 +1165,8 @@ struct ContentView: View {
         Task {
             let idToken = try? await auth.fetchIDToken()
             guard let idToken, activeRoomId == roomId else { return }
-            if let name = await roomManager.fetchRoomName(tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId) {
+            let fetched = await roomManager.fetchRoomName(tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId)
+            if let name = fetched.name {
                 currentRoomName = name
             }
         }

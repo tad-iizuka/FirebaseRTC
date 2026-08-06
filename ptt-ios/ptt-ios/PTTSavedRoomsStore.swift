@@ -21,11 +21,16 @@ final class PTTSavedRoomsStore: ObservableObject {
     struct SavedRoom: Codable, Identifiable, Equatable {
         var id: String { roomId }
         let roomId: String
-        var label: String
+        /// [表示仕様・2026-08-06] 未設定の場合はnilのまま保持する(以前は「招待コードで
+        /// 参加したルーム」という固定文言をフォールバックとして保存していたが廃止。
+        /// 一覧表示側(savedRoomRow)でnilならroomIdを代わりに表示する)。
+        var name: String?
         /// 参加時に入力した招待コード。ルーム作成はadmin-dashboardへ移管済みのため
         /// 表示用途はなく、履歴データとして保持しているのみ。
         var inviteCode: String?
         var lastUsedAt: Date
+        /// [開始/終了時刻] 未設定の場合はnil。一覧の下段表示に使う。
+        var schedule: PTTRoomManager.RoomSchedule?
     }
 
     @Published private(set) var rooms: [PTTSavedRoomsStore.SavedRoom] = []
@@ -51,10 +56,10 @@ final class PTTSavedRoomsStore: ObservableObject {
     }
 
     /// ルーム作成/参加のたびに呼ぶ。同じroomIdが既にあれば更新して先頭に移動する。
-    func upsert(roomId: String, label: String, inviteCode: String?) {
+    func upsert(roomId: String, name: String?, inviteCode: String?, schedule: PTTRoomManager.RoomSchedule? = nil) {
         guard storageKey != nil else { return }
         var updated = rooms.filter { $0.roomId != roomId }
-        updated.insert(SavedRoom(roomId: roomId, label: label, inviteCode: inviteCode, lastUsedAt: Date()), at: 0)
+        updated.insert(SavedRoom(roomId: roomId, name: name, inviteCode: inviteCode, lastUsedAt: Date(), schedule: schedule), at: 0)
         if updated.count > maxCount {
             updated = Array(updated.prefix(maxCount))
         }

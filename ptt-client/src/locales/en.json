@@ -68,8 +68,7 @@
     "inviteCodePlaceholder": "8-character code",
     "joinRoom": "Join with invite code",
     "joining": "Joining...",
-    "recentRooms": "— Recently used rooms —",
-    "joinedRoomLabel": "Room joined with an invite code"
+    "recentRooms": "— Recently used rooms —"
   },
   "inviteLink": {
     "redirecting": "Loading...",
