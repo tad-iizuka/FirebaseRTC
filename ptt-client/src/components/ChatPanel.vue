@@ -33,6 +33,16 @@ function send() {
   draft.value = ''
 }
 
+// [IME対応] 日本語入力で漢字変換を確定する際のEnterキーは、ブラウザ上では
+// 通常のEnterキー押下と区別がつかない形でkeydownイベントが発火する。
+// event.isComposing (変換確定時はtrue) を見て、変換確定のEnterでは送信しない
+// ようにする。isComposingを実装していない古いブラウザ向けの保険として、
+// keyCode 229(IME処理中を示す値)も合わせて見ておく。
+function onEnter(e: KeyboardEvent) {
+  if (e.isComposing || e.keyCode === 229) return
+  send()
+}
+
 // [チャットUI刷新] LINE等のトークUIに合わせ、連続する自分の発言はバブルを
 // 詰めて表示する。「ヘッダー(アバター+名前)を出すかどうか」を1メッセージずつ
 // 判定し、日付が変わった箇所には区切りを挟む。
@@ -283,7 +293,7 @@ function cancelPendingFile() {
       >
         <Paperclip class="h-3.5 w-3.5" aria-hidden="true" :stroke-width="2" />
       </Button>
-      <Input v-model="draft" :placeholder="t('chat.placeholder')" maxlength="2000" @keydown.enter="send" />
+      <Input v-model="draft" :placeholder="t('chat.placeholder')" maxlength="2000" @keydown.enter="onEnter" />
       <Button size="sm" class="w-auto px-4" @click="send">{{ t('chat.send') }}</Button>
     </div>
   </div>
