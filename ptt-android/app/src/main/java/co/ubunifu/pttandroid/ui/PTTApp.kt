@@ -92,6 +92,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import co.ubunifu.pttandroid.R
@@ -2293,7 +2294,7 @@ private fun ChatBubbleText(text: String, isMine: Boolean) {
             for (segment in co.ubunifu.pttandroid.chat.Linkify.segments(text)) {
                 if (segment.kind == co.ubunifu.pttandroid.chat.LinkifySegment.Kind.URL) {
                     pushStringAnnotation(tag = "URL", annotation = segment.value)
-                    androidx.compose.ui.text.withStyle(
+                    withStyle(
                         androidx.compose.ui.text.SpanStyle(
                             color = PTTColors.Live,
                             textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
