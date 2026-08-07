@@ -1966,7 +1966,35 @@ Room Schedule機能のschedule値(start/end)は`roomStore.schedule`として
 Xcodeでのビルド確認は本ドキュメント側では未実施のため、次アクションとして
 残す(「6. 次アクションの提案」参照)。
 
+**（2026-08-07 五十七訂・実機ビルドエラーの修正）** 上記の懸念通り、
+ユーザーの実機Xcodeビルドで4件のエラーが報告された。内訳と対応は以下の通り。
+
+- `AttributedString`の`.foregroundColor`/`.underlineStyle`属性への代入で
+  「Cannot infer contextual base」エラー。**実コードの不具合**だった。
+  `part.foregroundColor = .pttLive`・`part.underlineStyle = .single`は
+  ドット構文の型推論がAttributedStringの動的メンバー経由では効かず、
+  型を明示する必要があった。`part.foregroundColor = Color.pttLive`・
+  `part.underlineStyle = Text.LineStyle(pattern: .solid, color: Color.pttLive)`
+  へ修正した(`ContentView.swift`の`attributedChatText`)
+- `ChatAvatarView`・`Linkify`が「Cannot find in scope」。両ファイルの
+  中身自体には構文上の問題は見当たらず、この環境ではXcodeビルドの実行
+  確認自体ができないため断定はできないが、`PBXFileSystemSynchronizedRootGroup`
+  経由でのファイル自動認識(Info.plist/entitlements以外は無条件で
+  ターゲットに含まれる設定になっている)が、パッチ適用やファイル追加の
+  タイミングでXcode側に反映されていない可能性が高いと判断した。
+  ユーザーへは、(1) 両ファイルが`ptt-ios/ptt-ios/`直下(リポジトリ直下の
+  `ptt-ios/`フォルダの、さらにその中の`ptt-ios/`ソースフォルダ。同名の
+  フォルダが2階層になっている点に注意)に実在するか確認、(2) Xcodeを
+  完全に終了して再度プロジェクトを開き直す、(3) それでも解決しない場合は
+  Product > Clean Build Folder、(4) 最終手段としてProject Navigatorで
+  両ファイルを右クリック→ファイルシステム上には存在するが取り込まれて
+  いない場合は一旦削除して`ptt-ios`グループへ改めて「Add Files」する、
+  の順に確認するよう案内した。この点は本ドキュメント側では`git show`や
+  実ビルドでの直接検証ができていないため、次アクションとして次回の
+  ユーザー報告待ちで残す
+
 </details>
+
 
 ---
 
@@ -2840,13 +2868,18 @@ URLハイパーリンク化・IME誤送信バグ修正をWeb版(`ptt-client`)・
     コミット・反映は本ドキュメント側では確認できていない。六訂・八訂等で
     踏んだ`git show`による直接検証を、次回リポジトリ一式が再アップロード
     された際に行う
-12. **（新規）五十七訂の変更のビルド確認・リポジトリへの反映確認**：
-    この環境にはXcodeツールチェーンが無くビルド実行確認ができなかった
-    ため(目視レビューのみ)、次回Xcodeが使える環境、またはユーザー側での
-    ビルド確認結果の報告を待つ。あわせて`tad-iizuka/FirebaseRTC`
-    リポジトリ本体への実際のコミット・反映も、item9・11と同様に
-    `git show`による直接検証を次回リポジトリ一式が再アップロードされた
-    際に行う
+12. **（優先度高・更新）五十七訂の変更のビルド確認・リポジトリへの反映確認**：
+    ユーザーの実機Xcodeビルドで4件のエラーが報告され、うち2件
+    (`AttributedString`の`.foregroundColor`/`.underlineStyle`への型推論
+    エラー)は実コードの不具合と判明し修正した。残り2件
+    (`ChatAvatarView`/`Linkify`が「Cannot find in scope」)は、この環境では
+    Xcodeビルドの実行確認自体ができないため、ファイル自体の構文問題か
+    プロジェクト側の取り込み(target membership)の問題かを本ドキュメント側
+    では切り分けられていない。次回、(a) 修正版での再ビルド結果、
+    (b) 上記2件のエラーが解消したか、を確認する。あわせて
+    `tad-iizuka/FirebaseRTC`リポジトリ本体への実際のコミット・反映も、
+    item9・11と同様に`git show`による直接検証を次回リポジトリ一式が
+    再アップロードされた際に行う
 
 ### 6.1 完了済みアクション（アーカイブ）
 

@@ -1725,8 +1725,8 @@ struct ContentView: View {
             var part = AttributedString(segment.value)
             if segment.kind == .url, let url = URL(string: segment.value) {
                 part.link = url
-                part.foregroundColor = .pttLive
-                part.underlineStyle = .single
+                part.foregroundColor = Color.pttLive
+                part.underlineStyle = Text.LineStyle(pattern: .solid, color: Color.pttLive)
             }
             result += part
         }
