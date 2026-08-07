@@ -38,6 +38,7 @@ import co.ubunifu.pttandroid.R
 import co.ubunifu.pttandroid.model.AttachmentKind
 import co.ubunifu.pttandroid.model.ChatAttachment
 import co.ubunifu.pttandroid.model.ChatMessage
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
@@ -100,7 +101,14 @@ class PTTChatStore(
                         uid = doc.getString("uid") ?: "",
                         displayName = doc.getString("displayName") ?: "",
                         text = doc.getString("text") ?: "",
-                        createdAtMillis = doc.getDate("createdAt")?.time,
+                        // [間隔・時刻表示バグ修正] serverTimestamp()確定前はデフォルトだと
+                        // createdAtがnullを返し、連続投稿のグルーピング判定(buildChatListItems)
+                        // が崩れて送信直後のメッセージだけ余分な間隔が入ってしまう。ESTIMATEで
+                        // ローカル推定時刻を即座に使い、サーバー確定後は自動的に正しい値へ更新される。
+                        createdAtMillis = doc.getDate(
+                            "createdAt",
+                            DocumentSnapshot.ServerTimestampBehavior.ESTIMATE,
+                        )?.time,
                         // [チャットUI刷新] 五十六訂より前のメッセージにはフィールド自体が
                         // 無いため、getString()はnullを返す(そのままChatMessageのdefault
                         // null許容フィールドへ渡る)。

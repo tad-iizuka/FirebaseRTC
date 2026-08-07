@@ -2280,6 +2280,8 @@ private fun ChatTimestamp(createdAtMillis: Long?) {
         fontFamily = Mono,
         fontSize = 9.sp,
         color = PTTColors.Muted,
+        maxLines = 1,
+        softWrap = false,
     )
 }
 
