@@ -1983,7 +1983,7 @@ private fun BadgeManageRow(
 //     日付が変わった箇所には区切りを挟む(5分以上間が空いたら出し直す)
 //
 // [五十六訂のIME誤送信バグについて] Web版で見つかった「日本語IMEの変換確定Enterが
-// 誤って送信をトリガーする」バグは、Android版のOutlinedTextField(singleLine + 
+// 誤って送信をトリガーする」バグは、Android版のOutlinedTextField(singleLine +
 // ImeAction.Send)には当てはまらないと判断した。Web(ブラウザ)のkeydownイベントは
 // 変換確定の押下も含めて生のキー入力を渡してくるが、AndroidのIME(Gboard等)は
 // 変換候補の確定をアプリ側へ伝播させず、エディタアクション(ここではSend)は
@@ -2293,7 +2293,7 @@ private fun ChatBubbleText(text: String, isMine: Boolean) {
             for (segment in co.ubunifu.pttandroid.chat.Linkify.segments(text)) {
                 if (segment.kind == co.ubunifu.pttandroid.chat.LinkifySegment.Kind.URL) {
                     pushStringAnnotation(tag = "URL", annotation = segment.value)
-                    withStyle(
+                    androidx.compose.ui.text.withStyle(
                         androidx.compose.ui.text.SpanStyle(
                             color = PTTColors.Live,
                             textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,

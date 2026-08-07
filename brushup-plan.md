@@ -2098,6 +2098,28 @@ Android CI/実機ビルドでの確認は本ドキュメント側では未実施
 確認済みの現状」機能差表の「チャットUI(LINE風バブル表示・アバター・
 URLリンク化)」行をWeb ✅・iOS ✅・Android ✅に更新する。新たに
 「Android CI/実機ビルドでの確認」「IME誤送信バグの実機確認(Android)」を
+
+**（2026-08-07 五十八訂・実機ビルドエラーの修正）** 上記の懸念通り、ユーザーの
+実機Android Studioビルド(`./gradlew assembleDebug`)で1件のエラーが報告された。
+
+- `compileDebugKotlin`で`Unresolved reference 'withStyle'`(`PTTApp.kt`の
+  `ChatBubbleText`内)。**実コードの不具合**だった。原因はiOS版五十七訂の
+  `AttributedString`エラーと構造が似ている: `pushStringAnnotation`・
+  `append`・`pop`は`AnnotatedString.Builder`クラスの**メンバー関数**なので
+  暗黙のレシーバ経由でimport無しに呼び出せるが、`withStyle`は
+  `androidx.compose.ui.text`パッケージの**トップレベル拡張関数**として
+  別途定義されており、暗黙のレシーバのスコープに入っていてもimportなしでは
+  解決できない。今回、他の新規APIはすべて完全修飾名(FQN)で書いていたにも
+  かかわらず`withStyle`だけ短縮名のまま書いてしまっていたのが原因。
+  `androidx.compose.ui.text.withStyle(...)`とFQN化して修正した。
+  なお`LocalUriHandler.current`についても同様の懸念(`current`が拡張
+  プロパティならimportが必要では)を検討したが、この`PTTApp.kt`内で
+  既存コードが`LocalContext.current`を(`current`自体は個別importせずに)
+  問題なく使えている実績があり、同じ解決メカニズムが働くと判断し
+  修正不要とした(実際、今回の報告でも`current`関連のエラーは出ていない)。
+  この環境ではAndroid CIの実行ができないため、修正が今回のエラーを
+  解消しただけで新たなエラーを生んでいないかは次回のビルド結果待ちとなる
+
 次アクションとして追加する。
 
 </details>
@@ -2984,19 +3006,17 @@ URLハイパーリンク化・IME誤送信バグ修正をWeb版(`ptt-client`)・
     `tad-iizuka/FirebaseRTC`リポジトリ本体への実際のコミット・反映も、
     item9・11と同様に`git show`による直接検証を次回リポジトリ一式が
     再アップロードされた際に行う
-13. **（優先度高・新規）五十八訂の変更のビルド確認・実機IME確認・
-    リポジトリへの反映確認**：本環境にはAndroid SDK/Gradleが無く
-    (`google()`等Mavenリポジトリへのネットワークアクセスも不可)、
-    `ChatAvatar.kt`・`PTTApp.kt`の変更はコンパイル未確認のまま(目視レビュー
-    のみ)。追加した`Linkify.kt`のみ、Android/Compose依存が無いため
-    apt経由でインストールした単体のKotlinコンパイラ(1.3.31。プロジェクト
-    本体のKotlin 2.0.20とはバージョンが異なる)で構文・型エラーが無いことを
-    確認できた。次回、(a) `.github/workflows/android-ci.yml`のAndroid CI
-    (`lintDebug`・`testDebugUnitTest`・`assembleDebug`)またはAndroid
-    Studioでの実ビルド結果、(b) 実機の日本語IME(Gboard等)でのチャット入力で
-    誤送信が起きないかの確認、(c) `tad-iizuka/FirebaseRTC`リポジトリ本体への
-    実際のコミット・反映(`git show`による直接検証)、の3点を次回リポジトリ
-    一式が再アップロードされた際に行う
+13. **（優先度高・更新）五十八訂の変更のビルド確認・実機IME確認・
+    リポジトリへの反映確認**：ユーザーの実機Android Studioビルドで1件の
+    エラー(`Unresolved reference 'withStyle'`)が報告され、実コードの不具合
+    (トップレベル拡張関数への未import参照)と判明し修正した(詳細は文書冒頭
+    「五十八訂・実機ビルドエラーの修正」参照)。本環境にはAndroid SDK/Gradle
+    が無くこの修正後の再ビルド確認自体はできていないため、次回、
+    (a) 修正版での`assembleDebug`再ビルド結果(このエラーが解消したか、
+    新たなエラーが出ていないか)、(b) 実機の日本語IME(Gboard等)でのチャット
+    入力で誤送信が起きないかの確認、(c) `tad-iizuka/FirebaseRTC`リポジトリ
+    本体への実際のコミット・反映(`git show`による直接検証)、の3点を次回
+    リポジトリ一式が再アップロードされた際に行う
 
 ### 6.1 完了済みアクション（アーカイブ）
 
