@@ -101,6 +101,11 @@ class PTTChatStore(
                         displayName = doc.getString("displayName") ?: "",
                         text = doc.getString("text") ?: "",
                         createdAtMillis = doc.getDate("createdAt")?.time,
+                        // [チャットUI刷新] 五十六訂より前のメッセージにはフィールド自体が
+                        // 無いため、getString()はnullを返す(そのままChatMessageのdefault
+                        // null許容フィールドへ渡る)。
+                        role = doc.getString("role"),
+                        photoUrl = doc.getString("photoUrl"),
                         attachment = parseAttachment(doc.get("attachment") as? Map<*, *>),
                     )
                 }

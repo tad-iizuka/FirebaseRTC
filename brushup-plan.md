@@ -1,7 +1,7 @@
 # PTTアプリ ブラッシュアップ計画（改定版）
 
 対象リポジトリ: `tad-iizuka/FirebaseRTC`
-作成日: 2026-07-09 ／ 最終改定: 2026-08-07（五十七訂）
+作成日: 2026-07-09 ／ 最終改定: 2026-08-07（五十八訂）
 
 > **⚠️ 巻き戻り事故について（2026-08-04 発見・記録）**
 >
@@ -35,7 +35,7 @@
 定義するビジョンの要点」以降の本文と「6. 次アクションの提案」を読めば足りる。
 
 <details>
-<summary>改定履歴（初訂〜五十七訂、クリックで展開）</summary>
+<summary>改定履歴（初訂〜五十八訂、クリックで展開）</summary>
 
 改定: 2026-07-24（README.md「Vision」に基づき全面改定）
 再改定: 2026-07-25（Guestロール・バッジシステムの詳細仕様を検討し反映）
@@ -1993,6 +1993,113 @@ Xcodeでのビルド確認は本ドキュメント側では未実施のため、
   実ビルドでの直接検証ができていないため、次アクションとして次回の
   ユーザー報告待ちで残す
 
+五十八訂: 2026-08-07（次アクションitem10のうちAndroid分を実施。五十六訂の
+Web版・五十七訂のiOS版と同じ設計をAndroidへ移植した。これでチャットUI刷新
+一式(バブル化・アバター・URLリンク化)が3クライアントすべてに揃った。
+
+**実装内容(`ptt-android`のみ。サーバー・Web・iOSの変更は無い)**:
+
+- `model/PTTModels.kt`: `ChatMessage`に`role`/`photoUrl`を追加(両方
+  `null`許容のデフォルト引数付き。五十六訂より前に送信された既存メッセージ
+  にはフィールド自体が存在しないための後方互換、iOS版`PTTChatStore.swift`と
+  同じ考え方)
+- `chat/PTTChatStore.kt`: Firestoreドキュメントから`role`/`photoUrl`を
+  `doc.getString(...)`でそのまま読み取るだけ(サーバー側は五十六訂時点で
+  既に対応済みのため、今回サーバーの変更は無い)
+- `ui/ChatAvatar.kt`(新規): Web版`ChatAvatar.vue`・iOS版`ChatAvatarView.swift`の
+  移植。`ChatAvatarView`コンポーザブルと`ChatAvatarPalette`オブジェクトで
+  構成し、photoUrl>Guest>頭文字+生成色の3段階優先順位は変えていない。
+  Guestアイコンはmaterial-icons-extendedへの依存を増やさない既存方針
+  (`PTTStatusIcons.kt`のコメント参照)に合わせ、新規アイコンを追加せず
+  既存の`R.drawable.ic_person`(LoginStatusIcon等のプレースホルダーと同じ
+  アセット。iOS版のSF Symbols`person.fill`に相当)を再利用した。
+  生成色のuidハッシュは、JS版の`(hash << 5) - hash + charCode; hash |= 0`を
+  KotlinのInt標準演算(2の補数オーバーフローで暗黙に折り返す。JavaのIntと
+  同じ)でそのまま再現でき、Swift版のような特別なオーバーフロー演算子が
+  不要だった分、Web版に最も近い実装になっている。また、添字算出を
+  `((hash % size) + size) % size`とし、Web版・iOS版が使っている`abs()`
+  ではなく剰余演算だけで求める形にした(`abs(Int.MIN_VALUE)`は依然として
+  負の値のままになり得るため、理論上0..size-1の範囲を外れて配列アクセスが
+  クラッシュしうる。極めて低確率だが、剰余だけで求める今回の書き方なら
+  その場合でも常に範囲内に収まる。Web版・iOS版への同種の修正は、発生確率が
+  天文学的に低いことと、影響範囲が生成アバターの配色1点に閉じることから、
+  今回は見送り次アクションとしては起票しない)
+- `chat/Linkify.kt`(新規): Web版`lib/linkify.ts`・iOS版`Linkify.swift`の移植。
+  Kotlinの`Regex`で同じURL_PATTERN(日本語全角文字の除外レンジ含む)を再現し、
+  テキスト/URLのセグメント配列に分解する
+- `res/drawable/ic_chat_video.xml`・`ic_chat_document.xml`(新規): 動画/PDF
+  添付のベクターアイコン。Web版はlucideの`Video`/`FileText`、iOS版はSF
+  Symbolsの`video.fill`/`doc.text.fill`を使っているが、Android側は
+  material-icons-extendedへの依存を増やさない既存方針のため、Material
+  Design標準アイコン("movie"・"description")の輪郭パスを`ic_person.xml`と
+  同じ形式(単色シルエット、`Icon(tint=...)`で着色)の自前vector drawableとして
+  追加した
+- `ui/PTTApp.kt`(`ChatSection`まわりを全面書き換え):
+  - Web版`listItems`のcomputed・iOS版`chatListItems(_:)`と同じロジックで
+    日付区切り・5分以内の連続投稿ヘッダー省略を実装(`buildChatListItems()`)
+  - 自分の発言はLINE標準(右寄せ・アバター/名前非表示)、相手は左寄せ+
+    アバター(ヘッダー省略時は位置合わせの空スペース)+名前
+  - テキストは角丸+枠線+背景色の吹き出し。時刻は吹き出しの外側
+    (自分は左・相手は右)に表示(Web版のflex-row-reverse・iOS版の表示順序と
+    同じ視覚順序)
+  - URLハイパーリンク化は`ClickableText` + `AnnotatedString`のURL
+    アノテーションで実装した。より新しい`LinkAnnotation.Url`
+    (Compose Foundation 1.7以降)という選択肢もあったが、この環境では
+    実際のCompose依存関係を解決してビルドを試すことができないため、
+    Compose初期から存在し破壊的変更のリスクが低い`ClickableText`を
+    あえて選んだ(非推奨警告が出る可能性はあるが、コンパイルエラーには
+    ならない設定であることは`build.gradle.kts`のコンパイラオプションで
+    確認済み)
+  - 添付ファイル表示もテキスト吹き出しと統一感のある角丸+枠線スタイルへ
+    変更。動画/PDFは上記の新規vector drawable+ファイル名で表示
+  - Chatタブがそれ専用の全画面タブになっている構成(iOS版の五訂の
+    モバイルUI再編と同じ)に合わせ、メッセージ一覧を固定高さ(160dp)から
+    `Modifier.weight(1f)`による残り縦幅いっぱいの表示へ変更した
+
+**五十六訂のIME誤送信バグについて**: 五十六訂の次アクションitem10は
+「Androidの日本語入力(IME)でも同種の問題が起こりうるため、移植時に同じ
+観点での確認が必要」としていた。今回確認した限り、Android版の入力欄
+(`OutlinedTextField`、`singleLine = true` + `KeyboardOptions(imeAction =
+ImeAction.Send)`)は、AndroidのIME(Gboard등)が変換候補の確定操作自体を
+アプリ側のエディタアクションとして伝播させない設計のため、Web版で見つかった
+ような「変換確定のEnterで誤送信される」バグは原理上起こりにくいと判断した
+(ブラウザのkeydownイベントが変換確定の押下も含めて生のキー入力を渡してくる
+のに対し、AndroidのIMEアーキテクチャではエディタアクション=ユーザーが
+明示的に確定後のEnter/送信ボタンを押した時にのみ発火する)。ただし本環境には
+実機・実IME環境が無く、確認は設計上の推論に留まる(iOS版が`.onSubmit`の
+挙動について踏んだのと同じ留保)。実機での確認を次アクションとして残す。
+
+**ビルド確認について**: この環境にはAndroid SDK・Gradleの実行環境が無く、
+`google()`等のMavenリポジトリへのネットワークアクセスも許可されていない
+ため、`./gradlew assembleDebug`等によるWeb版相当の実行確認はできなかった。
+ただし、追加した新規ファイルのうちAndroid/Compose依存を持たない
+`chat/Linkify.kt`のみは、この環境にapt経由でインストールしたKotlin
+コンパイラ(1.3.31。プロジェクト本体が使うKotlin 2.0.20より大幅に古い)で
+単体コンパイルし、構文・型エラーが無いことを実際に確認できた(末尾カンマ
+構文はKotlin 1.4以降の機能のため、この古いコンパイラでのみ末尾カンマを
+一時的に外した上での検証。プロジェクト本体のKotlin 2.0.20では末尾カンマは
+問題なくサポートされる)。`ChatAvatar.kt`・`PTTApp.kt`の変更箇所は
+Compose/Coil/Android SDKへの依存があるためこの方法では検証できず、
+目視でのAPIシグネチャ照合(既存importの再利用可否・関数の可視性・
+既存コードで確立された利用パターンとの整合)に留まる。Android CI
+(`.github/workflows/android-ci.yml`の`lintDebug`・`testDebugUnitTest`・
+`assembleDebug`)またはローカルのAndroid Studioでの実ビルド確認を
+次アクションとして残す(六訂・八訂・五十七訂で踏んだのと同じ、実行確認が
+取れない場合の限界として記録する)。
+
+**成果物の反映状況について**: 十訂・五十五訂〜五十七訂と同じ方針で、今回も
+アップロードされたリポジトリ一式に対してファイルを直接編集した。
+`tad-iizuka/FirebaseRTC`リポジトリ本体への実際のコミット・反映、および
+Android CI/実機ビルドでの確認は本ドキュメント側では未実施のため、次
+アクションとして残す(「6. 次アクションの提案」参照)。
+
+**次アクションへの影響**: 「6. 次アクションの提案」item10(チャットUI刷新
+一式のiOS/Android移植)はこれで全プラットフォーム完了。前掲「1. 実コード
+確認済みの現状」機能差表の「チャットUI(LINE風バブル表示・アバター・
+URLリンク化)」行をWeb ✅・iOS ✅・Android ✅に更新する。新たに
+「Android CI/実機ビルドでの確認」「IME誤送信バグの実機確認(Android)」を
+次アクションとして追加する。
+
 </details>
 
 
@@ -2070,7 +2177,7 @@ Message）はコード上どこにも見当たらず、依然として未着手�
 | **組織階層(Company/Branch/Site)** | ✅ | ✅ | ✅ | Phase11。管理画面で団体・再帰node・Room割当を管理。各ユーザー向けUIのパンくず表示も2026-08-03(四十五訂)で実装完了 |
 | **参加者一覧のバッジ表示** | ✅ | ✅ | ✅ | Phase13。Room APIを20秒間隔でポーリングし最優先1件を表示 |
 | **開始/終了時刻(Room Schedule)** | ✅ | ❌ | ❌ | 2026-08-05、五十三訂で発見。本体UIの状態出し分け（待機画面/チャット閲覧専用画面）はサーバー(`lib/roomSchedule.js`)・`firestore.rules`・`admin-dashboard`・`ptt-client`のみ実装済みで、iOS/Androidは未着手のまま（「6. 次アクションの提案」item5参照）。ただし2026-08-06(五十五訂)で、保存済みルーム履歴欄の表示用途に限り`PTTRoomManager`のschedule値パース自体はiOS/Androidにも追加済み（詳細は五十五訂参照。本体UIの未実装状態は変わらないためこの行のiOS/Android列は❌のまま） |
-| **チャットUI(LINE風バブル表示・アバター・URLリンク化)** | ✅ | ✅ | ❌ | 2026-08-07、五十六訂でWeb版を実装(アバターは写真>Guestアイコン>生成アバターの優先順位、自分の発言はLINE標準(右寄せ・アバター非表示)。副次的にIME変換確定時の誤送信バグ(Phase5から存在)も修正)。同日、五十七訂でiOSへ移植完了(`ChatAvatarView.swift`・`Linkify.swift`新設、`PTTChatStore.swift`へrole/photoUrl追加、`ContentView.swift`のチャット表示を全面書き換え)。Xcodeでのビルド確認は未実施(次アクション参照)。Android移植は引き続き未着手（「6. 次アクションの提案」item10参照） |
+| **チャットUI(LINE風バブル表示・アバター・URLリンク化)** | ✅ | ✅ | ✅ | 2026-08-07、五十六訂でWeb版を実装(アバターは写真>Guestアイコン>生成アバターの優先順位、自分の発言はLINE標準(右寄せ・アバター非表示)。副次的にIME変換確定時の誤送信バグ(Phase5から存在)も修正)。同日、五十七訂でiOSへ移植(Xcodeでのビルド確認は未実施)、五十八訂でAndroidへ移植(`ChatAvatar.kt`・`Linkify.kt`新設、`PTTModels.kt`/`PTTChatStore.kt`へrole/photoUrl追加、`PTTApp.kt`のChatSectionを全面書き換え)。3クライアントとも実機/実ビルドでの最終確認は未実施（「6. 次アクションの提案」参照） |
 
 管理者サイトは`admin-dashboard/`(Vue 3+TS+Pinia)としてルーム一覧/詳細・
 監査ログ・管理者権限・録音履歴DLまで実装済み。閲覧専用だった旧
@@ -2624,7 +2731,7 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
 
 ---
 
-## 6. 次アクションの提案（2026-08-07 五十六訂で更新）
+## 6. 次アクションの提案（2026-08-07 五十八訂で更新）
 
 <details>
 <summary>この一覧のitem番号がどう変遷してきたか（クリックで展開）</summary>
@@ -2850,18 +2957,15 @@ URLハイパーリンク化・IME誤送信バグ修正をWeb版(`ptt-client`)・
 ような「目視確認のみ」の限界は今回については無い。新たに以下2件を
 次アクションとして追加する。
 
-10. **（優先度高）チャットUI刷新一式のAndroid移植**：五十七訂でiOS分は
-    完了した。残るAndroidへ、Web版(`ptt-client/src/components/
-    ChatPanel.vue`・`ChatAvatar.vue`・`lib/linkify.ts`・
-    `lib/avatarColor.ts`)およびiOS版(`ChatAvatarView.swift`・
-    `Linkify.swift`)の設計を土台に「LINE風バブル・3段階優先順位の
-    アバター(写真>Guestアイコン>生成アバター)・日付区切り・連続投稿の
-    詰め表示・PDF/動画のベクターアイコン化・URLハイパーリンク化」を移植
-    する。IME変換確定時の誤送信修正(五十六訂でWeb版のみ発見・修正済みの
-    バグ)についても、Androidの日本語入力(IME)で同種の問題が起こりうる
-    かをこの移植時に確認する(iOS版は五十七訂で確認した結果、
-    `TextField`+`.onSubmit`の標準動作により該当する誤送信経路が無いと
-    判断し追加対応不要とした。詳細は文書冒頭「五十七訂」参照)
+10. ✅ **完了（2026-08-07、五十八訂）**: チャットUI刷新一式のAndroid移植。
+    Web版(`ptt-client/src/components/ChatPanel.vue`・`ChatAvatar.vue`・
+    `lib/linkify.ts`・`lib/avatarColor.ts`)およびiOS版
+    (`ChatAvatarView.swift`・`Linkify.swift`)の設計を土台に、
+    `ui/ChatAvatar.kt`・`chat/Linkify.kt`(新規)・`PTTApp.kt`の`ChatSection`
+    全面書き換えとして実装した。IME変換確定時の誤送信については、Androidの
+    IMEアーキテクチャ上、変換確定操作自体はアプリ側のエディタアクションに
+    伝播しない設計のため該当する誤送信経路は無いと判断した(推論に留まり
+    実機確認はできていない。詳細は文書冒頭「五十八訂」参照)
 11. **（新規）五十六訂の変更のリポジトリへの反映確認**：十訂・五十五訂と
     同じく、今回もアップロードされたリポジトリ一式に対する直接編集・
     パッチ/zip返却のみで、`tad-iizuka/FirebaseRTC`リポジトリへの実際の
@@ -2880,6 +2984,19 @@ URLハイパーリンク化・IME誤送信バグ修正をWeb版(`ptt-client`)・
     `tad-iizuka/FirebaseRTC`リポジトリ本体への実際のコミット・反映も、
     item9・11と同様に`git show`による直接検証を次回リポジトリ一式が
     再アップロードされた際に行う
+13. **（優先度高・新規）五十八訂の変更のビルド確認・実機IME確認・
+    リポジトリへの反映確認**：本環境にはAndroid SDK/Gradleが無く
+    (`google()`等Mavenリポジトリへのネットワークアクセスも不可)、
+    `ChatAvatar.kt`・`PTTApp.kt`の変更はコンパイル未確認のまま(目視レビュー
+    のみ)。追加した`Linkify.kt`のみ、Android/Compose依存が無いため
+    apt経由でインストールした単体のKotlinコンパイラ(1.3.31。プロジェクト
+    本体のKotlin 2.0.20とはバージョンが異なる)で構文・型エラーが無いことを
+    確認できた。次回、(a) `.github/workflows/android-ci.yml`のAndroid CI
+    (`lintDebug`・`testDebugUnitTest`・`assembleDebug`)またはAndroid
+    Studioでの実ビルド結果、(b) 実機の日本語IME(Gboard等)でのチャット入力で
+    誤送信が起きないかの確認、(c) `tad-iizuka/FirebaseRTC`リポジトリ本体への
+    実際のコミット・反映(`git show`による直接検証)、の3点を次回リポジトリ
+    一式が再アップロードされた際に行う
 
 ### 6.1 完了済みアクション（アーカイブ）
 

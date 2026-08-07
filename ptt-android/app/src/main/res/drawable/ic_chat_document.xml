@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    [チャットUI刷新・五十六訂/五十七訂のAndroid移植]
+    PDF添付メッセージのファイル名バッジに使うアイコン。Web版はlucideの`FileText`、
+    iOS版はSF Symbolsの`doc.text.fill`を使っており、Android側はic_person.xmlと
+    同じ方針(material-icons-extendedへの依存を増やさない)で、Material Design
+    標準の"description"アイコンの輪郭パスを自前のvector drawableとして定義する。
+    塗り色はComposeのIcon(tint=...)側で指定する。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M14,2H6c-1.1,0 -1.99,0.9 -1.99,2L4,20c0,1.1 0.89,2 1.99,2H18c1.1,0 2,-0.9 2,-2V8L14,2zM16,18H8v-2h8v2zM16,14H8v-2h8v2zM13,9V3.5L18.5,9H13z" />
+</vector>

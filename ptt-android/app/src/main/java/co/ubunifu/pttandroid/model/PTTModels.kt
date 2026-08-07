@@ -59,6 +59,14 @@ data class ChatMessage(
     val displayName: String,
     val text: String,
     val createdAtMillis: Long?,
+    // [チャットUI刷新・五十六訂/五十七訂のAndroid移植] 送信時点のroleとphotoUrl。
+    // token-server/routes/messages.js(五十六訂)が書き込むようになったスナップショット値。
+    // moderator任命等で後からroleが変わっても、過去メッセージのroleは遡及更新されない
+    // (displayNameのニックネーム変更が過去メッセージへ遡及しないのと同じ扱い)。
+    // photoUrlはプロフィール写真機能が未実装の現状は常にnull。
+    // 五十六訂より前に送信された既存メッセージにはフィールド自体が存在しないため両方null許容。
+    val role: String? = null,
+    val photoUrl: String? = null,
     // [Phase16] 添付が無いメッセージはnull
     val attachment: ChatAttachment? = null,
 )

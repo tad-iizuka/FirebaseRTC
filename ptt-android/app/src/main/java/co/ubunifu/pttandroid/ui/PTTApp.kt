@@ -48,6 +48,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -1967,6 +1968,86 @@ private fun BadgeManageRow(
     }
 }
 
+// MARK: - チャットUI刷新(五十六訂のWeb版・五十七訂のiOS版に続くAndroid移植・LINEのトーク画面風)
+//
+// Web版(ptt-client/src/components/ChatPanel.vue)・iOS版(ContentView.swiftの
+// chatSection/chatMessageRow)の移植。
+//   - 左端にアバター、アバター上揃え・小さめフォントで名前
+//   - テキストは枠付き・背景付きの吹き出し、コンテンツ右下(自分は左下)に時刻
+//   - PDF/動画等はベクターアイコン＋ファイル名
+//   - URLはハイパーリンク化(ClickableText + AnnotatedStringのURLアノテーション。
+//     生のHTML化やWebViewには頼らないため、Web版がv-html不使用でXSSを避けている
+//     のと同じ安全性を保てる)
+//   - 自分の発言はLINE標準(右寄せ・アバター/名前非表示)
+//   - 連続する同一送信者の発言はヘッダー(アバター+名前)を詰めて表示し、
+//     日付が変わった箇所には区切りを挟む(5分以上間が空いたら出し直す)
+//
+// [五十六訂のIME誤送信バグについて] Web版で見つかった「日本語IMEの変換確定Enterが
+// 誤って送信をトリガーする」バグは、Android版のOutlinedTextField(singleLine + 
+// ImeAction.Send)には当てはまらないと判断した。Web(ブラウザ)のkeydownイベントは
+// 変換確定の押下も含めて生のキー入力を渡してくるが、AndroidのIME(Gboard等)は
+// 変換候補の確定をアプリ側へ伝播させず、エディタアクション(ここではSend)は
+// ユーザーが明示的に確定後のEnter/送信ボタンを押した時にのみ発火する設計のため。
+// ただし本環境では実機・実IMEでの確認はできていないため、次アクションとして
+// 実機確認を残す(iOS版が.onSubmitについて踏んだのと同じ留保)。
+
+private const val CHAT_GROUP_WINDOW_MS = 5 * 60 * 1000L
+
+private sealed class ChatListItem {
+    abstract val key: String
+
+    data class DateSeparator(override val key: String, val label: String) : ChatListItem()
+    data class MessageItem(
+        override val key: String,
+        val message: co.ubunifu.pttandroid.model.ChatMessage,
+        val showHeader: Boolean,
+    ) : ChatListItem()
+}
+
+/** Web版`listItems`のcomputed・iOS版`chatListItems(_:)`と同じロジック:
+ *  日付区切りを挟み、直前と同じ送信者かつ5分以内の連続投稿ではヘッダー
+ *  (アバター+名前)を省略する。 */
+private fun buildChatListItems(
+    messages: List<co.ubunifu.pttandroid.model.ChatMessage>,
+): List<ChatListItem> {
+    val dateKeyFormat = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US)
+    val dateLabelFormat = java.text.SimpleDateFormat(
+        android.text.format.DateFormat.getBestDateTimePattern(java.util.Locale.getDefault(), "MMMMd"),
+        java.util.Locale.getDefault(),
+    )
+
+    val items = mutableListOf<ChatListItem>()
+    var prevMessage: co.ubunifu.pttandroid.model.ChatMessage? = null
+    var prevDateKey: String? = null
+
+    for (message in messages) {
+        val createdAtMillis = message.createdAtMillis
+        val dateKey = createdAtMillis?.let { dateKeyFormat.format(java.util.Date(it)) }
+
+        if (dateKey != null && dateKey != prevDateKey) {
+            val label = dateLabelFormat.format(java.util.Date(createdAtMillis!!))
+            items += ChatListItem.DateSeparator(key = "date-$dateKey", label = label)
+            prevMessage = null // 日付が変わったら必ずヘッダーを出し直す
+        }
+
+        val sameSenderAsPrev = prevMessage?.uid == message.uid
+        val prevCreatedAt = prevMessage?.createdAtMillis
+        val withinGroupWindow =
+            sameSenderAsPrev &&
+                prevCreatedAt != null &&
+                createdAtMillis != null &&
+                (createdAtMillis - prevCreatedAt) < CHAT_GROUP_WINDOW_MS
+        val showHeader = !withinGroupWindow
+
+        items += ChatListItem.MessageItem(key = message.id, message = message, showHeader = showHeader)
+
+        prevMessage = message
+        prevDateKey = dateKey ?: prevDateKey
+    }
+
+    return items
+}
+
 @Composable
 private fun ChatSection(
     messages: List<co.ubunifu.pttandroid.model.ChatMessage>,
@@ -2015,63 +2096,30 @@ private fun ChatSection(
         }
     }
 
-    Column(Modifier.fillMaxWidth()) {
+    // [五十七訂・モバイルUI再編との整合] Chatはそれ専用のタブとして全画面を占める
+    // (iOS版と同じ構成)ため、メッセージ一覧は固定高さではなく残り縦幅いっぱいに広げる。
+    Column(Modifier.fillMaxSize()) {
         Text(stringResource(R.string.chat_title), fontFamily = Mono, fontSize = 10.sp, color = PTTColors.Muted)
         Spacer(Modifier.height(6.dp))
-        LazyColumn(Modifier.fillMaxWidth().height(160.dp)) {
-            items(messages) { message ->
-                Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-                    if (message.text.isNotEmpty()) {
-                        Text(
-                            "${message.displayName}: ${message.text}",
-                            fontFamily = Mono,
-                            fontSize = 12.sp,
-                            color = if (message.uid == myUid) PTTColors.Live else MaterialTheme.colorScheme.onSurface,
-                        )
-                    } else {
-                        Text(
-                            message.displayName,
-                            fontFamily = Mono,
-                            fontSize = 12.sp,
-                            color = if (message.uid == myUid) PTTColors.Live else MaterialTheme.colorScheme.onSurface,
-                        )
-                    }
-                    message.attachment?.let { attachment ->
-                        Spacer(Modifier.height(2.dp))
-                        if (attachment.kind == AttachmentKind.IMAGE) {
-                            val thumbUrl = thumbSrcByMessageId[message.id]
-                            if (thumbUrl != null) {
-                                AsyncImage(
-                                    model = thumbUrl,
-                                    contentDescription = attachment.fileName,
-                                    contentScale = ContentScale.Fit,
-                                    modifier = Modifier
-                                        .height(96.dp)
-                                        .clickable { openAttachment(message.id) },
-                                )
-                            } else {
-                                Text(
-                                    "[${stringResource(R.string.chat_attachment_loading)}]",
-                                    fontFamily = Mono,
-                                    fontSize = 11.sp,
-                                    color = PTTColors.Muted,
-                                    modifier = Modifier.clickable { openAttachment(message.id) },
-                                )
-                            }
-                        } else {
-                            val icon = if (attachment.kind == AttachmentKind.VIDEO) "\uD83C\uDFAC" else "\uD83D\uDCC4"
-                            Text(
-                                "$icon ${attachment.fileName}",
-                                fontFamily = Mono,
-                                fontSize = 11.sp,
-                                color = PTTColors.Muted,
-                                modifier = Modifier.clickable { openAttachment(message.id) },
-                            )
-                        }
-                    }
+
+        val listItems = remember(messages) { buildChatListItems(messages) }
+
+        LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
+            items(listItems, key = { it.key }) { item ->
+                when (item) {
+                    is ChatListItem.DateSeparator -> ChatDateSeparator(item.label)
+                    is ChatListItem.MessageItem -> ChatMessageRow(
+                        message = item.message,
+                        showHeader = item.showHeader,
+                        myUid = myUid,
+                        thumbUrl = thumbSrcByMessageId[item.message.id],
+                        onOpenAttachment = { id -> openAttachment(id) },
+                        modifier = Modifier.padding(top = if (item.showHeader) 8.dp else 2.dp),
+                    )
                 }
             }
         }
+
         errorMessage?.let { Text(it, color = PTTColors.Danger, fontFamily = Mono, fontSize = 11.sp) }
 
         if (pendingAttachmentName != null) {
@@ -2098,6 +2146,7 @@ private fun ChatSection(
                 }
             }
         } else {
+            Spacer(Modifier.height(6.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedButton(
                     onClick = onPickAttachment,
@@ -2122,6 +2171,230 @@ private fun ChatSection(
                     Text(stringResource(R.string.chat_send), fontFamily = Mono)
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ChatDateSeparator(label: String) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        Text(
+            label,
+            fontFamily = Mono,
+            fontSize = 10.sp,
+            color = PTTColors.Muted,
+            modifier = Modifier
+                .clip(androidx.compose.foundation.shape.RoundedCornerShape(50))
+                .border(BorderStroke(1.dp, PTTColors.Line), androidx.compose.foundation.shape.RoundedCornerShape(50))
+                .padding(horizontal = 10.dp, vertical = 3.dp),
+        )
+    }
+}
+
+@Composable
+private fun ChatMessageRow(
+    message: co.ubunifu.pttandroid.model.ChatMessage,
+    showHeader: Boolean,
+    myUid: String?,
+    thumbUrl: String?,
+    onOpenAttachment: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val isMine = message.uid == myUid
+    val avatarSize = 34.dp
+
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = if (isMine) Arrangement.End else Arrangement.Start,
+    ) {
+        if (!isMine) {
+            // 相手側アバター列。連続投稿でヘッダーを出さない行は、
+            // 位置を揃えるための空スペース
+            Box(Modifier.size(avatarSize)) {
+                if (showHeader) {
+                    ChatAvatarView(
+                        uid = message.uid,
+                        displayName = message.displayName,
+                        role = message.role,
+                        photoUrl = message.photoUrl,
+                        size = avatarSize,
+                    )
+                }
+            }
+            Spacer(Modifier.width(8.dp))
+        }
+
+        Column(
+            horizontalAlignment = if (isMine) Alignment.End else Alignment.Start,
+            modifier = Modifier.widthIn(max = 260.dp),
+        ) {
+            // 相手の名前(自分の発言では名乗る必要が無いため出さない)
+            if (!isMine && showHeader) {
+                Text(
+                    message.displayName,
+                    fontFamily = Mono,
+                    fontSize = 11.sp,
+                    color = PTTColors.Muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(2.dp))
+            }
+
+            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                if (isMine) ChatTimestamp(message.createdAtMillis)
+                if (message.text.isNotEmpty()) {
+                    ChatBubbleText(message.text, isMine = isMine)
+                }
+                if (!isMine) ChatTimestamp(message.createdAtMillis)
+            }
+
+            message.attachment?.let { attachment ->
+                Spacer(Modifier.height(3.dp))
+                ChatAttachmentBubble(
+                    attachment = attachment,
+                    messageId = message.id,
+                    thumbUrl = thumbUrl,
+                    onOpen = onOpenAttachment,
+                )
+            }
+        }
+    }
+}
+
+private val chatTimeFormat: java.text.SimpleDateFormat by lazy {
+    java.text.SimpleDateFormat(
+        android.text.format.DateFormat.getBestDateTimePattern(java.util.Locale.getDefault(), "jm"),
+        java.util.Locale.getDefault(),
+    )
+}
+
+@Composable
+private fun ChatTimestamp(createdAtMillis: Long?) {
+    Text(
+        text = createdAtMillis?.let { chatTimeFormat.format(java.util.Date(it)) } ?: "",
+        fontFamily = Mono,
+        fontSize = 9.sp,
+        color = PTTColors.Muted,
+    )
+}
+
+/** URLをハイパーリンク化したテキスト吹き出し。`v-html`を使わないWeb版・生のHTML化を
+ *  しないiOS版と同様、ClickableText + AnnotatedStringのURLアノテーションのみを使う
+ *  ため任意の文字列を安全に扱える。 */
+@Composable
+private fun ChatBubbleText(text: String, isMine: Boolean) {
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+    val annotated = remember(text) {
+        androidx.compose.ui.text.buildAnnotatedString {
+            for (segment in co.ubunifu.pttandroid.chat.Linkify.segments(text)) {
+                if (segment.kind == co.ubunifu.pttandroid.chat.LinkifySegment.Kind.URL) {
+                    pushStringAnnotation(tag = "URL", annotation = segment.value)
+                    withStyle(
+                        androidx.compose.ui.text.SpanStyle(
+                            color = PTTColors.Live,
+                            textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
+                        ),
+                    ) {
+                        append(segment.value)
+                    }
+                    pop()
+                } else {
+                    append(segment.value)
+                }
+            }
+        }
+    }
+
+    androidx.compose.foundation.text.ClickableText(
+        text = annotated,
+        style = androidx.compose.ui.text.TextStyle(fontFamily = Mono, fontSize = 13.sp, color = PTTColors.Text),
+        modifier = Modifier
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
+            .background(if (isMine) PTTColors.Accent.copy(alpha = 0.15f) else PTTColors.Panel.copy(alpha = 0.6f))
+            .border(
+                BorderStroke(1.dp, if (isMine) PTTColors.Accent.copy(alpha = 0.4f) else PTTColors.Line),
+                androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+            )
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+        onClick = { offset ->
+            annotated.getStringAnnotations(tag = "URL", start = offset, end = offset)
+                .firstOrNull()
+                ?.let { uriHandler.openUri(it.item) }
+        },
+    )
+}
+
+/** [Phase16] 添付ファイルの表示。画像はサムネイルを取得して表示、タップすると
+ *  `getAttachmentUrl`で発行した本体の署名付きURLを外部ビューア(ブラウザ等)で開く。
+ *  [五十七訂] Web版・iOS版に合わせ、テキスト吹き出しと統一感のある角丸+枠線
+ *  スタイルにし、動画/PDFはベクターアイコン(ic_chat_video/ic_chat_document)+
+ *  ファイル名で表示する。 */
+@Composable
+private fun ChatAttachmentBubble(
+    attachment: co.ubunifu.pttandroid.model.ChatAttachment,
+    messageId: String,
+    thumbUrl: String?,
+    onOpen: (String) -> Unit,
+) {
+    if (attachment.kind == AttachmentKind.IMAGE) {
+        Box(
+            modifier = Modifier
+                .clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
+                .background(PTTColors.Panel.copy(alpha = 0.6f))
+                .border(BorderStroke(1.dp, PTTColors.Line), androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
+                .padding(2.dp)
+                .clickable { onOpen(messageId) },
+        ) {
+            if (thumbUrl != null) {
+                AsyncImage(
+                    model = thumbUrl,
+                    contentDescription = attachment.fileName,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .heightIn(max = 140.dp)
+                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp)),
+                )
+            } else {
+                Text(
+                    "[${stringResource(R.string.chat_attachment_loading)}]",
+                    fontFamily = Mono,
+                    fontSize = 11.sp,
+                    color = PTTColors.Muted,
+                    modifier = Modifier.padding(8.dp),
+                )
+            }
+        }
+    } else {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier
+                .clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
+                .background(PTTColors.Panel.copy(alpha = 0.6f))
+                .border(BorderStroke(1.dp, PTTColors.Line), androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
+                .clickable { onOpen(messageId) }
+                .padding(horizontal = 10.dp, vertical = 7.dp),
+        ) {
+            Icon(
+                painter = painterResource(
+                    if (attachment.kind == AttachmentKind.VIDEO) R.drawable.ic_chat_video else R.drawable.ic_chat_document,
+                ),
+                contentDescription = null,
+                tint = PTTColors.Muted,
+                modifier = Modifier.size(15.dp),
+            )
+            Text(
+                attachment.fileName,
+                fontFamily = Mono,
+                fontSize = 11.sp,
+                color = PTTColors.Text,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
