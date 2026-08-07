@@ -1443,9 +1443,9 @@ struct ContentView: View {
                 .foregroundColor(.pttMuted)
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(chat.messages) { message in
-                        chatMessageRow(message)
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(chatListItems(chat.messages)) { item in
+                        chatListItemView(item)
                     }
                 }
             }
@@ -1540,54 +1540,253 @@ struct ContentView: View {
 
     /// [Phase16] チャットメッセージ1件分の表示行。テキストに加えて添付があれば
     /// 画像サムネイル、または動画/PDFのファイル名バッジを表示する。
-    private func chatMessageRow(_ message: ChatMessage) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("\(message.displayName): \(message.text)")
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundColor(
-                    message.uid == auth.currentUser?.uid
-                        ? .pttLive
-                        : .pttText
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
+    // MARK: - チャットUI刷新(五十六訂のiOS移植・LINEのトーク画面風)
+    //
+    // Web版(ptt-client/src/components/ChatPanel.vue)の移植。
+    //   - 左端にアバター、アバター上揃え・小さめフォントで名前
+    //   - テキストは枠付き・背景付きの吹き出し、コンテンツ右下(自分は左下)に時刻
+    //   - PDF/動画等はベクターアイコン＋ファイル名
+    //   - URLはハイパーリンク化
+    //   - 自分の発言はLINE標準(右寄せ・アバター/名前非表示)
+    //   - 連続する同一送信者の発言はヘッダー(アバター+名前)を詰めて表示し、
+    //     日付が変わった箇所には区切りを挟む(5分以上間が空いたら出し直す)
 
-            if let attachment = message.attachment, let messageId = message.id {
-                chatAttachmentView(attachment: attachment, messageId: messageId)
+    private enum ChatListItem: Identifiable {
+        case date(key: String, label: String)
+        case message(key: String, message: ChatMessage, showHeader: Bool)
+
+        var id: String {
+            switch self {
+            case .date(let key, _): return key
+            case .message(let key, _, _): return key
             }
         }
+    }
+
+    private static let chatGroupWindow: TimeInterval = 5 * 60
+
+    private static let chatDateKeyFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd"
+        return formatter
+    }()
+
+    private static let chatDateLabelFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.setLocalizedDateFormatFromTemplate("MMMMd")
+        return formatter
+    }()
+
+    private static let chatTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.setLocalizedDateFormatFromTemplate("jm")
+        return formatter
+    }()
+
+    /// Web版`listItems`のcomputedと同じロジック: 日付区切りを挟み、
+    /// 直前と同じ送信者かつ5分以内の連続投稿ではヘッダー(アバター+名前)を省略する。
+    private func chatListItems(_ messages: [ChatMessage]) -> [ChatListItem] {
+        var items: [ChatListItem] = []
+        var prevMessage: ChatMessage?
+        var prevDateKey: String?
+
+        for message in messages {
+            let dateKey = Self.chatDateKeyFormatter.string(from: message.createdAt)
+            if dateKey != prevDateKey {
+                let label = Self.chatDateLabelFormatter.string(from: message.createdAt)
+                items.append(.date(key: "date-\(dateKey)", label: label))
+                prevMessage = nil // 日付が変わったら必ずヘッダーを出し直す
+            }
+
+            let sameSenderAsPrev = prevMessage?.uid == message.uid
+            let withinGroupWindow =
+                sameSenderAsPrev
+                    && message.createdAt.timeIntervalSince(prevMessage?.createdAt ?? .distantPast) < Self.chatGroupWindow
+            let showHeader = !withinGroupWindow
+
+            items.append(.message(key: message.id ?? message.uid + dateKey, message: message, showHeader: showHeader))
+
+            prevMessage = message
+            prevDateKey = dateKey
+        }
+
+        return items
+    }
+
+    @ViewBuilder
+    private func chatListItemView(_ item: ChatListItem) -> some View {
+        switch item {
+        case .date(_, let label):
+            HStack {
+                Spacer()
+                Text(label)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.pttMuted)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 3)
+                    .overlay(Capsule().strokeBorder(Color.pttLine, lineWidth: 1))
+                Spacer()
+            }
+            .padding(.vertical, 8)
+        case .message(_, let message, let showHeader):
+            chatMessageRow(message, showHeader: showHeader)
+                .padding(.top, showHeader ? 8 : 2)
+        }
+    }
+
+    private func chatMessageRow(_ message: ChatMessage, showHeader: Bool) -> some View {
+        let isMine = message.uid == auth.currentUser?.uid
+        let avatarColumnWidth: CGFloat = 34
+
+        return HStack(alignment: .top, spacing: 8) {
+            if isMine {
+                Spacer(minLength: 40)
+            } else {
+                // 相手側アバター列。連続投稿でヘッダーを出さない行は、
+                // 位置を揃えるための空スペーサー
+                Group {
+                    if showHeader {
+                        ChatAvatarView(
+                            uid: message.uid,
+                            displayName: message.displayName,
+                            role: message.role,
+                            photoUrl: message.photoUrl,
+                            size: avatarColumnWidth
+                        )
+                    } else {
+                        Color.clear
+                    }
+                }
+                .frame(width: avatarColumnWidth, height: avatarColumnWidth)
+            }
+
+            VStack(alignment: isMine ? .trailing : .leading, spacing: 3) {
+                // 相手の名前(自分の発言では名乗る必要が無いため出さない)
+                if !isMine && showHeader {
+                    Text(message.displayName)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.pttMuted)
+                        .lineLimit(1)
+                }
+
+                HStack(alignment: .bottom, spacing: 5) {
+                    if isMine {
+                        chatTimestamp(message.createdAt)
+                    }
+                    if !message.text.isEmpty {
+                        chatBubbleText(message.text, isMine: isMine)
+                    }
+                    if !isMine {
+                        chatTimestamp(message.createdAt)
+                    }
+                }
+
+                if let attachment = message.attachment, let messageId = message.id {
+                    chatAttachmentView(attachment: attachment, messageId: messageId)
+                }
+            }
+            .frame(maxWidth: 260, alignment: isMine ? .trailing : .leading)
+
+            if !isMine {
+                Spacer(minLength: 40)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: isMine ? .trailing : .leading)
+    }
+
+    private func chatTimestamp(_ date: Date) -> some View {
+        Text(Self.chatTimeFormatter.string(from: date))
+            .font(.system(size: 9, design: .monospaced))
+            .foregroundColor(.pttMuted)
+    }
+
+    /// URLをハイパーリンク化したテキスト吹き出し。`v-html`を使わないWeb版と同様、
+    /// `AttributedString`の`.link`属性だけを使うため任意の文字列を安全に扱える。
+    private func chatBubbleText(_ text: String, isMine: Bool) -> some View {
+        Text(Self.attributedChatText(text))
+            .font(.system(size: 13, design: .monospaced))
+            .foregroundColor(.pttText)
+            .multilineTextAlignment(.leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(isMine ? Color.pttAccent.opacity(0.15) : Color.pttPanel.opacity(0.6))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .strokeBorder(isMine ? Color.pttAccent.opacity(0.4) : Color.pttLine, lineWidth: 1)
+            )
+    }
+
+    private static func attributedChatText(_ text: String) -> AttributedString {
+        var result = AttributedString()
+        for segment in Linkify.segments(from: text) {
+            var part = AttributedString(segment.value)
+            if segment.kind == .url, let url = URL(string: segment.value) {
+                part.link = url
+                part.foregroundColor = .pttLive
+                part.underlineStyle = .single
+            }
+            result += part
+        }
+        return result
     }
 
     /// [Phase16] 添付ファイルの表示。画像はサムネイルを取得して表示、
     /// タップすると`getAttachmentUrl`で発行した本体の署名付きURLをSafariで開く
     /// (Web版がwindow.openで新規タブに開くのと同じ扱い)。
+    /// [五十六訂] Web版に合わせ、テキスト吹き出しと統一感のある角丸+枠線スタイルに
+    /// 変更し、動画/PDFはベクターアイコン(SF Symbols)+ファイル名で表示する。
     private func chatAttachmentView(attachment: ChatAttachment, messageId: String) -> some View {
         Button {
             openChatAttachment(messageId: messageId)
         } label: {
             if attachment.kind == .image {
-                if let uiImage = chatThumbnailImages[messageId] {
-                    Image(uiImage: uiImage)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxHeight: 120)
-                        .cornerRadius(4)
-                } else {
-                    Text("[読み込み中...]")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(.pttMuted)
+                Group {
+                    if let uiImage = chatThumbnailImages[messageId] {
+                        Image(uiImage: uiImage)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxHeight: 140)
+                            .cornerRadius(14)
+                    } else {
+                        Text("[読み込み中...]")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.pttMuted)
+                            .padding(8)
+                    }
                 }
+                .padding(2)
+                .background(
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color.pttPanel.opacity(0.6))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .strokeBorder(Color.pttLine, lineWidth: 1)
+                )
             } else {
                 HStack(spacing: 6) {
-                    Text(attachment.kind == .video ? "🎬" : "📄")
+                    Image(systemName: attachment.kind == .video ? "video.fill" : "doc.text.fill")
+                        .font(.system(size: 13))
+                        .foregroundColor(.pttMuted)
                     Text(attachment.fileName)
                         .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(.pttMuted)
+                        .foregroundColor(.pttText)
                         .lineLimit(1)
+                        .truncationMode(.middle)
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(.pttPanel)
-                .cornerRadius(4)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color.pttPanel.opacity(0.6))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .strokeBorder(Color.pttLine, lineWidth: 1)
+                )
             }
         }
         .buttonStyle(.plain)

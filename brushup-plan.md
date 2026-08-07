@@ -1,7 +1,7 @@
 # PTTアプリ ブラッシュアップ計画（改定版）
 
 対象リポジトリ: `tad-iizuka/FirebaseRTC`
-作成日: 2026-07-09 ／ 最終改定: 2026-08-07（五十六訂）
+作成日: 2026-07-09 ／ 最終改定: 2026-08-07（五十七訂）
 
 > **⚠️ 巻き戻り事故について（2026-08-04 発見・記録）**
 >
@@ -35,7 +35,7 @@
 定義するビジョンの要点」以降の本文と「6. 次アクションの提案」を読めば足りる。
 
 <details>
-<summary>改定履歴（初訂〜五十六訂、クリックで展開）</summary>
+<summary>改定履歴（初訂〜五十七訂、クリックで展開）</summary>
 
 改定: 2026-07-24（README.md「Vision」に基づき全面改定）
 再改定: 2026-07-25（Guestロール・バッジシステムの詳細仕様を検討し反映）
@@ -1903,6 +1903,69 @@ Room Schedule機能のschedule値(start/end)は`roomStore.schedule`として
 「1. 実コード確認済みの現状」機能差表にも「チャットUI(バブル表示)」の行を
 新設し、Web ✅・iOS/Android ❌として記録する。
 
+五十七訂: 2026-08-07（item10のうちiOS分を実施。五十六訂のWeb版
+(`ptt-client/src/components/ChatPanel.vue`・`ChatAvatar.vue`・
+`lib/linkify.ts`・`lib/avatarColor.ts`)の設計をiOSへ移植した。Android分は
+未着手のまま(item10として引き続き残す)。
+
+**実装内容(`ptt-ios`のみ)**:
+
+- `PTTChatStore.swift`: `ChatMessage`に`role`/`photoUrl`を追加。
+  `token-server/routes/messages.js`が五十六訂で書き込むようになった
+  メッセージ単位のスナップショット値をそのままデコードするだけで済む
+  (サーバー側は五十六訂時点で既に対応済みのため、今回サーバーの変更は無い)。
+  既存メッセージ(五十六訂より前に送信されたもの)にはフィールド自体が
+  存在しないため、双方Optionalにして後方互換を保った
+- `ChatAvatarView.swift`(新規): Web版`ChatAvatar.vue`の移植。
+  photoUrl>Guest(SF Symbols `person.fill`)>頭文字+生成色、の3段階優先順位。
+  生成色は`avatarColor.ts`と同じuid由来の決定的ハッシュ(Web版のJS 32bit
+  整数ハッシュ`(hash << 5) - hash + charCode; hash |= 0`をSwiftの
+  `Int32`+オーバーフロー許容演算子(`&<<`/`&-`/`&+`)で再現)を使い、
+  Web版と別プラットフォームでも同一人物が同じ色になるよう揃えた
+- `Linkify.swift`(新規): Web版`lib/linkify.ts`の移植。`NSRegularExpression`
+  で同じURL_PATTERN(日本語全角文字の除外レンジ含む)を再現し、
+  テキスト/URLのセグメント配列に分解する。Web版がv-html不使用でXSSを
+  回避しているのと同様、iOS側も`AttributedString`の`.link`属性のみを使い
+  (生のHTML化や`UITextView`のデータ検出には頼らない)、任意の本文を
+  安全にリンク化できるようにした
+- `ContentView.swift`(`chatSection`・`chatMessageRow`まわりを全面書き換え):
+  - Web版`listItems`のcomputedと同じロジックで日付区切り・5分以内の
+    連続投稿ヘッダー省略を実装(`chatListItems(_:)`)
+  - 自分の発言はLINE標準(右寄せ・アバター/名前非表示)、相手は左寄せ+
+    アバター(ヘッダー省略時は位置合わせの空スペーサー)+名前
+  - テキストは角丸+枠線+背景色の吹き出し。時刻は吹き出しの外側
+    (自分は左・相手は右)に表示(Web版のflex-row-reverseと同じ視覚順序)
+  - 添付ファイル表示もテキスト吹き出しと統一感のある角丸+枠線スタイルへ
+    変更。動画/PDFはSF Symbols(`video.fill`/`doc.text.fill`)+ファイル名
+    (Web版のlucideアイコンの移植。iOSはSF Symbolsを使うため1対1の
+    アイコン名対応ではないが、同じ役割の標準アイコンを選んだ)
+
+**五十六訂のIME誤送信修正について**: 五十六訂の次アクションitem10は
+「Androidの日本語入力(IME)でも同種の問題が起こりうるため、移植時に同じ
+観点での確認が必要」としていたが、これはSwiftUIの`TextField`+
+`.onSubmit`の組み合わせにおけるIME変換確定Enterの扱いを指す。今回確認した
+限り、iOS版のチャット入力欄(`TextField`)は元々ソフトウェアキーボードの
+「送信」ボタン(`.onSubmit`)経由でのみ送信されており、日本語入力の変換確定
+そのものが送信をトリガーする経路が無いため、Web版で見つかったような
+誤送信バグはiOS版には存在しないと判断した(ハードウェアキーボード
+接続時のEnterキーについても、SwiftUIの`TextField`はIME変換確定のEnterと
+入力確定後のEnterを区別してから`onSubmit`を発火させる標準動作のため、
+追加対応は不要と判断)。Android分の確認は引き続きitem10のAndroid側作業に
+含める。
+
+**ビルド確認について**: この環境にはXcodeツールチェーン(`swift`/`swiftc`)
+が無く、ネットワークも遮断されているため、五十六訂のWeb版で実施できた
+ような実行確認(`vue-tsc -b`等相当のビルド)はできなかった。今回は目視での
+型・構文レビューに留まる(六訂・八訂時点のiOS READMEの教訓と同じ、実行
+確認が取れない場合の限界として記録する)。Xcodeでのビルド確認を次
+アクションとして残す。
+
+**成果物の反映状況について**: 十訂・五十五訂・五十六訂と同じ方針で、今回も
+アップロードされたリポジトリ一式に対してファイルを直接編集した。
+`tad-iizuka/FirebaseRTC`リポジトリ本体への実際のコミット・反映、および
+Xcodeでのビルド確認は本ドキュメント側では未実施のため、次アクションとして
+残す(「6. 次アクションの提案」参照)。
+
 </details>
 
 ---
@@ -1979,7 +2042,7 @@ Message）はコード上どこにも見当たらず、依然として未着手�
 | **組織階層(Company/Branch/Site)** | ✅ | ✅ | ✅ | Phase11。管理画面で団体・再帰node・Room割当を管理。各ユーザー向けUIのパンくず表示も2026-08-03(四十五訂)で実装完了 |
 | **参加者一覧のバッジ表示** | ✅ | ✅ | ✅ | Phase13。Room APIを20秒間隔でポーリングし最優先1件を表示 |
 | **開始/終了時刻(Room Schedule)** | ✅ | ❌ | ❌ | 2026-08-05、五十三訂で発見。本体UIの状態出し分け（待機画面/チャット閲覧専用画面）はサーバー(`lib/roomSchedule.js`)・`firestore.rules`・`admin-dashboard`・`ptt-client`のみ実装済みで、iOS/Androidは未着手のまま（「6. 次アクションの提案」item5参照）。ただし2026-08-06(五十五訂)で、保存済みルーム履歴欄の表示用途に限り`PTTRoomManager`のschedule値パース自体はiOS/Androidにも追加済み（詳細は五十五訂参照。本体UIの未実装状態は変わらないためこの行のiOS/Android列は❌のまま） |
-| **チャットUI(LINE風バブル表示・アバター・URLリンク化)** | ✅ | ❌ | ❌ | 2026-08-07、五十六訂でWeb版のみ実装。アバターは写真>Guestアイコン>生成アバターの優先順位、自分の発言はLINE標準(右寄せ・アバター非表示)。副次的にIME変換確定時の誤送信バグ(Phase5から存在)も修正した。iOS/Android移植は未着手（「6. 次アクションの提案」item10参照） |
+| **チャットUI(LINE風バブル表示・アバター・URLリンク化)** | ✅ | ✅ | ❌ | 2026-08-07、五十六訂でWeb版を実装(アバターは写真>Guestアイコン>生成アバターの優先順位、自分の発言はLINE標準(右寄せ・アバター非表示)。副次的にIME変換確定時の誤送信バグ(Phase5から存在)も修正)。同日、五十七訂でiOSへ移植完了(`ChatAvatarView.swift`・`Linkify.swift`新設、`PTTChatStore.swift`へrole/photoUrl追加、`ContentView.swift`のチャット表示を全面書き換え)。Xcodeでのビルド確認は未実施(次アクション参照)。Android移植は引き続き未着手（「6. 次アクションの提案」item10参照） |
 
 管理者サイトは`admin-dashboard/`(Vue 3+TS+Pinia)としてルーム一覧/詳細・
 監査ログ・管理者権限・録音履歴DLまで実装済み。閲覧専用だった旧
@@ -2759,22 +2822,31 @@ URLハイパーリンク化・IME誤送信バグ修正をWeb版(`ptt-client`)・
 ような「目視確認のみ」の限界は今回については無い。新たに以下2件を
 次アクションとして追加する。
 
-10. **（優先度高・新規）チャットUI刷新一式のiOS/Android移植**：Web先行の
-    方針で実装した「LINE風バブル・3段階優先順位のアバター(写真>Guest
-    アイコン>生成アバター)・日付区切り・連続投稿の詰め表示・PDF/動画の
-    ベクターアイコン化・URLハイパーリンク化・IME変換確定時の誤送信修正」
-    の一式を、Web版(`ptt-client/src/components/ChatPanel.vue`・
-    `ChatAvatar.vue`・`lib/linkify.ts`・`lib/avatarColor.ts`)の設計を
-    土台にiOS/Androidへ移植する。IME誤送信修正はAndroidの日本語入力
-    (IME)でも同種の問題が起こりうるため、移植時に同じ観点での確認が必要
-    (iOSはハードウェアキーボード以外では類似の問題が起きにくいが、
-    念のため確認する)
+10. **（優先度高）チャットUI刷新一式のAndroid移植**：五十七訂でiOS分は
+    完了した。残るAndroidへ、Web版(`ptt-client/src/components/
+    ChatPanel.vue`・`ChatAvatar.vue`・`lib/linkify.ts`・
+    `lib/avatarColor.ts`)およびiOS版(`ChatAvatarView.swift`・
+    `Linkify.swift`)の設計を土台に「LINE風バブル・3段階優先順位の
+    アバター(写真>Guestアイコン>生成アバター)・日付区切り・連続投稿の
+    詰め表示・PDF/動画のベクターアイコン化・URLハイパーリンク化」を移植
+    する。IME変換確定時の誤送信修正(五十六訂でWeb版のみ発見・修正済みの
+    バグ)についても、Androidの日本語入力(IME)で同種の問題が起こりうる
+    かをこの移植時に確認する(iOS版は五十七訂で確認した結果、
+    `TextField`+`.onSubmit`の標準動作により該当する誤送信経路が無いと
+    判断し追加対応不要とした。詳細は文書冒頭「五十七訂」参照)
 11. **（新規）五十六訂の変更のリポジトリへの反映確認**：十訂・五十五訂と
     同じく、今回もアップロードされたリポジトリ一式に対する直接編集・
     パッチ/zip返却のみで、`tad-iizuka/FirebaseRTC`リポジトリへの実際の
     コミット・反映は本ドキュメント側では確認できていない。六訂・八訂等で
     踏んだ`git show`による直接検証を、次回リポジトリ一式が再アップロード
     された際に行う
+12. **（新規）五十七訂の変更のビルド確認・リポジトリへの反映確認**：
+    この環境にはXcodeツールチェーンが無くビルド実行確認ができなかった
+    ため(目視レビューのみ)、次回Xcodeが使える環境、またはユーザー側での
+    ビルド確認結果の報告を待つ。あわせて`tad-iizuka/FirebaseRTC`
+    リポジトリ本体への実際のコミット・反映も、item9・11と同様に
+    `git show`による直接検証を次回リポジトリ一式が再アップロードされた
+    際に行う
 
 ### 6.1 完了済みアクション（アーカイブ）
 

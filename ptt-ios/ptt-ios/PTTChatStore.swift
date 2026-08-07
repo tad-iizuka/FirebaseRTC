@@ -50,6 +50,15 @@ struct ChatMessage: Identifiable, Codable, Equatable {
     let createdAt: Date
     // [Phase16] 添付が無いメッセージにはフィールド自体が存在しない
     var attachment: ChatAttachment?
+    // [チャットUI刷新・五十六訂のiOS移植] 送信時点のroleとphotoUrl。
+    // Web版(ptt-client/src/types/api.ts)と同じくメッセージドキュメント自身に
+    // スナップショットされている値をそのまま使う(moderator任命等で後から
+    // roleが変わっても過去メッセージのroleは遡及更新されない)。
+    // token-server/routes/messages.js側の追加時点より前に書き込まれた
+    // 既存メッセージにはフィールド自体が存在しないため、双方オプショナルにする。
+    // photoUrlはプロフィール写真機能が未実装の現状は常にnull。
+    var role: String?
+    var photoUrl: String?
 }
 
 @MainActor
