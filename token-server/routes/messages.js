@@ -170,6 +170,21 @@ router.post(
       const messageData = {
         uid,
         displayName,
+        // [チャットUI刷新] アバター表示用に送信時点のroleをスナップショットする。
+        // 5.4で保留にした「他参加者のGuest判定手段の欠如」は
+        // 「members/{uid}を汎用に公開するAPI/ルール」の追加を指すもので、
+        // これとは別に、既にdisplayName同様チャット上で全room memberへ
+        // 公開しているメッセージ単位のフィールドとしてroleを載せるのは
+        // 追加の公開範囲拡大にはあたらない(スコープはこのメッセージの
+        // 送信者1名・送信時点の状態に限定される)と判断し、ここで解決する。
+        // moderator任命等でroleが後から変わってもこの値は更新されない
+        // (displayNameのニックネーム変更が過去メッセージに遡及しないのと同じ扱い)。
+        role: req.roomMember.role,
+        // [将来] プロフィール写真は本ドキュメント作成時点では未実装のため常にnull。
+        // 実装時にmembers/{uid}.photoUrlを追加すれば、ここは
+        // req.roomMember.photoUrl || null に差し替えるだけで済むよう
+        // 今のうちにフィールドを用意しておく。
+        photoUrl: req.roomMember.photoUrl || null,
         text,
         createdAt: new Date(),
       };

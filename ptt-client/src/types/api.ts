@@ -124,9 +124,16 @@ export interface RoomMember {
 }
 
 /** rooms/{roomId}/messages/{messageId} のFirestoreドキュメント形状 */
+// [チャットUI刷新] role/photoUrlは送信時点のスナップショット(後からのrole変更・
+// プロフィール写真設定は過去メッセージに遡及しない)。古いメッセージには
+// roleフィールド自体が無い可能性があるためoptionalにしておく。
+export type ChatSenderRole = 'owner' | 'moderator' | 'member' | 'guest'
+
 export interface ChatMessageDoc {
   uid: string
   displayName: string
+  role?: ChatSenderRole
+  photoUrl?: string | null
   text: string
   createdAt: { toDate: () => Date } | null
   // [Phase16] 添付が無いメッセージにはフィールド自体が存在しない
@@ -137,6 +144,8 @@ export interface ChatMessage {
   id: string
   uid: string
   displayName: string
+  role?: ChatSenderRole
+  photoUrl?: string | null
   text: string
   createdAt: Date | null
   attachment?: ChatAttachment

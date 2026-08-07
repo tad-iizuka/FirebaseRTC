@@ -52,6 +52,8 @@ export const useChatStore = defineStore('chat', () => {
               id: d.id,
               uid: data.uid,
               displayName: data.displayName,
+              role: data.role,
+              photoUrl: data.photoUrl,
               text: data.text,
               createdAt: data.createdAt?.toDate() ?? null,
               attachment: data.attachment,
