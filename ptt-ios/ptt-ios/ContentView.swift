@@ -50,6 +50,18 @@ private enum RootTab: Hashable {
 
 struct ContentView: View {
 
+    /// [五十九訂・iPad/タブレット幅レイアウト] Web版で検討中の3ペイン構成
+    /// （参加者/PTT/チャット）をiOS側にも適用するための判定に使う。
+    /// iPadの通常幅（フルスクリーンまたは大きめのSplit View）では`.regular`、
+    /// iPhone全般とiPadのSlide Over/小さめSplit Viewでは`.compact`になる。
+    /// NavigationSplitView等のシステムコンテナは採用せず、既存の4タブ構成
+    /// （talk/members/chat/settings）と同じ「自前でHStackを組む」方式で
+    /// 3ペインを描画する。理由は2026-08-04(4訂)で標準TabViewのLiquid Glass
+    /// 選択ハイライトが色フラッシュを起こす不具合を踏んで自前タブバーへ
+    /// 切り替えた経緯があり、NavigationSplitViewのサイドバー/detail切り替えも
+    /// 同種のシステムアニメーション由来の不具合を踏むリスクを避けるため。
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
     @StateObject private var auth = PTTAuthManager()
     @StateObject private var roomManager = PTTRoomManager()
     @StateObject private var savedRooms = PTTSavedRoomsStore()
@@ -107,6 +119,10 @@ struct ContentView: View {
     /// 表示フラグ。従来はヘッダーのPTTSettingsIconが自前で保持していたが、
     /// 設定タブの通常行として表示するためContentView側で保持する。
     @State private var isConnectionSettingsPresented = false
+    /// [五十九訂・タブレット幅3ペイン] タブレット幅では設定タブ相当の内容を
+    /// タブではなくシートで開く。参加者/PTT/チャットの3ペインで画面を
+    /// 使い切るため、コンパクト幅のような4番目のタブ領域を割かない設計。
+    @State private var isTabletSettingsSheetPresented = false
 
     // [Phase16: チャット添付ファイル] Web版ChatPanel.vueのpendingFileの移植。
     // 選択直後には送信せず、送信ボタンが押されるまでここに保持しておく。
@@ -146,24 +162,33 @@ struct ContentView: View {
                 // アニメーション完了後の状態しか捉えられず気づけなかった)。
                 // 標準TabViewへの依存をやめ、コンテンツ切り替え・タブバー描画とも
                 // 自前で行うことで、色を完全にこちらの管理下に置く。
-                VStack(spacing: 0) {
-                    if activeRoomId != nil && selectedTab != .settings {
-                        header()
-                        roomNameHeader
-                        recordingBanner
-                    }
-
-                    Group {
-                        switch selectedTab {
-                        case .talk: talkTabContent
-                        case .members: membersTabContent
-                        case .chat: chatTabContent
-                        case .settings: settingsTabContent
+                // [五十九訂・タブレット幅3ペイン] iPadの通常幅かつ入室中のみ、
+                // 4タブ構成の代わりに参加者/PTT/チャットの3ペイン構成を表示する。
+                // 未入室中(ルーム選択画面)はタブレット幅でも従来のtalkTabContentを
+                // そのまま使う(ルーム選択画面自体の専用レイアウトは今回のスコープ外。
+                // 「6. 次アクションの提案」参照)。
+                if horizontalSizeClass == .regular && activeRoomId != nil {
+                    tabletThreePaneContent
+                } else {
+                    VStack(spacing: 0) {
+                        if activeRoomId != nil && selectedTab != .settings {
+                            header()
+                            roomNameHeader
+                            recordingBanner
                         }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                    customTabBar
+                        Group {
+                            switch selectedTab {
+                            case .talk: talkTabContent
+                            case .members: membersTabContent
+                            case .chat: chatTabContent
+                            case .settings: settingsTabContent
+                            }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                        customTabBar
+                    }
                 }
             }
         }
@@ -404,6 +429,81 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(40)
+    }
+
+    // MARK: - Tablet (iPad regular幅) 3ペイン構成
+    // [五十九訂] Web版で検討中のDesktop/Tablet幅レイアウト(左:参加者/中央:PTT/
+    // 右:チャット、3ペインともスクロール無しで常時表示)をiOS側に適用したもの。
+    // brushup-plan.md「6. 次アクションの提案」item15参照。既存の4タブ構成
+    // (talk/members/chat/settings)のコンテンツ(talkerSection・talkArea・
+    // voiceSection・chatSection)をそのまま再利用し、コンテナのレイアウトのみを
+    // HStackへ組み替える。ロジック側(各Store)の変更は一切無い。
+
+    /// 左(参加者)・中央(PTTボタン+退出)・右(チャット)の3ペイン。
+    /// 設定(プロフィール/接続設定/ニックネーム/録音操作)はペインの1つを
+    /// 割かず、右上の歯車ボタンからシート表示する(Web版が「ヘッダー右端の
+    /// 操作メニューに格納」としたのと同じ考え方)。
+    private var tabletThreePaneContent: some View {
+        VStack(spacing: 0) {
+            header()
+            roomNameHeader
+            recordingBanner
+            tabletToolbar
+
+            HStack(spacing: 0) {
+                ScrollView { talkerSection }
+                    .frame(width: 300)
+                    .background(Color.pttPanel.opacity(0.35))
+
+                Divider().overlay(Color.pttLine)
+
+                VStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    talkArea
+                    Spacer(minLength: 0)
+                    voiceSection
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                Divider().overlay(Color.pttLine)
+
+                chatSection
+                    .frame(width: 380)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.pttBackground.ignoresSafeArea())
+        .sheet(isPresented: $isTabletSettingsSheetPresented) {
+            NavigationStack {
+                settingsTabContent
+                    .navigationTitle(Text("設定"))
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("閉じる") { isTabletSettingsSheetPresented = false }
+                        }
+                    }
+            }
+        }
+    }
+
+    /// 3ペイン構成専用の細いツールバー行。設定シートを開く歯車ボタンのみを置く
+    /// (LEAVE ROOMは中央ペインのvoiceSectionが既に兼ねているため、ここには置かない)。
+    private var tabletToolbar: some View {
+        HStack {
+            Spacer()
+            Button {
+                isTabletSettingsSheetPresented = true
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 16))
+                    .foregroundColor(.pttMuted)
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 14)
+        }
+        .padding(.bottom, 6)
     }
 
     // MARK: - Settings tab: profile (旧ヘッダーのLoginStatusIcon相当)

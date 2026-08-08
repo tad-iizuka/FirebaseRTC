@@ -1,7 +1,7 @@
 # PTTアプリ ブラッシュアップ計画（改定版）
 
 対象リポジトリ: `tad-iizuka/FirebaseRTC`
-作成日: 2026-07-09 ／ 最終改定: 2026-08-08（五十九訂）
+作成日: 2026-07-09 ／ 最終改定: 2026-08-08（六十訂）
 
 > **⚠️ 巻き戻り事故について（2026-08-04 発見・記録）**
 >
@@ -2212,6 +2212,78 @@ Service Worker）の3件を新規項目として追加する。
 
 </details>
 
+六十訂: 2026-08-08（「6. 次アクションの提案」item15のうちiOS分を実装した。
+アップロードされたリポジトリ一式（HEAD=`51ba715`）を取得し、既存の
+`ContentView.swift`（4タブ構成: talk/members/chat/settings、五十三訂〜
+五十八訂で確認したLiquid Glass回避のための自前タブバー実装）を直接確認した
+上で変更した。
+
+**実装内容(`ptt-ios/ptt-ios/ContentView.swift`のみ。他クライアント・
+サーバーの変更は無い)**:
+
+- `@Environment(\.horizontalSizeClass)`を追加し、iPadの通常幅
+  （フルスクリーンまたは大きめのSplit View。`.regular`）かつ入室中
+  （`activeRoomId != nil`）の場合のみ、新設の`tabletThreePaneContent`を
+  表示する。iPhone全般・iPadのSlide Over/小さめSplit View（`.compact`）、
+  および未入室中（タブレット幅でも）は、既存の4タブ構成をそのまま維持する
+  （変更なし）
+- **設計判断（NavigationSplitViewを採用しなかった理由）**：五十三訂で
+  確認した通り、iOS側は2026-08-04(4訂)に標準`TabView`のLiquid Glass選択
+  ハイライトが色フラッシュを起こす不具合を踏み、自前のタブバー実装へ
+  切り替えた経緯がある。`NavigationSplitView`のサイドバー/detail切り替え
+  アニメーションも同種のシステム側アニメーション由来の不具合を踏むリスクが
+  あると判断し、Web版の3ペイン設計時に確立した「既存コンポーネントを流用し
+  コンテナのレイアウトのみ組み替える」という方針をiOS側にも踏襲し、
+  素の`HStack`で3ペインを組む自前実装とした。加えて、`NavigationSplitView`
+  は本来サイドバー選択に応じてdetailが切り替わる用途向けのAPIであり、
+  「参加者・PTT・チャットの3つが常時同時に見える」という今回の要件（Web版
+  五十九訂の設計方針と同じ）とは構造的に噛み合わない
+- `tabletThreePaneContent`: `header()`・`roomNameHeader`・
+  `recordingBanner`（いずれも既存の4タブ構成と共通）に続けて、
+  左（参加者・幅300pt固定・`talkerSection`をそのまま流用）／中央
+  （PTTボタン+退出ボタン・可変幅・既存の`talkArea`+`voiceSection`を
+  そのまま流用）／右（チャット・幅380pt固定・既存の`chatSection`をそのまま
+  流用）の3ペインを`HStack`で構成した。各Store（`PTTConnectionManager`・
+  `PTTChatStore`等）側のロジック変更は一切無い
+- 設定（プロフィール・接続設定・ゲストのニックネーム変更・録音操作。
+  4タブ構成では独立の設定タブ）は、3ペイン構成では専用ペインを割り当てず、
+  新設の`tabletToolbar`（3ペインの上に置く歯車ボタンのみの細い行）から
+  シート表示する方式とした。既存の`settingsTabContent`をそのまま
+  `NavigationStack`でラップして再利用しているため、こちらもロジックの
+  重複は無い（Web版が「LEAVE ROOMをヘッダー右端の操作メニューに格納」と
+  したのと同じ考え方。ただし今回はLEAVE ROOM自体は中央ペインの
+  `voiceSection`が引き続き兼ねており、歯車メニューに移したのは設定関連の
+  項目のみ）
+
+**今回のスコープ外として明示的に確認した項目**:
+
+- 未入室中（ルーム選択画面）のタブレット幅専用レイアウト。現状は
+  タブレット幅でも既存の`talkTabContent`（コンパクト幅と同じ縦積み）を
+  そのまま表示する。参加者・チャットともに入室前は空であるため実害は
+  小さいと判断したが、専用の中央寄せレイアウト等は今回未実装のまま残す
+- Android版（`ptt-android`）の同種対応。次アクションとして継続する
+- ビルド確認・実機確認。以下の限界について記録する
+
+**ビルド確認について**: この環境にはXcode・iOS SDKが無く、`xcodebuild`
+による実行確認はできなかった。追加した`@Environment(\.horizontalSizeClass)`・
+`ScrollView`・`HStack`・`.sheet`・`NavigationStack`はいずれもSwiftUI標準API
+であり、五十七訂・五十八訂で実際に踏んだような（`AttributedString`の
+dot-syntax型推論、`withStyle`のトップレベル拡張関数importなど）非自明な
+型推論の落とし穴は今回の変更範囲には見当たらないが、これは目視でのコード
+確認による判断であり、実機Xcodeビルドでの確認ではない点に留意する。
+特にiPad実機・Simulatorでの、Split View/Slide Over切り替え時に
+`horizontalSizeClass`が期待通り切り替わるかどうかの実機確認が必要
+（六訂・八訂等で踏んだのと同じ、実行確認が取れない場合の限界として記録する）。
+
+**成果物**: 変更した`ContentView.swift`単体のzip、および`git diff`
+パッチを返却する。`tad-iizuka/FirebaseRTC`リポジトリ本体への実際の
+コミット・反映は本ドキュメント側では未確認のため、次アクションとして残す。
+
+**次アクションへの影響**: 「6. 次アクションの提案」item15を「iOS分は実装
+済み・Android分とビルド/実機確認が残る」状態に更新する。
+
+</details>
+
 
 ---
 
@@ -2841,7 +2913,7 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
 
 ---
 
-## 6. 次アクションの提案（2026-08-08 五十九訂で更新）
+## 6. 次アクションの提案（2026-08-08 六十訂で更新）
 
 <details>
 <summary>この一覧のitem番号がどう変遷してきたか（クリックで展開）</summary>
@@ -3116,17 +3188,19 @@ URLハイパーリンク化・IME誤送信バグ修正をWeb版(`ptt-client`)・
     基づき、`ptt-client`のレイアウトCSS（コンテナのFlex/Grid）を実装する。
     既存コンポーネント（PTTStore/ChatStore等）自体のロジック変更は不要な
     設計とした
-15. **（新規）iOS/Androidのタブレット幅レイアウトの検討**：ユーザーより、
-    iOS/Androidともタブレット幅（iPad・Androidタブレット等）でのレイアウトは
-    現状未検討であり、将来的にはitem14のWeb版3ペインレイアウトと同様の
-    構成（参加者/PTT/チャット）が望ましいという方針が示された。五十三訂で
-    確認したiOS/Androidの4タブ構成（talk/chat/people/settings）は
-    スマートフォン幅を前提にしたものであり、タブレット幅での挙動は
-    本ドキュメントで未検討のまま残っている。item14のWeb版実装が固まった
-    後、同じ3ペイン構成をiOS/Androidのタブレット幅にどう適用するか
-    （SwiftUIの`NavigationSplitView`、Jetpack Composeの
-    `ListDetailPaneScaffold`等、各プラットフォームの標準的な
-    マルチペインAPIとの整合を含む）を検討する
+15. **iOS/Androidのタブレット幅レイアウト** → **iOS分は実装完了
+    （2026-08-08、六十訂）**。`ContentView.swift`に
+    `horizontalSizeClass == .regular`かつ入室中の場合のみ3ペイン
+    （参加者300pt固定／PTT可変幅／チャット380pt固定、`HStack`による自前
+    実装）を表示する分岐を追加した。`NavigationSplitView`は、iOS側が
+    2026-08-04(4訂)でTabViewのLiquid Glass選択ハイライト不具合を踏んだ
+    経緯を踏まえ、同種のシステムアニメーション由来の不具合リスクを避ける
+    ため採用しなかった（詳細は文書冒頭「六十訂」参照）。
+    **残課題**：(a) Android版（Jetpack Compose）の同種対応、
+    (b) 今回のiOS変更のXcodeビルド確認・iPad実機/Simulatorでの
+    `horizontalSizeClass`切り替え確認、(c) リポジトリへの反映確認
+    （`git show`による直接検証）、(d) 未入室中（ルーム選択画面）の
+    タブレット幅専用レイアウトは今回スコープ外のまま
 16. **（新規）PWA化**：`manifest.json`（`display: standalone`・ダーク
     テーマに合わせた`theme_color`/`background_color`・アイコン一式）と
     Service Workerを`ptt-client`に導入する。Service WorkerはApp Shell
