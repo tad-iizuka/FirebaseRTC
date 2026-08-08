@@ -42,8 +42,15 @@ function scheduleLabel(room: SavedRoom): string {
 				@click="emit('open', room)"
 			>
 				<span class="block w-full min-w-0 text-left">
-					<span class="block truncate">{{ primaryLabel(room) }}</span>
-					<span class="block truncate text-[11px] text-muted-foreground">{{ scheduleLabel(room) }}</span>
+					<span
+						class="block truncate"
+						:class="scheduleLabel(room) ? '' : 'text-sm font-medium'"
+					>{{ primaryLabel(room) }}</span>
+					<span
+						v-if="scheduleLabel(room)"
+						class="block truncate text-[11px] text-muted-foreground"
+						>{{ scheduleLabel(room) }}</span
+					>
 				</span>
 			</Button>
 			<Button variant="secondary" size="sm" @click="emit('remove', room.roomId)">{{ t('common.remove') }}</Button>

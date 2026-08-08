@@ -762,21 +762,34 @@ struct ContentView: View {
     }
 
     private func savedRoomRow(_ saved: PTTSavedRoomsStore.SavedRoom) -> some View {
-        Button {
+        let schedule = scheduleLabel(saved.schedule)
+        return Button {
             rejoinSavedRoom(saved)
         } label: {
             HStack(spacing: 8) {
-                VStack(alignment: .leading, spacing: 2) {
-                    // [表示仕様・2026-08-06] 上段: ルーム名があればルーム名、無ければroomId。
+                // [表示仕様・2026-08-08] 開始/終了時刻が無い項目は、下段が常に空欄のまま
+                // 場所を取ってしまい上段が上寄りに見えるため、その場合は上段1行のみを
+                // 行の高さいっぱいに上下中央・左寄せで、フォントも大きめに表示する。
+                // 時刻がある項目は従来通り2段表示(上段: 名前 / 下段: 時刻)のまま。
+                if schedule.isEmpty {
                     Text(saved.name ?? saved.roomId)
-                        .font(.system(size: 13, design: .monospaced))
+                        .font(.system(size: 15, weight: .medium, design: .monospaced))
                         .lineLimit(1)
                         .truncationMode(.middle)
-                    // 下段: 開始/終了時刻。どちらも未指定なら空欄。
-                    Text(scheduleLabel(saved.schedule))
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(.pttMuted)
-                        .lineLimit(1)
+                        .frame(minHeight: 32, alignment: .leading)
+                } else {
+                    VStack(alignment: .leading, spacing: 2) {
+                        // 上段: ルーム名があればルーム名、無ければroomId。
+                        Text(saved.name ?? saved.roomId)
+                            .font(.system(size: 13, design: .monospaced))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        // 下段: 開始/終了時刻。
+                        Text(schedule)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.pttMuted)
+                            .lineLimit(1)
+                    }
                 }
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.right")

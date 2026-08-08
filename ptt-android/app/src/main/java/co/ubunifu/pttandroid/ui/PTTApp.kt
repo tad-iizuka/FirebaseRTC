@@ -1673,19 +1673,37 @@ private fun SavedRoomRow(saved: SavedRoom, onOpen: (SavedRoom) -> Unit, onRemove
             onClick = { onOpen(saved) },
             modifier = Modifier.weight(1f),
         ) {
-            Column(horizontalAlignment = Alignment.Start) {
-                // [表示仕様・2026-08-06] 上段: ルーム名があればルーム名、無ければroomId。
-                Text(
-                    saved.name ?: saved.roomId,
-                    fontFamily = Mono, fontSize = 12.sp,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis,
-                )
-                // 下段: 開始/終了時刻。どちらも未指定なら空欄。
-                Text(
-                    scheduleLabel(saved.schedule),
-                    fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Muted,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis,
-                )
+            val schedule = scheduleLabel(saved.schedule)
+            // [表示仕様・2026-08-08] 開始/終了時刻が無い項目は、下段が常に空欄のまま
+            // 場所を取ってしまい、かつColumnがボタンの中央揃えレイアウトで押し縮められて
+            // 見た目上も中途半端な位置になっていたため、その場合は上段1行のみを
+            // 行の高さいっぱいに上下中央・左寄せで、フォントも大きめに表示する。
+            // 時刻がある項目は従来通り2段表示(上段: 名前 / 下段: 時刻)のまま。
+            Column(
+                modifier = Modifier.fillMaxWidth().heightIn(min = 32.dp),
+                horizontalAlignment = Alignment.Start,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                if (schedule.isEmpty()) {
+                    Text(
+                        saved.name ?: saved.roomId,
+                        fontFamily = Mono, fontSize = 15.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                } else {
+                    // 上段: ルーム名があればルーム名、無ければroomId。
+                    Text(
+                        saved.name ?: saved.roomId,
+                        fontFamily = Mono, fontSize = 12.sp,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                    // 下段: 開始/終了時刻。
+                    Text(
+                        schedule,
+                        fontFamily = Mono, fontSize = 11.sp, color = PTTColors.Muted,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
         Text(

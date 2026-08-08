@@ -101,6 +101,28 @@ Phase2の具体的要件が確定するまでの着手条件付き(Phase15)へ�
 あわせて「6. 次アクションの提案」がほぼ全項目完了済みだったため、完了分を
 「6.1 完了済みアクション（アーカイブ）」へ集約し、新ロードマップに即した
 次アクションへ刷新した）
+十三訂: 2026-08-08（「最近使ったルーム」一覧の表示不具合を修正。ユーザーが
+Android実機のスクリーンショットで指摘：開始/終了時刻を持たない項目
+（例:「浜松町」）が、時刻を持つ項目と同じ2段レイアウトのまま下段を空欄
+表示していたため、上段テキストが行内で上寄り・かつ(Androidでは
+`OutlinedButton`のコンテンツがデフォルトで中央揃えのRowに包まれる関係で)
+意図せず水平方向も中央寄りに見えてしまっていた。Web/iOS/Androidの3クライアント
+共通で、`scheduleLabel()`が空文字を返す項目のみ下段行そのものを描画せず、
+上段1行を行の高さいっぱいに上下中央・左寄せ・大きめフォントで表示する
+分岐を追加した(時刻を持つ項目は従来の2段表示のまま変更なし)。
+なお、ユーザーは「Webは既にそうなっていると思う」との認識だったが、
+`SavedRoomsList.vue`を確認したところ実際にはWebも同じ構造的な問題を
+抱えていたことが判明したため、3クライアントとも同一の修正を適用した。
+- `ptt-client/src/components/SavedRoomsList.vue`: 下段`v-if`化、
+  上段に時刻の有無で`text-sm font-medium`を出し分けるクラスバインディングを追加
+- `ptt-ios/ptt-ios/ContentView.swift`: `savedRoomRow()`を時刻の有無で
+  単一行(`size: 15, weight: .medium`, `minHeight: 32`)/2段(従来通り)に分岐
+- `ptt-android/.../ui/PTTApp.kt`: `SavedRoomRow()`の`Column`に
+  `fillMaxWidth()`(中央寄りに見えていた根本原因を解消)・`heightIn(min = 32.dp)`・
+  `verticalArrangement = Arrangement.Center`を追加し、時刻の有無で
+  単一行(`fontSize = 15.sp`, `FontWeight.Medium`)/2段(従来通り)に分岐
+本修正はビルド未検証(Xcode/Gradleでの確認はユーザー側の作業として残る)。
+次アクションの提案（6.）には影響しないため6.1アーカイブへの追加は無し）
 十三訂: 2026-07-26（Phase11(組織階層)を実装し、token-server
 （`lib/orgContext.js`新設・`routes/organizations.js`新設・`routes/rooms.js`・
 `routes/admin.js`・`server.js`・`firestore.rules`変更）・admin-dashboard
