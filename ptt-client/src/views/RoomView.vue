@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch, watchEffect } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
@@ -15,6 +15,7 @@ import Button from '@/components/ui/Button.vue'
 import GuestStatusBar from '@/components/GuestStatusBar.vue'
 import OrgBreadcrumb from '@/components/OrgBreadcrumb.vue'
 import PttButton from '@/components/PttButton.vue'
+import PttMiniBar from '@/components/PttMiniBar.vue'
 import RecordingBar from '@/components/RecordingBar.vue'
 import ParticipantList from '@/components/ParticipantList.vue'
 import ChatPanel from '@/components/ChatPanel.vue'
@@ -61,6 +62,21 @@ const lockedByName = computed(() => {
   return connection.participants.get(uid)?.name ?? uid
 })
 const participantList = computed(() => Array.from(connection.participants.values()))
+
+// [五十九訂: Web版レイアウト刷新]
+// 768px未満(Mobile幅)でのみ使うタブ状態。768px以上(Desktop/Tablet幅)では
+// 3ペイン構成となり全て常時表示されるため参照しない(表示切り替えはCSS側の
+// `md:`ブレークポイントで行う。テンプレート側コメント参照)。PTTStore等の
+// 送話ロジックには一切影響しない、純粋な表示状態。
+type MobileTab = 'call' | 'participants' | 'chat'
+const activeMobileTab = ref<MobileTab>('call')
+// 終了時刻超過(after_end)で「通話」タブの中身(PTTボタン)が無くなった場合、
+// 選択中タブが「通話」のままだと空欄になってしまうため「チャット」へ逃がす。
+watchEffect(() => {
+  if (isChatOnlyAfterEnd.value && activeMobileTab.value === 'call') {
+    activeMobileTab.value = 'chat'
+  }
+})
 // [組織階層への表示切り替え・再訂正] Roomが組織(orgId)に紐づいている場合、
 // 見出し・ヘッダーアイコンの頭文字には「最下層のノード名」を優先して使う。
 // 同名の組織が複数の支社・現場を持つ場合、最上位の組織名だけでは区別が
@@ -289,7 +305,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div>
+  <div class="flex h-full min-h-0 flex-col">
     <p v-if="banNotice" class="px-5 py-2 text-xs text-destructive">{{ banNotice }}</p>
 
     <!-- [開始/終了時刻] 待機画面(before_start)。他の要素は一切表示しない
@@ -309,87 +325,168 @@ onUnmounted(() => {
     </div>
 
     <template v-else>
-    <!-- [見出し・不具合修正] 組織(orgId)に紐づくRoomは最下層のノード名(無ければ組織名)を、
-         無所属Roomはルーム名を表示する。いずれも未設定の場合は表示しない。
-         接続状態(room=付き)は以前ここでStatusRowとして重複表示していたが、
-         AppHeader.vue側で常時ドット+テキスト表示するよう改めたため廃止した
-         (iOS版ContentView.swift 6訂の移植。詳細はbrushup-plan.md参照)。 -->
-    <h1
-      v-if="displayName"
-      class="truncate px-5 pb-0 pt-3 text-[15px] font-semibold"
-    >
-      {{ displayName }}
-    </h1>
-    <OrgBreadcrumb :org-name="orgContext.orgName" :breadcrumb="orgContext.breadcrumb" />
+    <!-- [五十九訂: Web版レイアウト刷新]
+         ここから下、ルーム名〜LEAVE ROOMまでは従来通りの共通ヘッダー領域
+         (Mobile/Desktop/Tabletいずれの幅でも同じ内容・同じコンポーネントを使う)。
+         ブレークポイントで表示が変わるのは、この下の「メインコンテンツ」
+         (参加者一覧・PTT・チャット)からで、768px未満はタブ切り替え+常設PTT
+         ミニバー、768px以上は3ペイン同時表示にCSSだけで切り替える。
+         コンポーネント自体(PttButton/ParticipantList/ChatPanel)は流用し、
+         それぞれ1インスタンスのみ描画してコンテナ側のFlex/Grid・`hidden`の
+         付け外しで配置と表示/非表示を切り替える(重複マウントしない)。 -->
+    <div class="shrink-0">
+      <!-- [見出し・不具合修正] 組織(orgId)に紐づくRoomは最下層のノード名(無ければ組織名)を、
+           無所属Roomはルーム名を表示する。いずれも未設定の場合は表示しない。
+           接続状態(room=付き)は以前ここでStatusRowとして重複表示していたが、
+           AppHeader.vue側で常時ドット+テキスト表示するよう改めたため廃止した
+           (iOS版ContentView.swift 6訂の移植。詳細はbrushup-plan.md参照)。 -->
+      <h1
+        v-if="displayName"
+        class="truncate px-5 pb-0 pt-3 text-[15px] font-semibold"
+      >
+        {{ displayName }}
+      </h1>
+      <OrgBreadcrumb :org-name="orgContext.orgName" :breadcrumb="orgContext.breadcrumb" />
 
-    <GuestStatusBar
-      :is-guest="ban.myRole === 'guest'"
-      :display-name="ban.myDisplayName"
-      :updating="ban.nicknameUpdating"
-      :error-message="ban.nicknameErrorMessage"
-      @update-nickname="updateNickname"
-    />
+      <GuestStatusBar
+        :is-guest="ban.myRole === 'guest'"
+        :display-name="ban.myDisplayName"
+        :updating="ban.nicknameUpdating"
+        :error-message="ban.nicknameErrorMessage"
+        @update-nickname="updateNickname"
+      />
 
-    <!-- [開始/終了時刻] 終了時刻超過(after_end)は「チャット閲覧のみ」のため、
-         録音バー・PTTボタンごと非表示にする(LiveKit未接続でconnection.*系の値も
-         すべて初期値のままのため、表示しても意味がない)。 -->
-    <p v-if="isChatOnlyAfterEnd" class="px-5 py-2 text-xs text-muted-foreground">
-      {{ t('room.afterEndNotice') }}
-    </p>
-    <template v-else>
-    <RecordingBar
-      :is-recording="connection.isRecording"
-      :started-at="connection.recordingStartedAt"
-      :can-control="canControlRecording"
-      :starting="recording.starting"
-      :stopping="recording.stopping"
-      :error-message="recording.errorMessage"
-      :auto-recording="roomStore.autoRecording"
-      :auto-recording-loading="roomStore.autoRecordingLoading"
-      :auto-recording-error-message="roomStore.autoRecordingErrorMessage"
-      @start="startRecording"
-      @stop="stopRecording"
-      @update-auto-recording="toggleAutoRecording"
-    />
-    </template>
-    <div class="px-5 pb-0 pt-2">
-      <Button variant="secondary" class="w-full" @click="leaveRoom">{{ t('room.leaveRoom') }}</Button>
+      <!-- [開始/終了時刻] 終了時刻超過(after_end)は「チャット閲覧のみ」のため、
+           録音バー・PTTボタンごと非表示にする(LiveKit未接続でconnection.*系の値も
+           すべて初期値のままのため、表示しても意味がない)。 -->
+      <p v-if="isChatOnlyAfterEnd" class="px-5 py-2 text-xs text-muted-foreground">
+        {{ t('room.afterEndNotice') }}
+      </p>
+      <template v-else>
+      <RecordingBar
+        :is-recording="connection.isRecording"
+        :started-at="connection.recordingStartedAt"
+        :can-control="canControlRecording"
+        :starting="recording.starting"
+        :stopping="recording.stopping"
+        :error-message="recording.errorMessage"
+        :auto-recording="roomStore.autoRecording"
+        :auto-recording-loading="roomStore.autoRecordingLoading"
+        :auto-recording-error-message="roomStore.autoRecordingErrorMessage"
+        @start="startRecording"
+        @stop="stopRecording"
+        @update-auto-recording="toggleAutoRecording"
+      />
+      </template>
+      <div class="px-5 pb-0 pt-2">
+        <Button variant="secondary" class="w-full" @click="leaveRoom">{{ t('room.leaveRoom') }}</Button>
+      </div>
+
+      <!-- [Mobile幅(〜767px)専用] talk/participants/chatのタブ。768px以上では
+           常に非表示(3ペインが常時表示のためタブ自体が不要)。 -->
+      <div class="flex border-b border-t border-border text-[11px] uppercase tracking-[0.08em] md:hidden">
+        <button
+          type="button"
+          class="flex-1 border-b-2 px-2 py-2.5 text-center transition-colors"
+          :class="activeMobileTab === 'call' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground'"
+          @click="activeMobileTab = 'call'"
+        >
+          {{ t('room.tabCall') }}
+        </button>
+        <button
+          type="button"
+          class="flex-1 border-b-2 px-2 py-2.5 text-center transition-colors"
+          :class="activeMobileTab === 'participants' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground'"
+          @click="activeMobileTab = 'participants'"
+        >
+          {{ t('room.tabParticipants') }}
+        </button>
+        <button
+          type="button"
+          class="flex-1 border-b-2 px-2 py-2.5 text-center transition-colors"
+          :class="activeMobileTab === 'chat' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground'"
+          @click="activeMobileTab = 'chat'"
+        >
+          {{ t('room.tabChat') }}
+        </button>
+      </div>
     </div>
 
-    <div v-if="!isChatOnlyAfterEnd" class="flex flex-col items-center gap-3.5 px-5 pb-6 pt-6">
-      <PttButton
+    <!-- [メインコンテンツ] Mobile: 縦積み(タブで排他表示+下部ミニバー)。
+         Desktop/Tablet(768px以上): 横並び3ペイン、全て常時表示。 -->
+    <div class="flex min-h-0 flex-1 flex-col md:flex-row md:overflow-hidden">
+      <!-- 左ペイン: 参加者一覧(Desktop/Tabletでは常時表示・幅固定240px) -->
+      <div
+        class="min-h-0 flex-1 overflow-y-auto md:block md:w-[240px] md:shrink-0 md:border-r md:border-border"
+        :class="{ hidden: activeMobileTab !== 'participants' }"
+      >
+        <ParticipantList
+          :participants="participantList"
+          :can-ban="canBan && !isChatOnlyAfterEnd"
+          :top-badges="topBadges"
+          :all-badges="allBadges"
+          :grantable-badges="badges.grantableBadges"
+          :is-granting-badge="badges.isGranting"
+          @ban="requestBan"
+          @report="reportParticipant"
+          @grant-badge="grantBadge"
+          @revoke-badge="revokeBadge"
+        />
+      </div>
+
+      <!-- 中央ペイン: PTT(Desktop/Tabletでは残り幅いっぱい・固定表示) -->
+      <div
+        class="min-h-0 flex-1 overflow-y-auto md:flex md:w-auto md:flex-1 md:flex-col md:items-center md:justify-center md:gap-3.5 md:overflow-y-auto md:border-r md:border-border"
+        :class="{ hidden: activeMobileTab !== 'call' }"
+      >
+        <div v-if="!isChatOnlyAfterEnd" class="flex flex-col items-center gap-3.5 px-5 pb-6 pt-6 md:py-0">
+          <PttButton
+            :disabled="pttDisabled"
+            :is-sending="connection.isSending"
+            :locked-by-name="lockedByName"
+            @start="connection.startTalking"
+            @stop="() => connection.stopTalking()"
+          />
+          <p class="text-center text-[11px] text-muted-foreground">{{ t('room.pttHint') }}</p>
+        </div>
+        <p v-else class="px-5 py-8 text-center text-[13px] text-muted-foreground md:py-0">
+          {{ t('room.afterEndNotice') }}
+        </p>
+      </div>
+
+      <!-- 右ペイン: チャット(Desktop/Tabletでは常時表示・可変幅min320px) -->
+      <div
+        class="flex min-h-0 flex-1 flex-col overflow-hidden md:w-[380px] md:min-w-[320px] md:shrink"
+        :class="{ hidden: activeMobileTab !== 'chat' }"
+      >
+        <ChatPanel
+          class="flex min-h-0 flex-1 flex-col"
+          :messages="chat.messages"
+          :my-uid="auth.currentUser?.uid"
+          :error-message="chat.errorMessage"
+          :read-only="isChatOnlyAfterEnd"
+          :get-attachment-url="getChatAttachmentUrl"
+          :get-thumbnail-url="getChatThumbnailUrl"
+          @send="sendChat"
+          @send-file="sendChatFile"
+        />
+      </div>
+
+      <!-- [Mobile幅専用] 常設PTTミニバー。「参加者」「チャット」タブを
+           開いていても送話できるようにするための固定バー(README.mdの
+           Phase1「安定性・低遅延」要件に直結するため)。「通話」タブは
+           PttButton(大きな円ボタン)が主役のため、ここでは二重表示しない。
+           after_end(通話不可)の間も表示しない。 -->
+      <PttMiniBar
+        v-if="activeMobileTab !== 'call' && !isChatOnlyAfterEnd"
+        class="md:hidden"
         :disabled="pttDisabled"
         :is-sending="connection.isSending"
         :locked-by-name="lockedByName"
         @start="connection.startTalking"
         @stop="() => connection.stopTalking()"
       />
-      <p class="text-center text-[11px] text-muted-foreground">{{ t('room.pttHint') }}</p>
     </div>
-
-    <ParticipantList
-      :participants="participantList"
-      :can-ban="canBan && !isChatOnlyAfterEnd"
-      :top-badges="topBadges"
-      :all-badges="allBadges"
-      :grantable-badges="badges.grantableBadges"
-      :is-granting-badge="badges.isGranting"
-      @ban="requestBan"
-      @report="reportParticipant"
-      @grant-badge="grantBadge"
-      @revoke-badge="revokeBadge"
-    />
-
-    <ChatPanel
-      :messages="chat.messages"
-      :my-uid="auth.currentUser?.uid"
-      :error-message="chat.errorMessage"
-      :read-only="isChatOnlyAfterEnd"
-      :get-attachment-url="getChatAttachmentUrl"
-      :get-thumbnail-url="getChatThumbnailUrl"
-      @send="sendChat"
-      @send-file="sendChatFile"
-    />
 
     <!-- [2026-08-04] 開発者向けログ表示(LogPanel)を非表示化。
          ログの収集自体(stores/connection.ts の logLines)は維持しており、表示のみをコメントアウトしている。

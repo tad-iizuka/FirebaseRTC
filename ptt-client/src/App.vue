@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useBanStore } from '@/stores/ban'
 import { useSavedRoomsStore } from '@/stores/savedRooms'
@@ -16,6 +17,12 @@ const savedRooms = useSavedRoomsStore()
 const connection = useConnectionStore()
 const onboarding = useOnboardingStore()
 const orgContext = useOrgContextStore()
+const route = useRoute()
+
+// [五十九訂: レイアウト刷新] room画面のみ、カード全体を画面いっぱいの高さで固定し、
+// 幅も768px以上向けの3ペイン構成が収まるよう広げる。auth/room-select等の他画面は
+// 従来通り(中央寄せ・高さは内容に応じて可変)のまま変更しない。
+const isRoomRoute = computed(() => route.name === 'room')
 
 // [ヘッダー左側テキストの参照元・再修正 2026-08-05] 前回の移植時、iOS版の
 // header()が組織名(orgContext.orgName)のみを表示している点を見落とし、
@@ -54,12 +61,19 @@ async function handleSignOut() {
 </script>
 
 <template>
-	<div class="flex min-h-dvh items-start justify-center p-4 sm:items-center sm:p-6">
-		<div class="w-full min-w-0 max-w-[420px] overflow-hidden rounded-md border border-border bg-card">
+	<div
+		class="flex p-4 sm:p-6"
+		:class="isRoomRoute ? 'h-dvh items-stretch justify-center' : 'min-h-dvh items-start justify-center sm:items-center'"
+	>
+		<div
+			class="flex min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-md border border-border bg-card"
+			:class="isRoomRoute ? 'h-full max-w-[1100px]' : 'max-w-[420px]'"
+		>
 			<!-- [オンボーディング] 初回起動時はサインイン前でもスワイプ形式の紹介画面を最優先で表示する -->
 			<OnboardingFlow v-if="!onboarding.hasCompletedOnboarding" @complete="onboarding.complete" />
 			<template v-else>
 				<AppHeader
+					class="shrink-0"
 					:user-name="headerDisplayName"
 					:photo-url="auth.currentUser?.photoURL"
 					:is-signed-in="!!auth.currentUser"
@@ -69,7 +83,11 @@ async function handleSignOut() {
 					@sign-out="handleSignOut"
 				/>
 				<AuthView v-if="!auth.currentUser" />
-				<RouterView v-else />
+				<!-- [五十九訂] RouterViewのclassはフォールスルー属性としてRoomView.vue等の
+				     ルート要素にそのままマージされる。room画面ではこのflex-1/min-h-0が
+				     3ペイン/タブ切り替えの高さの基準になる。他画面(単一カラムで内容量に
+				     応じた高さ)には影響しない。 -->
+				<RouterView v-else class="min-h-0 flex-1" />
 			</template>
 		</div>
 	</div>

@@ -149,10 +149,17 @@ function cancelPendingFile() {
 </script>
 
 <template>
-  <div class="border-t border-border px-5 py-4">
-    <div class="mb-2 text-[10px] uppercase tracking-[0.1em] text-muted-foreground">{{ t('chat.title') }}</div>
+  <!-- [五十九訂: Web版レイアウト刷新]
+       ルート要素はRoomView.vue側から`flex min-h-0 flex-1 flex-col`が
+       フォールスルー属性としてマージされる(通常のドキュメントフローに
+       置かれる従来の使い方の場合はこれらのクラスが付与されず、その場合でも
+       下のmin-h-0/flex-1は単に無効化されるだけで表示が壊れることはない)。
+       これにより、下のメッセージ一覧だけが可変高さで伸縮・スクロールし、
+       入力欄などはpx-5 py-4の帯の下端に固定される。 -->
+  <div class="flex min-h-0 flex-1 flex-col border-t border-border px-5 py-4">
+    <div class="mb-2 shrink-0 text-[10px] uppercase tracking-[0.1em] text-muted-foreground">{{ t('chat.title') }}</div>
 
-    <div class="mb-2.5 grid max-h-60 gap-0.5 overflow-y-auto text-xs">
+    <div class="mb-2.5 grid min-h-[6rem] flex-1 auto-rows-min gap-0.5 overflow-y-auto text-xs">
       <template v-for="item in listItems" :key="item.key">
         <!-- 日付区切り -->
         <div v-if="item.type === 'date'" class="my-1.5 flex items-center justify-center">
@@ -260,11 +267,11 @@ function cancelPendingFile() {
       </template>
     </div>
 
-    <p v-if="errorMessage" class="mb-2 text-[11px] text-destructive">{{ errorMessage }}</p>
+    <p v-if="errorMessage" class="mb-2 shrink-0 text-[11px] text-destructive">{{ errorMessage }}</p>
 
     <div
       v-if="!readOnly && pendingFile"
-      class="mb-2 flex items-center gap-1.5 rounded-sm border border-border px-2 py-1.5 text-[11px]"
+      class="mb-2 flex shrink-0 items-center gap-1.5 rounded-sm border border-border px-2 py-1.5 text-[11px]"
     >
       <Paperclip class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" :stroke-width="2" />
       <span class="max-w-40 flex-1 truncate text-muted-foreground">{{ pendingFile.name }}</span>
@@ -282,8 +289,8 @@ function cancelPendingFile() {
       class="hidden"
       @change="onFileSelected"
     />
-    <p v-if="readOnly" class="text-[11px] text-muted-foreground">{{ t('chat.readOnlyNotice') }}</p>
-    <div v-else-if="!pendingFile" class="flex gap-1.5">
+    <p v-if="readOnly" class="shrink-0 text-[11px] text-muted-foreground">{{ t('chat.readOnlyNotice') }}</p>
+    <div v-else-if="!pendingFile" class="flex shrink-0 gap-1.5">
       <Button
         size="sm"
         variant="ghost"

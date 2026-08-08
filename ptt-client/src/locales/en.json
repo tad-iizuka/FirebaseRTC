@@ -95,7 +95,10 @@
     "nicknameEdit": "Edit nickname",
     "nicknamePlaceholder": "Nickname",
     "nicknameSave": "Save",
-    "nicknameSaving": "Saving..."
+    "nicknameSaving": "Saving...",
+    "tabCall": "Call",
+    "tabParticipants": "Participants",
+    "tabChat": "Chat"
   },
   "recording": {
     "badge": "Recording",

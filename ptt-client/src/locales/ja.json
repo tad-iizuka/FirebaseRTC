@@ -95,7 +95,10 @@
     "nicknameEdit": "ニックネームを変更",
     "nicknamePlaceholder": "ニックネーム",
     "nicknameSave": "保存",
-    "nicknameSaving": "保存中..."
+    "nicknameSaving": "保存中...",
+    "tabCall": "通話",
+    "tabParticipants": "参加者",
+    "tabChat": "チャット"
   },
   "recording": {
     "badge": "録音中",
