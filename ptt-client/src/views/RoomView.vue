@@ -456,7 +456,7 @@ onUnmounted(() => {
 
       <!-- 右ペイン: チャット(Desktop/Tabletでは常時表示・可変幅min320px) -->
       <div
-        class="flex min-h-0 flex-1 flex-col overflow-hidden md:w-[380px] md:min-w-[320px] md:shrink"
+        class="flex min-h-0 flex-1 flex-col overflow-hidden md:flex md:w-[380px] md:min-w-[320px] md:shrink"
         :class="{ hidden: activeMobileTab !== 'chat' }"
       >
         <ChatPanel
