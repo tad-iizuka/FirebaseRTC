@@ -1,7 +1,7 @@
 # PTTアプリ ブラッシュアップ計画（改定版）
 
 対象リポジトリ: `tad-iizuka/FirebaseRTC`
-作成日: 2026-07-09 ／ 最終改定: 2026-08-08（六十訂）
+作成日: 2026-07-09 ／ 最終改定: 2026-08-08（六十二訂）
 
 > **⚠️ 巻き戻り事故について（2026-08-04 発見・記録）**
 >
@@ -2284,6 +2284,127 @@ dot-syntax型推論、`withStyle`のトップレベル拡張関数importなど�
 
 </details>
 
+六十一訂: 2026-08-08（「6. 次アクションの提案」item15のうちAndroid分を実装
+した。同じくアップロードされたリポジトリ一式（HEAD=`51ba715`。iOS実装時と
+同一）の`ptt-android`側、既存の`PTTApp.kt`（4タブ構成:
+`RootTab.TALK/MEMBERS/CHAT/SETTINGS`、五十三訂で確認したiOS版の移植）を
+直接確認した上で変更した。
+
+**実装内容(`ptt-android/app/src/main/java/co/ubunifu/pttandroid/ui/PTTApp.kt`
+のみ。他クライアント・サーバーの変更は無い)**:
+
+- `LocalConfiguration.current.screenWidthDp`で画面幅(dp)を取得し、
+  600dp以上を「タブレット幅」と判定する`isTabletWidth`を追加した。
+  iOS版の`horizontalSizeClass`に相当する判定をAndroid側でどう行うかが
+  設計上の分岐点だったが、**`material3-window-size-class`等の新規
+  ライブラリは導入しなかった**（`app/build.gradle.kts`に元々含まれていない
+  依存をこの変更のためだけに追加すると、この環境ではビルド確認ができない
+  変更の検証範囲がさらに広がるため）。代わりにAndroid公式ドキュメントが
+  目安として示す`sw600dp`（横幅600dp以上=タブレット相当）の閾値をそのまま
+  数値として使う、依存追加を伴わない実装とした
+- `isTabletWidth && activeRoomId != null`の場合のみ、新設の
+  `TabletThreePaneContent`を表示する分岐を追加した。iPhone相当の
+  スマートフォン幅、および未入室中（タブレット幅でも）は、既存の4タブ構成
+  （`RootTabBar`+`when (selectedTab)`）をそのまま維持する（変更なし）。
+  iOS版六十訂と同じく、未入室中のタブレット幅専用レイアウトは今回スコープ外
+- `TabletThreePaneContent`: ヘッダー（`HeaderRow`・ルーム名・
+  `OrgBreadcrumbRow`・`RecordingBanner`。既存の4タブ構成と共通）に続けて、
+  左（参加者・幅300dp固定・既存の`ParticipantsSection`をそのまま流用）／
+  中央（PTTボタン+退出ボタン・可変幅・既存の`TalkArea`と、
+  `TalkTabContent`内の入室中分岐にあった退出ボタンをそのまま流用）／右
+  （チャット・幅380dp固定・既存の`ChatSection`をそのまま流用）の3ペインを
+  `Row`で構成した。各Store（`PTTConnectionManager`・`PTTChatStore`等）側の
+  ロジック変更は一切無い（iOS版と同じ方針）
+- 設定（プロフィール・接続設定・ゲストのニックネーム変更・録音操作。
+  4タブ構成では独立の設定タブ）は3ペイン構成では専用ペインを割り当てず、
+  新設のツールバー行（3ペインの上に置く歯車ボタンのみの細い行）から
+  `ModalBottomSheet`（material3。既存の`build.gradle.kts`に含まれる
+  `androidx.compose.material3:material3`の範囲内で追加ライブラリ不要）で
+  表示する方式とした。既存の`SettingsTabContent`をそのまま呼び出して
+  再利用しており、ロジックの重複は無い（iOS版が`settingsTabContent`を
+  `NavigationStack`でラップしたのと同じ考え方）
+- **実装時に踏んだ落とし穴（今回の変更内で発見・修正済み）**：当初
+  `ModalBottomSheet`の内側を`Column(Modifier.verticalScroll(...))`で
+  ラップしていたが、`SettingsTabContent`自身が既に
+  `Modifier.fillMaxSize().verticalScroll(...)`を持っているため、同方向の
+  スクロールを二重にネストする実装になっていた。Composeは同方向スクロール
+  可能レイアウトの直接ネストを許容せず例外を投げる仕様のため、外側の
+  `Column(verticalScroll)`を削除し`SettingsTabContent`を直接呼び出す形に
+  修正した。目視でのコード確認段階で気づけた問題だが、実機確認が取れない
+  今回のような変更では見落としやすい類のバグとして記録しておく
+
+**今回のスコープ外として明示的に確認した項目**（iOS版六十訂と同じ方針）：
+
+- 未入室中（ルーム選択画面）のタブレット幅専用レイアウト
+- ビルド確認・実機確認。以下の限界について記録する
+
+**ビルド確認について**: この環境にはAndroid SDK・Gradleラッパーの実行環境が
+無く、`./gradlew assembleDebug`等による実行確認はできなかった。追加した
+`LocalConfiguration`・`Row`の`weight`/`fillMaxHeight`・`ModalBottomSheet`・
+`IconButton`はいずれもJetpack Compose標準APIであり、既存コード
+（`ContentView.swift`の`AttributedString`型推論、Android側の`CameraX`
+`@OptIn`伝播等）で過去に踏んだような非自明な型推論・アノテーション伝播の
+落とし穴は見当たらないが、これは目視でのコード確認による判断であり、実際の
+Gradleビルドでの確認ではない点に留意する。特に以下は実機/エミュレータでの
+確認が必要：(a) Android タブレット実機・エミュレータでの
+`screenWidthDp >= 600`判定が意図通りタブレット/大画面デバイスと一致するか
+（マルチウィンドウ分割時の挙動を含む）、(b) `ModalBottomSheet`が
+`ExperimentalMaterial3Api`である点（Compose BOM 2024.09.03時点でのAPI安定性）。
+これらは六訂・八訂等で踏んだのと同じ、実行確認が取れない場合の限界として
+記録する。
+
+**成果物**: 変更した`PTTApp.kt`単体のzip、および`git diff`パッチを返却する。
+`tad-iizuka/FirebaseRTC`リポジトリ本体への実際のコミット・反映は本ドキュメント
+側では未確認のため、次アクションとして残す。
+
+**次アクションへの影響**: 「6. 次アクションの提案」item15を「iOS/Android
+ともに実装済み、両OSともビルド/実機確認・リポジトリ反映確認が残る」状態に
+更新する。
+
+</details>
+
+六十二訂: 2026-08-08（ユーザーからAndroid Studioでのビルド失敗
+スクリーンショットの共有を受け、六十一訂で実装したAndroid版の不具合を
+修正した。
+
+**発見された不具合**: `Build ptt-android: failed`。
+`app:compileDebugKotlin`で
+`Cannot access 'val RowColumnParentData?.weight: Float': it is internal in
+file.`というコンパイルエラーが`PTTApp.kt:55`で発生。
+
+**原因**: 六十一訂で追加した`import androidx.compose.foundation.layout.weight`
+が原因だった。Jetpack Composeの`weight`は`RowScope`/`ColumnScope`に対する
+拡張関数として定義されており、トップレベル関数としてimportする対象では
+ない。`Modifier.weight(...)`はRow/Column/BoxのlambdaスコープでComposeが
+暗黙のレシーバーとして解決するため、そもそもimport文自体が不要
+（ファイル内の他の`Modifier.weight(1f)`呼び出し、例えば既存の
+`TalkTabContent`内の`Spacer(Modifier.weight(1f))`もimport無しで動作して
+いた）。この誤ったimportが、たまたま同名で存在する内部シンボル
+（`RowColumnParentData?.weight`）の方へ解決を混乱させ、ビルドエラーに
+つながった。
+
+**修正内容**: `PTTApp.kt`の該当import文1行を削除。他のコード変更は無い。
+削除後もファイル内の全`.weight(...)`呼び出し（3ペイン構成内の
+`Row(Modifier.weight(1f)...)`・`Column(Modifier.weight(1f)...)`・
+`Spacer(Modifier.weight(1f))`含む）はいずれもRow/Columnスコープ内での
+呼び出しのため、import無しで問題なく解決される。
+
+**教訓として記録**: 「ビルド確認について」の項で毎回記載している通り、
+この環境ではXcode/Android Studioでの実ビルド確認ができないため、
+今回のような「文法的には正しいが意味的に誤ったimport」に起因する
+コンパイルエラーは、目視でのコード確認だけでは発見できなかった。
+ユーザー側の実ビルド結果（スクリーンショット等の共有）が、この種の
+不具合を検出する唯一の手段であることを改めて記録する。
+
+**成果物**: 修正済み`PTTApp.kt`単体のzip、および`git diff`パッチ
+（アップロードされたリポジトリ一式HEAD=`3a84a5f`基準、六十一訂の内容を
+一部修正した形で作り直したもの）を返却する。
+
+**次アクションへの影響**: 「6. 次アクションの提案」item15のAndroid分の
+説明に、今回の不具合修正を反映する。
+
+</details>
+
 
 ---
 
@@ -2913,7 +3034,7 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
 
 ---
 
-## 6. 次アクションの提案（2026-08-08 六十訂で更新）
+## 6. 次アクションの提案（2026-08-08 六十二訂で更新）
 
 <details>
 <summary>この一覧のitem番号がどう変遷してきたか（クリックで展開）</summary>
@@ -3188,19 +3309,24 @@ URLハイパーリンク化・IME誤送信バグ修正をWeb版(`ptt-client`)・
     基づき、`ptt-client`のレイアウトCSS（コンテナのFlex/Grid）を実装する。
     既存コンポーネント（PTTStore/ChatStore等）自体のロジック変更は不要な
     設計とした
-15. **iOS/Androidのタブレット幅レイアウト** → **iOS分は実装完了
-    （2026-08-08、六十訂）**。`ContentView.swift`に
-    `horizontalSizeClass == .regular`かつ入室中の場合のみ3ペイン
-    （参加者300pt固定／PTT可変幅／チャット380pt固定、`HStack`による自前
-    実装）を表示する分岐を追加した。`NavigationSplitView`は、iOS側が
-    2026-08-04(4訂)でTabViewのLiquid Glass選択ハイライト不具合を踏んだ
-    経緯を踏まえ、同種のシステムアニメーション由来の不具合リスクを避ける
-    ため採用しなかった（詳細は文書冒頭「六十訂」参照）。
-    **残課題**：(a) Android版（Jetpack Compose）の同種対応、
-    (b) 今回のiOS変更のXcodeビルド確認・iPad実機/Simulatorでの
-    `horizontalSizeClass`切り替え確認、(c) リポジトリへの反映確認
-    （`git show`による直接検証）、(d) 未入室中（ルーム選択画面）の
-    タブレット幅専用レイアウトは今回スコープ外のまま
+15. **iOS/Androidのタブレット幅レイアウト** → **iOS/Androidとも実装完了
+    （iOS: 2026-08-08六十訂、Android: 2026-08-08六十一訂）**。iOS版は
+    `horizontalSizeClass == .regular`、Android版は
+    `LocalConfiguration.screenWidthDp >= 600`をそれぞれの判定条件とし、
+    入室中のみ3ペイン（参加者/PTT/チャット、固定幅+可変幅の自前レイアウト）
+    を表示する分岐を追加した。両OSとも新規ライブラリ（iOS:
+    `NavigationSplitView`不採用、Android: `material3-window-size-class`
+    不採用）を避け、既存の標準API・既存コンポーネントの再利用のみで実装した
+    （詳細は文書冒頭「六十訂」「六十一訂」参照）。設定関連はどちらも専用
+    ペインを割かず、シート（iOS: `.sheet`+`NavigationStack`、Android:
+    `ModalBottomSheet`）に集約した。
+    **残課題**：(a) 両OSともXcode/Gradleでのビルド確認・タブレット実機/
+    エミュレータでのサイズクラス切り替え確認（Android版は六十二訂で
+    `import androidx.compose.foundation.layout.weight`の誤りによる
+    コンパイルエラーを修正済み。修正後の再ビルド確認が必要）、
+    (b) リポジトリへの反映確認（`git show`による直接検証）、
+    (c) 未入室中（ルーム選択画面）のタブレット幅専用レイアウトは両OSとも
+    スコープ外のまま
 16. **（新規）PWA化**：`manifest.json`（`display: standalone`・ダーク
     テーマに合わせた`theme_color`/`background_color`・アイコン一式）と
     Service Workerを`ptt-client`に導入する。Service WorkerはApp Shell

@@ -45,6 +45,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -63,11 +64,16 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -84,6 +90,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -168,6 +175,7 @@ private fun queryDisplayName(context: android.content.Context, uri: Uri): String
     return uri.lastPathSegment ?: "file"
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PTTApp(
     authManager: PTTAuthManager,
@@ -288,6 +296,15 @@ fun PTTApp(
     var selectedTabName by rememberSaveable { mutableStateOf(RootTab.TALK.name) }
     val selectedTab = runCatching { RootTab.valueOf(selectedTabName) }.getOrDefault(RootTab.TALK)
     fun setSelectedTab(tab: RootTab) { selectedTabName = tab.name }
+    // [六十一訂・タブレット幅3ペイン] iOS版(ContentView.swiftのhorizontalSizeClass)と
+    // 同じ判定意図を、Android側では`LocalConfiguration.screenWidthDp`で行う。
+    // `material3-window-size-class`等の追加ライブラリは導入せず(build.gradle.ktsに
+    // 元々含まれていない依存を今回のためだけに増やすと、この環境でビルド確認できない
+    // 変更の検証範囲がさらに広がるため)、Android公式ドキュメントが目安として示す
+    // sw600dp(横幅600dp以上=タブレット相当)をそのまま閾値として使う。
+    val windowWidthDp = LocalConfiguration.current.screenWidthDp
+    val isTabletWidth = windowWidthDp >= 600
+    var isTabletSettingsSheetOpen by remember { mutableStateOf(false) }
     var activeRoomId by rememberSaveable { mutableStateOf<String?>(null) }
     var currentInviteCode by rememberSaveable { mutableStateOf<String?>(null) }
     // [ルーム名] admin-dashboardで設定されたルーム名。POST /rooms/:roomId/join の
@@ -583,6 +600,96 @@ fun PTTApp(
             ?: orgContext.orgName
             ?: currentRoomName
 
+        // [六十一訂・タブレット幅3ペイン] タブレット幅かつ入室中のみ、4タブ構成の
+        // 代わりに参加者/PTT/チャットの3ペインを表示する(iOS版ContentView.swiftの
+        // `horizontalSizeClass == .regular && activeRoomId != nil`分岐の移植)。
+        // 未入室中(ルーム選択画面)はタブレット幅でも既存の4タブ構成のままとする
+        // (iOS版と同じくスコープ外。「6. 次アクションの提案」参照)。
+        if (isTabletWidth && activeRoomId != null) {
+            TabletThreePaneContent(
+                displayName = displayName,
+                status = status,
+                orgContext = orgContext,
+                isRecording = isRecording,
+                recordingStartedAt = recordingStartedAt,
+                participants = participants,
+                myUid = currentUser?.uid,
+                canBan = PTTRoomPermissions.canManageRoom(myRole),
+                onRequestBan = { banTarget = it },
+                onRequestReport = { reportTarget = it; reportReasonText = "" },
+                reportError = reportError,
+                topBadges = badgesByUid.mapValues { (_, entry) -> entry.topBadge },
+                allBadges = badgesByUid.mapValues { (_, entry) -> entry.badges },
+                grantableBadges = grantableBadges,
+                isGrantingBadge = badgeGranting,
+                badgeGrantError = badgeGrantError,
+                onGrantBadge = { target, badgeId -> grantBadge(target, badgeId) },
+                onRevokeBadge = { target, badgeId -> revokeBadge(target, badgeId) },
+                isConnected = status is ConnectionStatus.Connected,
+                isSending = isSending,
+                someoneElseTalking = someoneElseIsTalking,
+                talkerName = currentTalkerName,
+                onStartTalk = { connectionManager.startTalking() },
+                onStopTalk = { connectionManager.stopTalking() },
+                onLeaveRoom = { leaveRoom() },
+                chatMessages = chatMessages,
+                chatInput = chatInput,
+                onChatInputChange = { chatInput = it },
+                chatError = chatError,
+                onSendChat = {
+                    val roomId = activeRoomId
+                    val text = chatInput
+                    if (roomId != null && text.isNotBlank()) {
+                        chatInput = ""
+                        scope.launch {
+                            try {
+                                val idToken = authManager.fetchIdToken()
+                                chatStore.sendMessage(tokenServerUrl, idToken, roomId, text)
+                            } catch (e: Exception) {
+                                chatInput = text
+                            }
+                        }
+                    }
+                },
+                pendingAttachmentName = pendingAttachmentName,
+                attachmentSending = attachmentSending,
+                onPickAttachment = { launchAttachmentPicker() },
+                onSendPendingAttachment = { sendPendingAttachment() },
+                onCancelPendingAttachment = { cancelPendingAttachment() },
+                getAttachmentUrl = { messageId -> resolveAttachmentUrl(messageId) },
+                getThumbnailUrl = { messageId -> resolveThumbnailUrl(messageId) },
+                isSettingsSheetOpen = isTabletSettingsSheetOpen,
+                onOpenSettingsSheet = { isTabletSettingsSheetOpen = true },
+                onDismissSettingsSheet = { isTabletSettingsSheetOpen = false },
+                settingsDisplayName = myDisplayName ?: authManager.displayName,
+                settingsPhotoUrl = currentUser?.photoUrl?.toString(),
+                isGuestAccount = currentUser?.isAnonymous == true,
+                onSignOut = { leaveRoom(); authManager.signOut() },
+                settingsStore = settingsStore,
+                activeRoomId = activeRoomId,
+                isGuestInRoom = myRole == "guest",
+                guestDisplayName = myDisplayName,
+                nicknameUpdating = nicknameUpdating,
+                nicknameError = nicknameError,
+                onUpdateNickname = { name ->
+                    val roomId = activeRoomId ?: return@TabletThreePaneContent
+                    scope.launch {
+                        try {
+                            val idToken = authManager.fetchIdToken()
+                            banStore.updateNickname(tokenServerUrl, idToken, roomId, name)
+                        } catch (e: Exception) {
+                            // banStore.nicknameErrorMessage に理由がセットされているのでUIには既に反映済み
+                        }
+                    }
+                },
+                canControlRecording = PTTRoomPermissions.canManageRoom(myRole),
+                recordingStarting = recordingStarting,
+                recordingStopping = recordingStopping,
+                recordingError = recordingError,
+                onRequestStartRecording = { showRecordingStartConfirm = true },
+                onStopRecording = { stopRecording() },
+            )
+        } else {
         Column(Modifier.fillMaxSize()) {
             // [モバイルUI再編・2026-08-04] 接続状態・ルーム名・録音中バナーは
             // 入室中のみ、4タブ共通のヘッダー領域に固定表示する(iOS版bodyの
@@ -769,6 +876,7 @@ fun PTTApp(
 
             RootTabBar(selectedTab = selectedTab, onSelect = { setSelectedTab(it) })
         }
+        }
     }
 
     // [BAN対応] BANボタン押下時の確認ダイアログ
@@ -855,6 +963,232 @@ fun PTTApp(
                 }
             },
         )
+    }
+}
+
+// MARK: - Tablet (幅600dp以上) 3ペイン構成
+// [六十一訂] Web版五十九訂・iOS版六十訂で採用したDesktop/Tablet幅レイアウト
+// (左:参加者/中央:PTT/右:チャット、3ペインともスクロール無しで常時表示)の
+// Android移植。既存の4タブ構成のコンテンツ(ParticipantsSection・TalkArea・
+// ChatSection)をそのまま再利用し、コンテナのレイアウトのみをRowへ組み替える。
+// 各Store側のロジック変更は一切無い。
+
+/**
+ * 左(参加者)・中央(PTTボタン+退出)・右(チャット)の3ペイン。
+ * 設定(プロフィール/接続設定/ニックネーム/録音操作)はペインを割かず、
+ * 右上の歯車ボタンから`ModalBottomSheet`で表示する(iOS版tabletToolbar・
+ * `.sheet`の移植。Web版が「ヘッダー右端の操作メニューに格納」としたのと
+ * 同じ考え方)。LEAVE ROOMは中央ペインの退出ボタンが引き続き兼ねる。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TabletThreePaneContent(
+    displayName: String?,
+    status: ConnectionStatus,
+    orgContext: OrgContext,
+    isRecording: Boolean,
+    recordingStartedAt: Long?,
+    participants: Map<String, ParticipantInfo>,
+    myUid: String?,
+    canBan: Boolean,
+    onRequestBan: (ParticipantInfo) -> Unit,
+    onRequestReport: (ParticipantInfo) -> Unit,
+    reportError: String?,
+    topBadges: Map<String, AssignedBadge?>,
+    allBadges: Map<String, List<AssignedBadge>>,
+    grantableBadges: List<co.ubunifu.pttandroid.model.GrantableBadge>?,
+    isGrantingBadge: Boolean,
+    badgeGrantError: String?,
+    onGrantBadge: (ParticipantInfo, String) -> Unit,
+    onRevokeBadge: (ParticipantInfo, String) -> Unit,
+    isConnected: Boolean,
+    isSending: Boolean,
+    someoneElseTalking: Boolean,
+    talkerName: String,
+    onStartTalk: () -> Unit,
+    onStopTalk: () -> Unit,
+    onLeaveRoom: () -> Unit,
+    chatMessages: List<co.ubunifu.pttandroid.model.ChatMessage>,
+    chatInput: String,
+    onChatInputChange: (String) -> Unit,
+    chatError: String?,
+    onSendChat: () -> Unit,
+    pendingAttachmentName: String?,
+    attachmentSending: Boolean,
+    onPickAttachment: () -> Unit,
+    onSendPendingAttachment: () -> Unit,
+    onCancelPendingAttachment: () -> Unit,
+    getAttachmentUrl: suspend (String) -> String,
+    getThumbnailUrl: suspend (String) -> String,
+    isSettingsSheetOpen: Boolean,
+    onOpenSettingsSheet: () -> Unit,
+    onDismissSettingsSheet: () -> Unit,
+    settingsDisplayName: String?,
+    settingsPhotoUrl: String?,
+    isGuestAccount: Boolean,
+    onSignOut: () -> Unit,
+    settingsStore: PTTSettingsStore,
+    activeRoomId: String?,
+    isGuestInRoom: Boolean,
+    guestDisplayName: String?,
+    nicknameUpdating: Boolean,
+    nicknameError: String?,
+    onUpdateNickname: (String) -> Unit,
+    canControlRecording: Boolean,
+    recordingStarting: Boolean,
+    recordingStopping: Boolean,
+    recordingError: String?,
+    onRequestStartRecording: () -> Unit,
+    onStopRecording: () -> Unit,
+) {
+    Column(Modifier.fillMaxSize()) {
+        Column(Modifier.padding(16.dp)) {
+            HeaderRow(
+                currentUserName = settingsDisplayName,
+                photoUrl = settingsPhotoUrl,
+                isSignedIn = true,
+                status = status,
+                roomName = displayName,
+                settingsStore = settingsStore,
+                onSignOut = onSignOut,
+            )
+            displayName?.let { name ->
+                Text(
+                    name,
+                    fontFamily = Mono,
+                    fontSize = 15.sp,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                    color = PTTColors.Text,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(4.dp))
+            }
+            OrgBreadcrumbRow(orgContext)
+            RecordingBanner(isRecording = isRecording, recordingStartedAt = recordingStartedAt)
+        }
+
+        // 3ペイン専用の細いツールバー行。設定シートを開く歯車ボタンのみを置く。
+        Row(Modifier.fillMaxWidth().padding(end = 14.dp, bottom = 6.dp), horizontalArrangement = Arrangement.End) {
+            IconButton(onClick = onOpenSettingsSheet) {
+                Icon(
+                    painterResource(R.drawable.ic_settings_gear),
+                    contentDescription = stringResource(R.string.tab_settings),
+                    tint = PTTColors.Muted,
+                )
+            }
+        }
+
+        Row(Modifier.weight(1f).fillMaxWidth()) {
+            // 左ペイン: 参加者(幅300dp固定)。
+            Column(
+                Modifier
+                    .width(300.dp)
+                    .fillMaxHeight()
+                    .verticalScroll(rememberScrollState())
+                    .padding(16.dp),
+            ) {
+                ParticipantsSection(
+                    participants = participants,
+                    myUid = myUid,
+                    canBan = canBan,
+                    onRequestBan = onRequestBan,
+                    onRequestReport = onRequestReport,
+                    reportError = reportError,
+                    topBadges = topBadges,
+                    allBadges = allBadges,
+                    grantableBadges = grantableBadges,
+                    isGrantingBadge = isGrantingBadge,
+                    badgeGrantError = badgeGrantError,
+                    onGrantBadge = onGrantBadge,
+                    onRevokeBadge = onRevokeBadge,
+                )
+            }
+
+            HorizontalDivider(
+                modifier = Modifier.fillMaxHeight().width(1.dp),
+                color = PTTColors.Line,
+            )
+
+            // 中央ペイン: PTTボタン+退出ボタン(可変幅)。既存TalkTabContentの
+            // 入室中分岐と同じ構成(TalkArea + 退出ボタン)をそのまま流用する。
+            Column(Modifier.weight(1f).fillMaxHeight()) {
+                Spacer(Modifier.weight(1f))
+                TalkArea(
+                    isConnected = isConnected,
+                    isSending = isSending,
+                    someoneElseTalking = someoneElseTalking,
+                    talkerName = talkerName,
+                    onStart = onStartTalk,
+                    onStop = onStopTalk,
+                )
+                Spacer(Modifier.weight(1f))
+                Button(
+                    onClick = onLeaveRoom,
+                    modifier = Modifier.fillMaxWidth().padding(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = PTTColors.Danger),
+                ) {
+                    Text(stringResource(R.string.room_leave_room), fontFamily = Mono)
+                }
+            }
+
+            HorizontalDivider(
+                modifier = Modifier.fillMaxHeight().width(1.dp),
+                color = PTTColors.Line,
+            )
+
+            // 右ペイン: チャット(幅380dp固定)。
+            Column(Modifier.width(380.dp).fillMaxHeight().padding(16.dp)) {
+                ChatSection(
+                    messages = chatMessages,
+                    myUid = myUid,
+                    input = chatInput,
+                    onInputChange = onChatInputChange,
+                    errorMessage = chatError,
+                    onSend = onSendChat,
+                    pendingAttachmentName = pendingAttachmentName,
+                    attachmentSending = attachmentSending,
+                    onPickAttachment = onPickAttachment,
+                    onSendPendingAttachment = onSendPendingAttachment,
+                    onCancelPendingAttachment = onCancelPendingAttachment,
+                    getAttachmentUrl = getAttachmentUrl,
+                    getThumbnailUrl = getThumbnailUrl,
+                )
+            }
+        }
+    }
+
+    if (isSettingsSheetOpen) {
+        ModalBottomSheet(onDismissRequest = onDismissSettingsSheet) {
+            // [六十一訂] SettingsTabContent自身が内部で
+            // `Modifier.fillMaxSize().verticalScroll(...)`を持つため、ここで
+            // 追加のverticalScrollでラップしない(同方向スクロールの二重ネストは
+            // Composeが例外を投げるため。iOS版はNavigationStackでラップのみで
+            // 追加のScrollViewを重ねていない、という判断とも一致する)。
+            SettingsTabContent(
+                    displayName = settingsDisplayName,
+                    photoUrl = settingsPhotoUrl,
+                    isGuestAccount = isGuestAccount,
+                    onSignOut = {
+                        onDismissSettingsSheet()
+                        onSignOut()
+                    },
+                    settingsStore = settingsStore,
+                    activeRoomId = activeRoomId,
+                    isGuestInRoom = isGuestInRoom,
+                    guestDisplayName = guestDisplayName,
+                    nicknameUpdating = nicknameUpdating,
+                    nicknameError = nicknameError,
+                    onUpdateNickname = onUpdateNickname,
+                    canControlRecording = canControlRecording,
+                    isRecording = isRecording,
+                    recordingStarting = recordingStarting,
+                    recordingStopping = recordingStopping,
+                    recordingError = recordingError,
+                    onRequestStartRecording = onRequestStartRecording,
+                    onStopRecording = onStopRecording,
+                )
+        }
     }
 }
 
