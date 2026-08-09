@@ -2462,6 +2462,83 @@ file.`というコンパイルエラーが`PTTApp.kt:55`で発生。
 完了済みアクションへ移動する。item15の残課題を(a)ビルド実行確認のみに
 縮小し、(b)(c)の記載を更新する。
 
+六十四訂: 2026-08-09（ユーザーより、iOS版UIをApple Human Interface
+Guidelinesに照らして再検討し、独自実装を極力標準コンポーネントへ置き換える
+よう依頼を受けた。動機は「今後のiOSアップデートへの追従のしやすさ」）。
+
+**調査（第1段階）**: `ptt-ios/ptt-ios/`配下を精査し、既に標準コンポーネントで
+実装できている箇所（`PTTSettingsView.swift`の`Form`/`Section`/`Picker`、
+最近使ったルーム一覧の`List`+`swipeActions`、`.alert()`、`Menu`等）と、
+独自実装になっている箇所を切り分けた。後者は優先度順に、①タブバー本体
+（`customTabBar`、標準`TabView`のLiquid Glass選択ハイライトが切替時に
+色フラッシュする不具合の回避策として2026-08-04(4訂)に導入）、②参加者一覧
+（`List`ではなく生の`VStack`+`ForEach`）、③設定タブ本体（`Form`ではなく
+`ScrollView`+`VStack`+手動`Divider`）、④ルームID/招待コード入力欄の装飾、
+⑤チャットの吹き出し表示、の5点。④⑤は標準コントロール(`TextField`)の上の
+装飾に留まる、またはHIGが特定の標準部品を定めていない領域のため優先度低、
+①〜③を候補として提示した。
+
+**調査（第2段階、ユーザーからの追加報告を受けて）**: ユーザーから
+「QRコードを読み取るボタンでも、タブを移動して戻った際に同様にハイライトが
+一瞬白くなってから戻る現象があり、意図しない箇所でハイライトされることが
+問題」との報告を受けた。このボタンは①のタブバーとは無関係な箇所
+（`roomSelectionSection`内）で`.buttonStyle(.glass)`を使用しており、
+①の対応（自前タブバーへの置き換え）では解決しない不具合であることが
+判明した。これにより、不具合は標準`TabView`固有ではなく、`.glassEffect()`・
+`.buttonStyle(.glass/.glassProminent)`等のLiquid Glass系API全般に共通する
+再描画時の問題である可能性が高いと判断した。ユーザーの提案（まず標準実装へ
+戻し、その上で必要な部分だけ改めてスタイリングを検討する）に基づき、
+①を含むLiquid Glass関連の実装を全て標準コンポーネントへ戻す方針とした。
+なお、最新のアップロード（`ptt-ios.zip`）を`diff -rq`で前回確認済みのコードと
+突き合わせたが、ソースに差分は無かった（Xcodeのウィンドウ状態を記録する
+バイナリファイルのみ差分あり）ため、前回の棚卸し内容がそのまま最新状態に
+対して有効であることを確認した上で本対応を行った。
+
+**実装内容（`ContentView.swift`のみ。他ファイルの変更は無い）**:
+
+- タブバー本体: `customTabBar`/`tabBarButton`（自前描画）を削除し、標準
+  `TabView(selection:)`+`.tabItem { Label(...) }`+`.tag(...)`に置き換えた。
+  選択色は`.tint(.pttAccent)`で指定するのみとし、ハイライトの見た目自体は
+  システム標準実装に委ねる
+- サインイン画面のカード: `GlassEffectContainer`+`.glassEffect(.regular
+  .tint(.pttPanel).interactive(), in: RoundedRectangle(cornerRadius: 28))`を、
+  標準の半透明マテリアル`.background(.regularMaterial, in:
+  RoundedRectangle(cornerRadius: 28))`に置き換えた。同様に、右上の設定
+  アイコンの丸背景も`.glassEffect(.regular, in: Circle())`から
+  `.background(.regularMaterial, in: Circle())`に置き換えた。
+  `.regularMaterial`はiOS 15から存在する標準API（半透明の「すりガラス」
+  背景）で、ぼかし・透過の描画自体をOS側が管理するため、今回のような
+  再描画時のフラッシュは起きにくく、今後のiOSアップデートにも自動で
+  追従できると判断した
+- ボタン5箇所: Googleサインイン・ゲスト参加・招待コードで参加する・
+  QRコードを読み取る・ルームを退出する、いずれも`.buttonStyle(.glass)`→
+  `.buttonStyle(.bordered)`、`.buttonStyle(.glassProminent)`→
+  `.buttonStyle(.borderedProminent)`に置き換えた（`.tint()`・
+  `role: .destructive`の指定はそのまま維持しており、主操作/副次操作/
+  破壊的操作の塗り分けという意図自体は変えていない）
+- タブレット3ペイン（`tabletThreePaneContent`）は元々`.glassEffect()`を
+  使用しておらず、変更していない。5.4で検討していた「NavigationSplitView
+  不採用」の判断も、タブバーの不具合原因が変わったことによる影響は無いと
+  判断し、そのまま維持する
+
+**成果物**: 修正済み`ContentView.swift`を含む`ptt-ios`一式のzip
+（`ptt-ios-fixed.zip`）、および`git diff`パッチ（アップロードされた
+`ptt-ios.zip`基準、リポジトリ本体は未取得のためリポジトリ相対パス
+`ptt-ios/ptt-ios/ContentView.swift`表記のパッチファイルのみ）を返却する。
+
+**残課題**: この環境はXcode/実機/シミュレータが無いため、(a)標準
+`TabView`・標準`bordered`系ボタン・`.regularMaterial`のいずれについても
+実機での再描画確認（フラッシュが実際に解消したか）ができておらず、
+御社側での確認が必要、(b)確認の結果、フラッシュが解消していない場合は
+不具合の原因がLiquid Glass系API以外にある可能性も出てくるため、その場合は
+別途切り分けが必要、(c)標準実装に戻したことで見た目の作り込み（角丸や
+影の付き方等）が変わっている箇所があるため、確認後に必要なら改めて
+スタイリングを検討する（ユーザーからの提案通り、まず標準実装への回帰を
+優先し、装飾の作り込みは次のステップとする）
+
+**次アクションへの影響**: 「6. 次アクションの提案」に、今回の変更の
+実機確認を新規item17として追加する。
+
 ---
 
 ## 0. README.mdが定義するビジョンの要点（前提の再確認）
@@ -3090,7 +3167,7 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
 
 ---
 
-## 6. 次アクションの提案（2026-08-08 六十三訂で更新）
+## 6. 次アクションの提案（2026-08-09 六十四訂で更新）
 
 <details>
 <summary>この一覧のitem番号がどう変遷してきたか（クリックで展開）</summary>
@@ -3392,6 +3469,17 @@ URLハイパーリンク化・IME誤送信バグ修正をWeb版(`ptt-client`)・
     する（古い録音状態・BAN状態を見せる事故を避けるため）。Web Push通知は
     今回のスコープ外とし、Phase14（プッシュ通知）着手時にService Worker
     基盤を再利用する形で合流させる
+17. **（新規）iOS版: Liquid Glass関連実装の標準コンポーネントへの回帰・
+    実機確認**：六十四訂で、HIG準拠・今後のiOSアップデートへの追従を
+    目的に、`ContentView.swift`のタブバー（`customTabBar`→標準
+    `TabView`）・サインイン画面のカード/アイコン背景（`.glassEffect()`→
+    `.regularMaterial`）・ボタン5箇所（`.buttonStyle(.glass/
+    .glassProminent)`→`.bordered/.borderedProminent`）を標準実装へ
+    戻した。この環境ではXcode/実機/シミュレータが無いため、(a)実機での
+    再描画確認（QRボタン等で報告されていたフラッシュ現象が解消したか）、
+    (b)解消していない場合の原因切り分け、(c)見た目の作り込み（角丸・影等）
+    の再検討、がいずれも未実施のまま残っている。詳細は文書冒頭
+    「六十四訂」参照
 
 ### 6.1 完了済みアクション（アーカイブ）
 

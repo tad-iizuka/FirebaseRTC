@@ -44,6 +44,19 @@ import UIKit
 /// 兼ねる(未入室=ルーム選択、入室中=PTTボタン+退出ボタン)。
 /// 頻度の低い操作(プロフィール/サインアウト/録音操作/ニックネーム変更/接続設定)は
 /// 独立のSettingsタブ(歯車アイコン)に集約する。
+///
+/// [不具合修正・2026-08-09] 2026-08-04(4訂)では標準`TabView`のLiquid Glass
+/// 選択ハイライトが切替時に一瞬色フラッシュする不具合を確認し、自前描画の
+/// タブバー(customTabBar、当時削除)へ切り替えていた。しかし今回、タブバーとは
+/// 無関係な「QRコードを読み取る」ボタン(`.buttonStyle(.glass)`)でも、タブを
+/// 移動して戻った際に同様のフラッシュ(白→黒)が再現することが判明し、
+/// 不具合はタブバー固有ではなく`.glassEffect()`系のAPI全般に共通する再描画時の
+/// 問題である可能性が高いと判断した。意図しない箇所でハイライトが発生する
+/// という実害の大きさも踏まえ、まずタブバーを含む`.glassEffect()`系の実装を
+/// 全て標準コンポーネント(標準`TabView`・`.buttonStyle(.bordered/.borderedProminent)`・
+/// 標準`Material`)へ戻し、今後のiOS/Xcodeアップデートに素直に追従できる状態に
+/// 揃えた上で、必要な部分だけ改めてスタイリングを検討する方針とする
+/// (ユーザー確認済み、2026-08-09)。
 private enum RootTab: Hashable {
     case talk, members, chat, settings
 }
@@ -56,10 +69,11 @@ struct ContentView: View {
     /// iPhone全般とiPadのSlide Over/小さめSplit Viewでは`.compact`になる。
     /// NavigationSplitView等のシステムコンテナは採用せず、既存の4タブ構成
     /// （talk/members/chat/settings）と同じ「自前でHStackを組む」方式で
-    /// 3ペインを描画する。理由は2026-08-04(4訂)で標準TabViewのLiquid Glass
-    /// 選択ハイライトが色フラッシュを起こす不具合を踏んで自前タブバーへ
-    /// 切り替えた経緯があり、NavigationSplitViewのサイドバー/detail切り替えも
-    /// 同種のシステムアニメーション由来の不具合を踏むリスクを避けるため。
+    /// 3ペインを描画する。タブバー自体は標準`TabView`に戻したが(2026-08-09)、
+    /// タブレット3ペインは4タブ構成そのものとは別のレイアウト切り替えであり、
+    /// `NavigationSplitView`のサイドバー/detail切り替えアニメーションで
+    /// 同種の不具合を踏むリスクを避ける判断は変えていないため、自前HStack方式は
+    /// 維持する。
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @StateObject private var auth = PTTAuthManager()
@@ -142,7 +156,7 @@ struct ContentView: View {
                 PTTOnboardingView(onComplete: { onboarding.complete() })
             } else if auth.currentUser == nil {
                 // [モバイルUI再編・2026-08-04(再改定)] 未ログイン画面は上下左右中央揃えの
-                // 単一グラスカードのみで構成する(ヘッダーバーは持たない)。詳細はauthSection参照。
+                // 単一カードのみで構成する(ヘッダーバーは持たない)。詳細はauthSection参照。
                 authSection
             } else {
                 // [モバイルUI再編・2026-08-04(再改定)] サインイン後は入室状態に関わらず
@@ -155,13 +169,11 @@ struct ContentView: View {
                 // ルーム文脈を示している」項目が中心のため、他タブと違ってこの
                 // 共通ヘッダー(ルーム名・パンくず・接続状態行)を表示する意味が薄い。
                 // ユーザー指摘を受け、設定タブ選択中はこのヘッダーブロックを非表示にする。
-                // [不具合修正・2026-08-04(4訂)] 標準TabViewのLiquid Glass選択ハイライトは、
-                // 切り替えアニメーション中に背後のコンテンツを再サンプリングするらしく、
-                // `.toolbarBackground`で固定色を指定してもタップの瞬間だけ白っぽく
-                // フラッシュする現象が実機録画で確認された(スクリーンショットでは
-                // アニメーション完了後の状態しか捉えられず気づけなかった)。
-                // 標準TabViewへの依存をやめ、コンテンツ切り替え・タブバー描画とも
-                // 自前で行うことで、色を完全にこちらの管理下に置く。
+                // [不具合修正・2026-08-09] 2026-08-04(4訂)で標準TabViewから自前タブバーへ
+                // 切り替えていたが、タブバーと無関係な箇所(QRコード読み取りボタン)でも
+                // 同種のフラッシュが再現したため、不具合はタブバー固有ではないと判断し
+                // 標準TabViewへ戻した。タブ選択色は`.tint()`でアプリのアクセントカラーに
+                // 揃える(自前でハイライトの見た目を作り込まない)。
                 // [五十九訂・タブレット幅3ペイン] iPadの通常幅かつ入室中のみ、
                 // 4タブ構成の代わりに参加者/PTT/チャットの3ペイン構成を表示する。
                 // 未入室中(ルーム選択画面)はタブレット幅でも従来のtalkTabContentを
@@ -177,17 +189,21 @@ struct ContentView: View {
                             recordingBanner
                         }
 
-                        Group {
-                            switch selectedTab {
-                            case .talk: talkTabContent
-                            case .members: membersTabContent
-                            case .chat: chatTabContent
-                            case .settings: settingsTabContent
-                            }
+                        TabView(selection: $selectedTab) {
+                            talkTabContent
+                                .tabItem { Label("通話", systemImage: "mic.circle") }
+                                .tag(RootTab.talk)
+                            membersTabContent
+                                .tabItem { Label("参加者", systemImage: "person.2") }
+                                .tag(RootTab.members)
+                            chatTabContent
+                                .tabItem { Label("チャット", systemImage: "bubble.left.and.bubble.right") }
+                                .tag(RootTab.chat)
+                            settingsTabContent
+                                .tabItem { Label("設定", systemImage: "gearshape") }
+                                .tag(RootTab.settings)
                         }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                        customTabBar
+                        .tint(.pttAccent)
                     }
                 }
             }
@@ -271,59 +287,10 @@ struct ContentView: View {
     }
 
     // MARK: - Tabs (4タブ構成: 通話/参加者/チャット/設定)
-
-    /// [不具合修正・2026-08-04(4訂)] 標準TabViewのタブバーを置き換える自前実装。
-    /// 色を完全に固定できるよう、選択状態のハイライトも`Color.pttAccentDim`ベースの
-    /// カプセルで自前描画する(システムのLiquid Glass選択アニメーションに伴う
-    /// 色のフラッシュを避けるため。詳細はbody側のコメント参照)。
-    /// カプセル自体はガラス風の質感を保つよう`.glassEffect()`で仕上げる。
-    private var customTabBar: some View {
-        GlassEffectContainer(spacing: 8) {
-            HStack(spacing: 2) {
-                tabBarButton(tab: .talk, systemImage: "mic.circle", label: "通話")
-                tabBarButton(tab: .members, systemImage: "person.2", label: "参加者")
-                tabBarButton(tab: .chat, systemImage: "bubble.left.and.bubble.right", label: "チャット")
-                tabBarButton(tab: .settings, systemImage: "gearshape", label: "設定")
-            }
-            .padding(6)
-            .glassEffect(.regular.tint(.pttPanel), in: Capsule())
-        }
-        .padding(.horizontal, 20)
-        .padding(.bottom, 8)
-        .padding(.top, 6)
-    }
-
-    /// [不具合修正・2026-08-04(6訂)] `label`をプレーンな`String`にしていたため、
-    /// `Text(label)`がローカライズ検索(Localizable.xcstrings)を経由せず
-    /// 常に日本語のまま表示されていた(SwiftUIは文字列リテラルが直接
-    /// `LocalizedStringKey`型のパラメータに渡された場合のみ自動でローカライズ
-    /// 変換する。一度`String`型の変数に代入してから`Text`に渡すと、その変換は
-    /// 起きない)。`LocalizedStringKey`に変更し、呼び出し側のリテラルが
-    /// カタログ経由で翻訳されるようにした。
-    private func tabBarButton(tab: RootTab, systemImage: String, label: LocalizedStringKey) -> some View {
-        let isSelected = selectedTab == tab
-        return Button {
-            selectedTab = tab
-        } label: {
-            VStack(spacing: 3) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 19))
-                Text(label)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-            }
-            .foregroundColor(isSelected ? .pttAccent : .pttMuted)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
-            .background {
-                if isSelected {
-                    Capsule().fill(Color.pttAccentDim.opacity(0.55))
-                }
-            }
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .animation(.easeOut(duration: 0.15), value: isSelected)
-    }
+    // [不具合修正・2026-08-09] タブバーは標準TabViewに戻したため、以前ここにあった
+    // 自前描画のcustomTabBar/tabBarButtonは削除した。選択色は各tabItemに対する
+    // `.tint(.pttAccent)`(body側)で指定するのみで、ハイライトの見た目自体は
+    // システムの標準実装に任せる。
 
     /// Talkタブ。未入室=ルーム選択画面、入室中=PTTボタン+退出ボタンを表示する。
     /// 「入室後は通話ボタン＋ルーム退出ボタンも表示」という要件に合わせ、退出ボタン
@@ -587,14 +554,19 @@ struct ContentView: View {
 
     /// 未サインイン時の画面。Web版のauthSectionに相当。
     /// [モバイルUI再編・2026-08-04(再改定)] 画面全体を上下左右中央揃えにし、
-    /// iOS 26 Liquid Glass(`.glassEffect`)に準拠したカード1枚で構成する。
+    /// カード1枚で構成する。
+    /// [不具合修正・2026-08-09] `GlassEffectContainer`+`.glassEffect()`を、
+    /// 標準の半透明マテリアル(`.regularMaterial`)へ置き換えた(body側コメント
+    /// 「不具合修正・2026-08-09」参照)。`.regularMaterial`はiOS 15から存在する
+    /// 標準APIで、System上のぼかし・透過表現はOS側が管理するため今回のような
+    /// 再描画時のフラッシュは起きず、今後のiOSアップデートにも自動で追従する。
     private var authSection: some View {
         ZStack {
             Color.pttBackground.ignoresSafeArea()
 
-            // [Liquid Glass] ガラス越しに背景の質感が見えるよう、うっすらとした
-            // アクセントカラーの円をぼかして背後に置く(素の単色背景だとガラスの
-            // 透過・屈折表現がほぼ視認できないため)。
+            // 背景の奥行きを出すため、うっすらとしたアクセントカラーの円をぼかして
+            // 背後に置く(素の単色背景だとカードの透過・ぼかし表現がほぼ視認できない
+            // ため)。
             Circle()
                 .fill(Color.pttAccent.opacity(0.25))
                 .frame(width: 260, height: 260)
@@ -606,57 +578,56 @@ struct ContentView: View {
                 .blur(radius: 90)
                 .offset(x: 100, y: 180)
 
-            GlassEffectContainer(spacing: 14) {
-                VStack(spacing: 22) {
-                    VStack(spacing: 6) {
-                        Image(systemName: "mic.circle.fill")
-                            .font(.system(size: 44))
-                            .foregroundStyle(.pttAccent)
-                        Text("PTT CLIENT")
-                            .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                            .foregroundColor(.pttMuted)
-                        Text("人ではなく、場につながる。")
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(.pttMuted)
-                    }
-
-                    authButtons
-
-                    Text("ゲストは登録不要ですが、送信内容や参加履歴は削除されず保持されます。")
+            VStack(spacing: 22) {
+                VStack(spacing: 6) {
+                    Image(systemName: "mic.circle.fill")
+                        .font(.system(size: 44))
+                        .foregroundStyle(.pttAccent)
+                    Text("PTT CLIENT")
+                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                        .foregroundColor(.pttMuted)
+                    Text("人ではなく、場につながる。")
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundColor(.pttMuted)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    if let message = auth.lastErrorMessage {
-                        Text(message)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(.pttDanger)
-                            .multilineTextAlignment(.center)
-                    }
                 }
-                .padding(28)
-                .frame(maxWidth: 340)
-                .glassEffect(.regular.tint(.pttPanel).interactive(), in: RoundedRectangle(cornerRadius: 28))
+
+                authButtons
+
+                Text("ゲストは登録不要ですが、送信内容や参加履歴は削除されず保持されます。")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.pttMuted)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let message = auth.lastErrorMessage {
+                    Text(message)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.pttDanger)
+                        .multilineTextAlignment(.center)
+                }
             }
+            .padding(28)
+            .frame(maxWidth: 340)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 28))
             .padding(24)
         }
         // [設定] 未サインイン時も接続先(トークンサーバー/LiveKit)を変更できるよう、
-        // ガラスカードの右上に小さく歯車アイコンを重ねる(サインイン後は設定タブへ移動)。
+        // カードの右上に小さく歯車アイコンを重ねる(サインイン後は設定タブへ移動)。
         .overlay(alignment: .topTrailing) {
             PTTSettingsIcon(settings: settingsStore)
-                .glassEffect(.regular, in: Circle())
+                .background(.regularMaterial, in: Circle())
                 .padding(20)
         }
     }
 
     /// Google/ゲストサインインの2ボタン。主操作(Googleサインイン)は塗りつぶしで
-    /// 目立たせたいため`.buttonStyle(.glassProminent)`、副次操作(ゲスト参加)は
-    /// カードのガラスに馴染む`.buttonStyle(.glass)`(ニュートラル)を使い分ける。
-    /// [不具合修正・2026-08-04(5訂)] 当初は両方とも`.glass`+`.tint()`にしていたが、
-    /// 実機では`.tint()`が反映されず両方とも同じニュートラルな見た目になって
-    /// しまうことが判明した(`.glass`はニュートラルな質感を保つスタイルで、
-    /// 色付き塗りつぶしにするには`.glassProminent`が必要だった)。
+    /// 目立たせたいため標準の`.buttonStyle(.borderedProminent)`、副次操作
+    /// (ゲスト参加)はニュートラルな`.buttonStyle(.bordered)`を使い分ける。
+    /// [不具合修正・2026-08-09] 以前は`.glassProminent`/`.glass`(Liquid Glass)を
+    /// 使っていたが、タブ切替後の再描画時にフラッシュする不具合が確認されたため、
+    /// iOS 15から存在する標準の`bordered`系スタイルに戻した(body側コメント
+    /// 「不具合修正・2026-08-09」参照)。塗り分けの意図(主操作/副次操作)自体は
+    /// 変えていない。
     private var authButtons: some View {
         VStack(spacing: 12) {
             Button {
@@ -667,7 +638,7 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
             }
-            .buttonStyle(.glassProminent)
+            .buttonStyle(.borderedProminent)
             .tint(.pttAccent)
             .disabled(auth.isSigningIn)
 
@@ -679,7 +650,7 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
             }
-            .buttonStyle(.glass)
+            .buttonStyle(.bordered)
             .disabled(auth.isSigningIn)
         }
     }
@@ -766,25 +737,33 @@ struct ContentView: View {
                 field(label: "ルームID", text: $joinRoomId, placeholder: "招待された側が入力")
                 field(label: "招待コード", text: $joinInviteCode, placeholder: "8文字のコード")
             }
+            // [不具合修正・2026-08-09] `.buttonStyle(.glassProminent)`は、タブを
+            // 移動して戻ってきた際に一瞬白く光ってから元の色に戻るフラッシュが
+            // 実機で確認されたため、標準の`.buttonStyle(.borderedProminent)`へ
+            // 戻した(body側コメント「不具合修正・2026-08-09」参照)。
             Button(action: handleJoinRoom) {
                 Text(roomManager.isWorking ? String(localized: "参加中...") : String(localized: "招待コードで参加する"))
                     .font(.system(size: 14, weight: .medium, design: .monospaced))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
             }
-            .buttonStyle(.glassProminent)
+            .buttonStyle(.borderedProminent)
             .tint(.pttAccent)
             .disabled(roomManager.isWorking)
 
             // [招待リンク/QR] アプリ内QRスキャナーの起動ボタン。読み取り結果は
             // 入力欄への反映のみ(自動参加はしない。deeplink-qr-join-plan.md参照)。
+            // [不具合修正・2026-08-09] このボタン(`.buttonStyle(.glass)`だった)で
+            // タブ移動→復帰時のフラッシュ(白→黒)が再現したことが、タブバー以外にも
+            // `.glassEffect()`系の不具合が及んでいることに気づく契機になった。
+            // 標準の`.buttonStyle(.bordered)`へ戻した。
             Button(action: { isQrScannerPresented = true }) {
                 Text("QRコードを読み取る")
                     .font(.system(size: 13, design: .monospaced))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
             }
-            .buttonStyle(.glass)
+            .buttonStyle(.bordered)
             .sheet(isPresented: $isQrScannerPresented) {
                 QRScannerView(
                     onDecoded: { invite in
@@ -1170,12 +1149,15 @@ struct ContentView: View {
     /// pttMuted文字色)をそのまま踏襲していたが、iOSでは馴染みが薄いという
     /// 指摘を受け、role: .destructiveを持つボタンに変更した。
     /// [不具合修正・2026-08-04(5訂)] role: .destructiveや`.tint()`だけでは
-    /// 実機で赤系に着色されず(通常時は白文字、タップ時はただの白っぽい
-    /// ハイライトになっていた)、退出という破壊的操作なのに見た目上それと
-    /// 分からなかった。原因は`.buttonStyle(.glass)`がニュートラルな質感を保つ
-    /// スタイルで、色付き塗りつぶしには`.glassProminent`が必要だったため
-    /// (authButtons参照)。`.glassProminent` + `.tint(.pttDanger)`に変更し、
+    /// 実機で赤系に着色されず、退出という破壊的操作なのに見た目上それと
+    /// 分からなかった(当時の`.buttonStyle(.glass)`がニュートラルな質感を保つ
+    /// スタイルだったため)。`.glassProminent` + `.tint(.pttDanger)`に変更し、
     /// 通常時・押下時とも赤系で統一されるようにした。
+    /// [不具合修正・2026-08-09] `.glassProminent`はタブ移動→復帰時のフラッシュが
+    /// 確認されたため標準の`.buttonStyle(.borderedProminent)`へ戻した
+    /// (body側コメント「不具合修正・2026-08-09」参照)。`role: .destructive`と
+    /// `.tint(.pttDanger)`の組み合わせは`.borderedProminent`でも同様に機能し、
+    /// 赤系で統一される。
     private var voiceSection: some View {
         Button(role: .destructive, action: leaveRoom) {
             Text("ルームを退出する")
@@ -1183,7 +1165,7 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)
         }
-        .buttonStyle(.glassProminent)
+        .buttonStyle(.borderedProminent)
         .tint(.pttDanger)
         .padding(14)
     }
