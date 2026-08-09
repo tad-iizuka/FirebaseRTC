@@ -152,13 +152,40 @@ jobs:
           xcodebuild -showdestinations -project "$PROJECT" -scheme "$SCHEME" 2>/dev/null \
             | tee /tmp/destinations.txt
 
-          # 具体的なidを持つ iOS Simulator 行だけを抽出(プレースホルダーは除外)
-          LINE=$(grep -E "platform:iOS Simulator" /tmp/destinations.txt | grep -v "Any iOS Simulator Device" | grep "id:" | head -1)
+          # [2026-08-09 修正] project.pbxproj の IPHONEOS_DEPLOYMENT_TARGET を読み取り、
+          # それを満たすOSのdestinationだけを候補にする。
+          # 従来は「具体的なidを持つ最初のiOS Simulator行」を無条件に選んでいたため、
+          # ランナーにIPHONEOS_DEPLOYMENT_TARGET未満のOSのシミュレータ(例: 26.2)しか
+          # 入っておらず、かつそれが -showdestinations の最初の行に来た場合、
+          # 「iPad (A16)'s iOS Simulator 26.2 doesn't match ptt-iosTests's iOS
+          # Simulator 26.5 deployment target」という決定論的な失敗を選択してしまい、
+          # 後続の xcodebuild test がリトライしても必ず同じ理由で失敗し続けていた
+          # (シミュレータのインフラ起因の一時的な問題ではなかった)。
+          REQUIRED_OS=$(grep -m1 -oE 'IPHONEOS_DEPLOYMENT_TARGET = [0-9.]+' "$PROJECT/project.pbxproj" \
+            | awk '{print $3}')
+          echo "Required IPHONEOS_DEPLOYMENT_TARGET: ${REQUIRED_OS:-(not found, skipping version filter)}"
+
+          # 具体的なidを持つ iOS Simulator 行だけを抽出(プレースホルダーは除外)し、
+          # REQUIRED_OSが取得できた場合はOS >= REQUIRED_OSを満たす行だけに絞り込む。
+          # awkでのos+0/req+0比較は "26.5" のようなmajor.minor 2要素の数値を想定した
+          # 簡易比較であり、minorが2桁になるケース(例: 26.10)までは厳密に扱えない点に注意。
+          CANDIDATES=$(grep -E "platform:iOS Simulator" /tmp/destinations.txt | grep -v "Any iOS Simulator Device" | grep "id:")
+          if [ -n "$REQUIRED_OS" ]; then
+            LINE=$(echo "$CANDIDATES" | while IFS= read -r l; do
+              [ -z "$l" ] && continue
+              OS=$(echo "$l" | sed -E 's/.*OS:([^,}]+).*/\1/' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')
+              awk -v os="$OS" -v req="$REQUIRED_OS" 'BEGIN{exit !(os+0 >= req+0)}' && echo "$l"
+            done | head -1)
+          else
+            LINE=$(echo "$CANDIDATES" | head -1)
+          fi
 
           if [ -z "$LINE" ]; then
-            echo "::error::このschemeに対して有効なiOS Simulator destinationが見つかりませんでした。"
+            echo "::error::IPHONEOS_DEPLOYMENT_TARGET(${REQUIRED_OS:-不明})を満たすiOS Simulator destinationが見つかりませんでした。ランナーに対応するSimulatorランタイムが入っていない可能性があります。"
             echo "--- xcodebuild -showdestinations の出力 ---"
             cat /tmp/destinations.txt
+            echo "--- インストール済みSimulatorランタイム ---"
+            xcrun simctl list runtimes
             exit 1
           fi
 

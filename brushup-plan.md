@@ -1,7 +1,7 @@
 # PTTアプリ ブラッシュアップ計画（改定版）
 
 対象リポジトリ: `tad-iizuka/FirebaseRTC`
-作成日: 2026-07-09 ／ 最終改定: 2026-08-09（六十六訂）
+作成日: 2026-07-09 ／ 最終改定: 2026-08-09（六十七訂）
 
 > **⚠️ 巻き戻り事故について（2026-08-04 発見・記録）**
 >
@@ -2657,6 +2657,98 @@ $selectedTab)`の`.tint(.pttAccent)`直後に`.preferredColorScheme(.dark)`が
 
 ---
 
+六十七訂: 2026-08-09（ユーザーからiOS CI（`.github/workflows/ios-ci.yml`の
+`Unit Tests (ptt-iosTests)`ステップ）の失敗ログの共有を受け、原因を調査し
+修正した。前回取得済みのリポジトリ一式（HEAD=`bbe774a`）に対して
+`.github/workflows/ios-ci.yml`を直接確認・修正しており、新規のZIP
+アップロードは今回受けていない。
+
+**症状**: 2回とも同一のエラーで失敗していた。
+```
+xcodebuild: error: Failed to build project ptt-ios with scheme ptt-ios.:
+Cannot test target "ptt-iosTests" on "iPad (A16)": iPad (A16)'s iOS
+Simulator 26.2 doesn't match ptt-iosTests's iOS Simulator 26.5
+deployment target.
+```
+
+**原因調査**: `ptt-ios/ptt-ios.xcodeproj/project.pbxproj`を確認したところ、
+複数のビルド設定で`IPHONEOS_DEPLOYMENT_TARGET = 26.5`が指定されていた
+（`ios-ci.yml`冒頭のコメントにも同じ記載がある）。一方、ワークフローの
+「Pick available iOS Simulator」ステップは、`xcodebuild -showdestinations`
+の出力から**具体的なidを持つ最初のiOS Simulator行を無条件に選択**する
+実装になっており、OSバージョンとdeployment targetの整合性を一切
+チェックしていなかった。今回のランナーにはOS 26.2のシミュレータ
+（iPad (A16)）しか存在しなかった（ログの警告
+「Using the first of multiple matching destinations」がarm64/x86_64の
+26.2を2件示しているのみで、26.5以上の行が無い）ため、この26.2の
+シミュレータが選ばれ、後続の`xcodebuild test`で確実に失敗していた。
+
+「Unit Tests」ステップの再試行ロジックは
+「シミュレータのインフラ起因の可能性があるため再試行します」という
+コメント通り、一時的な不安定さを想定した設計だが、今回の原因は
+**決定論的な設定ミスマッチ**であり、シミュレータを`shutdown`/`boot`し
+直しても同じ26.2が選ばれ続けるため、2回とも全く同じ理由で失敗していた
+（ログの2回の試行が文字通り同一のエラーメッセージであることからも
+裏付けられる）。
+
+なお、「Ensure iOS Simulator runtime is installed」ステップ
+（`xcodebuild -downloadPlatform iOS`）が26.5以上のランタイムを実際に
+インストールできていたかどうかは、今回共有されたログの範囲では確認
+できない（`continue-on-error: true`のため、失敗していてもジョブ全体は
+止まらない仕様になっている）。仮にこのステップが正常に26.5以上の
+ランタイムを用意できていたとしても、後続の選択ロジックがOSバージョンを
+見ずに最初の行を機械的に選ぶ実装だったため、26.2のシミュレータが
+リストの前方にあれば同じ問題が起き得た。
+
+**修正内容（`.github/workflows/ios-ci.yml`の「Pick available iOS
+Simulator」ステップのみ）**:
+
+- `project.pbxproj`から`IPHONEOS_DEPLOYMENT_TARGET`の値を
+  `grep -oE`で読み取り、`REQUIRED_OS`として保持する処理を追加
+- 候補となるdestination行それぞれについて、`awk`で`OS >= REQUIRED_OS`を
+  満たすものだけに絞り込んでから選択するよう変更した（従来は絞り込み
+  無しで先頭行を機械的に選択していた）。`os+0`/`req+0`という awk の
+  数値強制変換による比較のため、"26.5"のようなmajor.minor 2要素の
+  バージョン文字列を想定した簡易比較であり、minorが2桁になるケース
+  （例: 26.10）までは厳密に扱えない点をコメントに明記した
+- 条件を満たすdestinationが1件も無かった場合、`::error::`で
+  「IPHONEOS_DEPLOYMENT_TARGETを満たすiOS Simulator destinationが
+  見つからなかった」ことと、必要なdeployment targetの値・
+  `xcrun simctl list runtimes`の出力を明示するよう変更した（従来は
+  「有効なdestinationが見つからない」という汎用メッセージのみで、
+  今回のような「見つかってはいるがバージョンが足りない」ケースの
+  区別がつかなかった）
+- 上記の修正により、今回と同じ状況（deployment targetを満たす
+  シミュレータがランナーに存在しない）が再発した場合、無駄な2回の
+  リトライ・シミュレータの起動待ちを経ずに「Pick available iOS
+  Simulator」ステップの時点で即座に、かつ原因が分かる形で失敗する
+  ようになる
+
+**（重要な留保）** この修正は**失敗の原因を早期に・明確に切り分ける
+ためのものであり、ランナー上にIPHONEOS_DEPLOYMENT_TARGET(26.5)を満たす
+Simulatorランタイムが存在しない場合にCIを成功させるものではない**。
+今回のランナーで実際に26.5以上のランタイムが用意可能かどうか
+（`-downloadPlatform iOS`が正しく機能するか、あるいはXcodeの選択
+バージョン自体を固定してその同梱ランタイムに頼る方が安定するか）は、
+実際にCIを再実行して確認する必要がある。この環境にはmacOSランナー・
+GitHub Actionsの実行環境が無いため、YAML構文の妥当性
+（`python3 -c "import yaml; yaml.safe_load(...)"`で確認済み）と、
+埋め込みシェルスクリプト部分の構文（`bash -n`で確認済み）・簡易な
+ロジックの動作（サンプルdestination行を使い、26.2のみの場合は
+選択なし→エラー、26.2と26.6が両方ある場合は26.6を選択、という2パターン
+を手元で検証済み）の確認に留まる。実際のGitHub Actions上での再実行
+結果を次アクションとして残す。
+
+**成果物**: 修正済み`.github/workflows/ios-ci.yml`単体のzip
+（`ios-ci-fix.zip`）、および`git diff`パッチ（`ios-ci-fix.patch`）を
+返却する。リポジトリ本体への実際の反映は次アクションとして残す。
+
+**次アクションへの影響**: 「6. 次アクションの提案」に、(1)今回の修正の
+実際のCI再実行結果の確認、(2)リポジトリへの反映確認、の2件を新規item19
+として追加する。
+
+---
+
 ## 0. README.mdが定義するビジョンの要点（前提の再確認）
 
 | 項目 | README.mdの定義 |
@@ -3305,7 +3397,7 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
 
 ---
 
-## 6. 次アクションの提案（2026-08-09 六十六訂で更新）
+## 6. 次アクションの提案（2026-08-09 六十七訂で更新）
 
 <details>
 <summary>この一覧のitem番号がどう変遷してきたか（クリックで展開）</summary>
@@ -3620,6 +3712,18 @@ URLハイパーリンク化・IME誤送信バグ修正をWeb版(`ptt-client`)・
 18. **（完了・「6.1」item37へ移動）** ~~Phase16(PWA化、六十五訂)のリポジトリ
     反映確認~~ → 2026-08-09、六十六訂でコミット`ea965f0`を`git show`により
     直接検証し解消済み
+19. **（新規）iOS CI（`ios-ci.yml`）シミュレータ選択修正の確認**：
+    六十七訂で、「Pick available iOS Simulator」ステップが
+    `IPHONEOS_DEPLOYMENT_TARGET`(26.5)を満たさないシミュレータ(26.2)を
+    無条件に選んでしまい、`xcodebuild test`が決定論的に失敗していた原因を
+    特定し、OSバージョンで絞り込む修正を行った。この環境にはGitHub
+    Actionsの実行環境が無く、YAML構文・埋め込みシェルスクリプトの構文・
+    簡易ロジックの手元検証に留まるため、(a)実際のCI再実行で今回の
+    エラーが解消したか、(b)ランナー上でIPHONEOS_DEPLOYMENT_TARGETを満たす
+    Simulatorランタイムがそもそも用意できるか（できない場合は
+    `-downloadPlatform iOS`側や採用Xcodeバージョンの固定方針を別途
+    見直す必要がある）、(c)リポジトリへの反映確認、の3点が未確認のまま
+    残っている。詳細は文書冒頭「六十七訂」参照
 
 ### 6.1 完了済みアクション（アーカイブ）
 
