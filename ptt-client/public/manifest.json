@@ -1,0 +1,40 @@
+{
+  "id": "/",
+  "name": "PTT Client",
+  "short_name": "PTT",
+  "description": "Connect to a place, not to a person. \u62db\u5f85\u30b3\u30fc\u30c9\u3067\u30eb\u30fc\u30e0\u306b\u53c2\u52a0\u3057\u3001\u30d7\u30c3\u30b7\u30e5\u30c8\u30fc\u30af\u3067\u30ea\u30a2\u30eb\u30bf\u30a4\u30e0\u306b\u4f1a\u8a71\u3059\u308b\u3002",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "lang": "ja",
+  "dir": "ltr",
+  "theme_color": "#0d1210",
+  "background_color": "#0d1210",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
