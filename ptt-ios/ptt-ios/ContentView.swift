@@ -204,6 +204,7 @@ struct ContentView: View {
                                 .tag(RootTab.settings)
                         }
                         .tint(.pttAccent)
+                        .preferredColorScheme(.dark)
                     }
                 }
             }
