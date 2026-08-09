@@ -167,17 +167,41 @@ jobs:
 
           # 具体的なidを持つ iOS Simulator 行だけを抽出(プレースホルダーは除外)し、
           # REQUIRED_OSが取得できた場合はOS >= REQUIRED_OSを満たす行だけに絞り込む。
-          # awkでのos+0/req+0比較は "26.5" のようなmajor.minor 2要素の数値を想定した
-          # 簡易比較であり、minorが2桁になるケース(例: 26.10)までは厳密に扱えない点に注意。
-          CANDIDATES=$(grep -E "platform:iOS Simulator" /tmp/destinations.txt | grep -v "Any iOS Simulator Device" | grep "id:")
+          #
+          # [2026-08-09 修正・第2版] 以前はシェルの while ループで候補行ごとに
+          # `awk -v os=... req=...` を都度起動し、その出力を `head -1` に流していた。
+          # この構成には2つの実害があった:
+          #   1. `while ... done | head -1` は head が1行受け取った時点でパイプを
+          #      閉じるが、while ループ自体は残りの行を回り続けるため、以降の
+          #      `echo` が閉じたパイプへの書き込みで "Broken pipe" を出し続ける
+          #   2. 候補行1つにつきawkプロセスを1個ずつ再起動する構成がmacOSの
+          #      /usr/bin/awk(BWK awk)上で不安定に壊れ、"newline in string" の
+          #      解析エラーで毎回失敗していた(結果、`&&`が成立せず`LINE`が
+          #      常に空になり、ジョブが失敗していた)
+          # → awkの呼び出しを1回だけにし、OS抽出・数値比較・最初の一致での
+          #   打ち切り(exit)まで全てawk内部で完結させることで両方を解消する。
+          #   あわせて major/minor をそれぞれ整数として比較するようにし、
+          #   従来コメントにあった「minorが2桁(例: 26.10)だと簡易比較が崩れる」
+          #   問題も解消した。
+          grep -E "platform:iOS Simulator" /tmp/destinations.txt \
+            | grep -v "Any iOS Simulator Device" \
+            | grep "id:" > /tmp/candidates.txt
+
           if [ -n "$REQUIRED_OS" ]; then
-            LINE=$(echo "$CANDIDATES" | while IFS= read -r l; do
-              [ -z "$l" ] && continue
-              OS=$(echo "$l" | sed -E 's/.*OS:([^,}]+).*/\1/' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')
-              awk -v os="$OS" -v req="$REQUIRED_OS" 'BEGIN{exit !(os+0 >= req+0)}' && echo "$l"
-            done | head -1)
+            LINE=$(awk -F'OS:' -v req="$REQUIRED_OS" '
+              {
+                split($2, a, ",")
+                os = a[1]
+                gsub(/^[ \t]+|[ \t]+$/, "", os)
+                split(os, ov, ".")
+                split(req, rv, ".")
+                mo = ov[1] + 0; no = ov[2] + 0
+                mr = rv[1] + 0; nr = rv[2] + 0
+                if (mo > mr || (mo == mr && no >= nr)) { print; exit }
+              }
+            ' /tmp/candidates.txt)
           else
-            LINE=$(echo "$CANDIDATES" | head -1)
+            LINE=$(head -1 /tmp/candidates.txt)
           fi
 
           if [ -z "$LINE" ]; then
