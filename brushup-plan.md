@@ -1,7 +1,7 @@
 # PTTアプリ ブラッシュアップ計画（改定版）
 
 対象リポジトリ: `tad-iizuka/FirebaseRTC`
-作成日: 2026-07-09 ／ 最終改定: 2026-08-08（六十二訂）
+作成日: 2026-07-09 ／ 最終改定: 2026-08-09（六十五訂）
 
 > **⚠️ 巻き戻り事故について（2026-08-04 発見・記録）**
 >
@@ -2541,6 +2541,74 @@ Guidelinesに照らして再検討し、独自実装を極力標準コンポー�
 
 ---
 
+六十五訂: 2026-08-09（「6. 次アクションの提案」item16「PWA化」を実装した。
+六十四訂（iOS Liquid Glass回帰）とは別系統の作業で、対象も`ptt-client`
+（Web版）のみのため、実装内容自体は独立している。アップロードされた
+リポジトリ一式（HEAD=`5d0ab05`。六十三訂が検証した`22e4398`の1コミット
+後で、差分は六十三訂自身のドキュメント更新のみであることを
+`git show --stat 5d0ab05`で確認済み）の`ptt-client`に対して行った。
+
+**実装内容（`ptt-client`のみ。サーバー・admin-dashboard・iOS/Androidの
+変更は無い）:**
+
+- `public/manifest.json`（新規）: `display: standalone`。`theme_color`/
+  `background_color`は`src/style.css`の`--background`（`#0d1210`）に
+  同期させた。アイコンは`any`/`maskable`purposeをそれぞれ192/512で用意
+- `public/sw.js`（新規）: App Shell（HTML/CSS/JS/アイコン等の静的アセット）
+  のみをキャッシュ対象とするService Worker。同一オリジンのGETリクエスト
+  にのみ介入する設計とし、Firestore・LiveKit・token-server（Cloud Run、
+  `stores/settings.ts`の`tokenServerUrl`で確認した通り別オリジン）への
+  通信をキャッシュ対象から意図的に除外した（録音中フラグ・BAN状態・
+  チャット等のリアルタイム性が要求される情報を古いキャッシュのまま
+  見せてしまう事故を避けるため）。ナビゲーションはネットワーク優先＋
+  オフライン時のみキャッシュへフォールバック、静的アセットは
+  stale-while-revalidateとした
+- `public/icons/`・`apple-touch-icon.png`・`favicon.ico`（新規）: 専用の
+  アプリアイコンが存在しなかった（`ptt-android/app/src/main/
+  ic_launcher-playstore.png`はAndroid Studioの既定プレースホルダーの
+  ままで、アプリ独自のものではなかったことをリポジトリ内の画像アセットを
+  網羅的に確認して判明した）ため、アプリのデザイントークン（背景
+  `#0d1210`・アクセント`#ff7a3c`・live色`#3ddc84`。`ptt-client/src/
+  style.css`から取得）に基づき、簡易な図形（walkie-talkie風アイコン）を
+  SVGで新規作成し、`rsvg-convert`で各サイズへラスタライズして用意した
+- `index.html`: manifest link・theme-color meta・各種icon linkを追加
+- `src/main.ts`: `import.meta.env.PROD`時のみService Workerを登録
+  （vite dev serverのHMRとの相性問題を避けるため開発時は登録しない）
+
+**動作確認**: この環境はnpmレジストリへのアクセスが可能だったため、
+`npm install`（497 packages）→`npm run build`（`vue-tsc -b && vite
+build`）を実際に実行し、エラー0件で完走することを確認した（既存の
+チャンクサイズ警告は今回の変更と無関係の既存事象）。`dist/`配下に
+`manifest.json`・`sw.js`・`icons/`・`apple-touch-icon.png`・
+`favicon.ico`が想定通り出力されていること、`manifest.json`が妥当な
+JSONであることも確認済み。ブラウザでの実際のインストール動作
+（ホーム画面追加・オフライン挙動）の目視確認はこの環境では実施できて
+いない。
+
+**スコープ外として明示的に見送った項目**:
+
+- Web Push通知 → 対象外。Phase14（プッシュ通知）着手時に、今回導入した
+  Service Worker基盤（登録・更新・キャッシュ管理の仕組み）を再利用し、
+  pushイベントリスナーを追加する形で合流させる想定とし、その旨を
+  `public/sw.js`内のコメントに記録した
+- iOS/Androidは対象外（ネイティブアプリのため、PWA化という概念自体が
+  適用されない）
+
+**成果物の反映状況について**: 今回の変更はアップロードされたリポジトリ
+一式ZIP（HEAD=`5d0ab05`）に対して直接行い、更新版ZIPと`index.html`/
+`src/main.ts`のdiffパッチとして返却したものであり、
+`tad-iizuka/FirebaseRTC`リポジトリ本体への実際のコミット・反映は本改定
+時点では未確認。六訂・八訂等で踏んだのと同じ確認プロセス（リポジトリ
+本体を再取得し`git show`等で直接検証する、またはユーザーからの反映
+報告を受ける）を次アクションとして残す。
+
+**次アクションへの影響**: 「6. 次アクションの提案」item16を「6.1」の
+完了済みアクションへ移動し、リポジトリへの反映確認のみを新規item18として
+残す。「3. 優先順位付きロードマップ案」にPhase16として新設し、「1. 実
+コード確認済みの現状」の機能差表にもPWA対応の行を追加する。
+
+---
+
 ## 0. README.mdが定義するビジョンの要点（前提の再確認）
 
 | 項目 | README.mdの定義 |
@@ -2614,6 +2682,9 @@ Message）はコード上どこにも見当たらず、依然として未着手�
 | **参加者一覧のバッジ表示** | ✅ | ✅ | ✅ | Phase13。Room APIを20秒間隔でポーリングし最優先1件を表示 |
 | **開始/終了時刻(Room Schedule)** | ✅ | ❌ | ❌ | 2026-08-05、五十三訂で発見。本体UIの状態出し分け（待機画面/チャット閲覧専用画面）はサーバー(`lib/roomSchedule.js`)・`firestore.rules`・`admin-dashboard`・`ptt-client`のみ実装済みで、iOS/Androidは未着手のまま（「6. 次アクションの提案」item5参照）。ただし2026-08-06(五十五訂)で、保存済みルーム履歴欄の表示用途に限り`PTTRoomManager`のschedule値パース自体はiOS/Androidにも追加済み（詳細は五十五訂参照。本体UIの未実装状態は変わらないためこの行のiOS/Android列は❌のまま） |
 | **チャットUI(LINE風バブル表示・アバター・URLリンク化)** | ✅ | ✅ | ✅ | 2026-08-07、五十六訂でWeb版を実装(アバターは写真>Guestアイコン>生成アバターの優先順位、自分の発言はLINE標準(右寄せ・アバター非表示)。副次的にIME変換確定時の誤送信バグ(Phase5から存在)も修正)。同日、五十七訂でiOSへ移植(Xcodeでのビルド確認は未実施)、五十八訂でAndroidへ移植(`ChatAvatar.kt`・`Linkify.kt`新設、`PTTModels.kt`/`PTTChatStore.kt`へrole/photoUrl追加、`PTTApp.kt`のChatSectionを全面書き換え)。3クライアントとも実機/実ビルドでの最終確認は未実施（「6. 次アクションの提案」参照） |
+| **Web版レイアウト刷新(3ペイン/タブ+PTTミニバー)** | ✅ | - | - | 2026-08-08、コミット`e48725c`・`51ba715`。768pxブレークポイントでMobile幅はタブ+常設PTTミニバー(`PttMiniBar.vue`)、Desktop/Tablet幅は参加者/PTT/チャットの3ペイン同時表示 |
+| **タブレット幅レイアウト(3ペイン)** | - | ✅ | ✅ | 2026-08-08、iOS(`horizontalSizeClass == .regular`)・Android(`screenWidthDp >= 600`)とも入室中のみ3ペイン表示。両OSともXcode/Gradleでの実ビルド確認は未実施（「6. 次アクションの提案」item15参照） |
+| **PWA対応(ホーム画面追加・オフラインApp Shell)** | ✅ | - | - | 2026-08-09、六十五訂で実装。`manifest.json`・`sw.js`(App Shellのみキャッシュ、Firestore/LiveKit/token-serverは同一オリジン判定により対象外)・専用アイコン一式を新規追加。`npm run build`はエラー0件で完走確認済み。iOS/Androidはネイティブアプリのため対象外、リポジトリへの反映確認は次アクション（item18）として残る |
 
 管理者サイトは`admin-dashboard/`(Vue 3+TS+Pinia)としてルーム一覧/詳細・
 監査ログ・管理者権限・録音履歴DLまで実装済み。閲覧専用だった旧
@@ -2978,6 +3049,25 @@ Guestロール追加（Phase10）で顕在化した課題。現状、role別の�
   可能な形に拡張する（Phase13で実装した基本機能の上に積み増す）
 - 自動付与判定の業種プロファイル単位での条件出し分けを実装する
 
+### Phase 16: Webクライアント PWA化 → **新設・実装完了（2026-08-09、六十五訂）**
+README.mdのTarget RoadmapやFuture Featuresが直接要求する項目ではないが、
+Web版(`ptt-client`)を「インストール可能なアプリ」として提供できるように
+する、ユーザー起点の改善要望として着手した。業界ラベリング層(Phase15)と
+同様、Phase1/Phase2の中心的な課題（権限管理・組織階層等）とは独立した
+項目のため、土台整備を止めずに並行して着手できるものとしてロードマップに
+追加している。
+
+- `public/manifest.json`（`display: standalone`。`theme_color`/
+  `background_color`はアプリのデザイントークン`#0d1210`に同期）・
+  `public/sw.js`（App Shellのみをキャッシュ対象とするService Worker。
+  Firestore/LiveKit/token-server(Cloud Run)は同一オリジン判定により
+  対象外）・専用アイコン一式を実装した
+- Web Push通知は今回のスコープ外。Phase14（プッシュ通知）着手時に、
+  今回導入したService Worker基盤を再利用して合流させる想定
+- `npm run build`（`vue-tsc -b && vite build`）はエラー0件で完走確認済み。
+  リポジトリへの反映確認は次アクション（item18）として残る。詳細は文書
+  冒頭「六十五訂」参照
+
 ---
 
 ## 5. Guestロール・バッジシステム 詳細仕様（2026-07-25 検討分）
@@ -3167,7 +3257,7 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
 
 ---
 
-## 6. 次アクションの提案（2026-08-09 六十四訂で更新）
+## 6. 次アクションの提案（2026-08-09 六十五訂で更新）
 
 <details>
 <summary>この一覧のitem番号がどう変遷してきたか（クリックで展開）</summary>
@@ -3462,13 +3552,8 @@ URLハイパーリンク化・IME誤送信バグ修正をWeb版(`ptt-client`)・
     あることを確認した、
     (c) 未入室中（ルーム選択画面）のタブレット幅専用レイアウトは両OSとも
     スコープ外のまま
-16. **（新規）PWA化**：`manifest.json`（`display: standalone`・ダーク
-    テーマに合わせた`theme_color`/`background_color`・アイコン一式）と
-    Service Workerを`ptt-client`に導入する。Service WorkerはApp Shell
-    のみキャッシュ対象とし、Firestore/LiveKitの通信はキャッシュ対象外と
-    する（古い録音状態・BAN状態を見せる事故を避けるため）。Web Push通知は
-    今回のスコープ外とし、Phase14（プッシュ通知）着手時にService Worker
-    基盤を再利用する形で合流させる
+16. **PWA化** → **実装完了（2026-08-09、六十五訂）。「6.1」item36へ移動**。
+    詳細は文書冒頭「六十五訂」・「3. 優先順位付きロードマップ案」Phase16参照
 17. **（新規）iOS版: Liquid Glass関連実装の標準コンポーネントへの回帰・
     実機確認**：六十四訂で、HIG準拠・今後のiOSアップデートへの追従を
     目的に、`ContentView.swift`のタブバー（`customTabBar`→標準
@@ -3480,6 +3565,13 @@ URLハイパーリンク化・IME誤送信バグ修正をWeb版(`ptt-client`)・
     (b)解消していない場合の原因切り分け、(c)見た目の作り込み（角丸・影等）
     の再検討、がいずれも未実施のまま残っている。詳細は文書冒頭
     「六十四訂」参照
+18. **（新規）Phase16(PWA化、六十五訂)のリポジトリ反映確認**：今回の変更
+    （`public/manifest.json`・`public/sw.js`・`public/icons/`等・
+    `index.html`・`src/main.ts`）はアップロードされたZIPに対して直接行い、
+    更新版ZIPとdiffパッチとして返却したのみで、`tad-iizuka/FirebaseRTC`
+    リポジトリ本体への反映は本改定時点では未確認。六訂・八訂等で踏んだのと
+    同じプロセス（リポジトリ本体を再取得し`git show`等で直接検証する）を
+    次回実施する
 
 ### 6.1 完了済みアクション（アーカイブ）
 
@@ -3903,5 +3995,22 @@ URLハイパーリンク化・IME誤送信バグ修正をWeb版(`ptt-client`)・
     六十訂は当時の依頼対象であったiOS版のみに範囲を絞ったため見過ごされて
     いた）。ビルド確認（`vue-tsc -b`・`eslint .`）はこの環境の
     ネットワーク遮断により未実施のまま。詳細は文書冒頭「六十三訂」参照
+36. ✅ **完了（2026-08-09、六十五訂）**: 旧item16「PWA化」を実装した。
+    `ptt-client`に`public/manifest.json`（`display: standalone`。
+    `theme_color`/`background_color`をアプリのデザイントークン`#0d1210`に
+    同期）・`public/sw.js`（App Shellのみをキャッシュ対象とするService
+    Worker。Firestore/LiveKit/token-server(Cloud Run)は同一オリジン判定
+    により自然に対象外）・専用アイコン一式（既存の`ptt-android`アイコンは
+    Android Studioの既定プレースホルダーだったため、アプリのデザイン
+    トークンに基づきSVGで新規作成）を追加した。`index.html`・`src/main.ts`
+    も変更（Service Worker登録は`import.meta.env.PROD`時のみ）。
+    `npm install`・`npm run build`（`vue-tsc -b && vite build`）を実際に
+    実行しエラー0件で完走することを確認した。Web Push通知はPhase14待ちで
+    スコープ外、iOS/Androidはネイティブアプリのため対象外。**（留保）**
+    アップロードされたリポジトリ一式（HEAD=`5d0ab05`）に対して直接編集し、
+    更新版ZIPとdiffパッチとして返却したもので、`tad-iizuka/FirebaseRTC`
+    リポジトリ本体への実際のコミット・反映は本ドキュメント側では未確認。
+    六訂・八訂等と同じ`git show`等による直接検証を次アクション（item18）
+    として残す
 
 </details>
