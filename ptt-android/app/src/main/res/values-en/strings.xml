@@ -78,6 +78,12 @@
     <string name="room_leave_room">Leave room</string>
     <string name="room_ptt_hint">Audio is sent only while the button is pressed</string>
     <string name="room_ban_notice">You have been removed from this room</string>
+    <!-- [開始/終了時刻] Web版locales/en.json・iOS版Localizable.xcstringsと同じ文言。
+         「6. 次アクションの提案」item5。 -->
+    <string name="schedule_waiting_title">Starting soon</string>
+    <string name="schedule_waiting_body_with_time">Scheduled start: %1$s</string>
+    <string name="schedule_waiting_body_no_time">The start time hasn\'t been set yet. Please wait.</string>
+    <string name="schedule_after_end_notice">This room is past its end time. Chat is view-only.</string>
     <string name="room_ban_confirm_title">Ban this participant?</string>
     <string name="room_ban_confirm_description">Ban %1$s from this room?\nThis action cannot be undone.</string>
     <string name="room_ban_confirm_label">Ban</string>

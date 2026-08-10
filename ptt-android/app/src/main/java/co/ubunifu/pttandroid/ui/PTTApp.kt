@@ -124,10 +124,12 @@ import co.ubunifu.pttandroid.room.PTTRoomManager
 import co.ubunifu.pttandroid.room.PTTSavedRoomsStore
 import co.ubunifu.pttandroid.room.RoomSchedule
 import co.ubunifu.pttandroid.room.SavedRoom
+import co.ubunifu.pttandroid.room.ScheduleState
 import co.ubunifu.pttandroid.settings.PTTServerPreset
 import co.ubunifu.pttandroid.settings.PTTSettingsStore
 import co.ubunifu.pttandroid.ui.theme.PTTColors
 import coil.compose.AsyncImage
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
@@ -136,6 +138,9 @@ private val Mono = FontFamily.Monospace
 
 /** [不具合調査用] ファイル選択画面から戻ると在室中のルームが失われる件のログタグ。 */
 private const val TAG = "PTTApp"
+// [開始/終了時刻] Web版 SCHEDULE_WAIT_POLL_INTERVAL_MS・iOS版
+// PTTScheduleStore.pollIntervalSecondsと同じ間隔。「6. 次アクションの提案」item5。
+private const val SCHEDULE_WAIT_POLL_INTERVAL_MS = 15_000L
 
 /**
  * [表示仕様・2026-08-06] 開始/終了時刻をローカル履歴一覧の下段用に整形する。
@@ -307,6 +312,11 @@ fun PTTApp(
     var isTabletSettingsSheetOpen by remember { mutableStateOf(false) }
     var activeRoomId by rememberSaveable { mutableStateOf<String?>(null) }
     var currentInviteCode by rememberSaveable { mutableStateOf<String?>(null) }
+    // [開始/終了時刻] Web版roomStore.schedule/scheduleStateの移植。「6. 次アクションの提案」item5。
+    // activeRoomIdと異なりrememberSaveableにはしない(Activity再生成後は
+    // 下記LaunchedEffectが必ず再取得するため、保存の必要が無い)。
+    var scheduleState by remember { mutableStateOf<ScheduleState?>(null) }
+    var roomSchedule by remember { mutableStateOf<RoomSchedule?>(null) }
     // [ルーム名] admin-dashboardで設定されたルーム名。POST /rooms/:roomId/join の
     // レスポンス(name)からのみ取得できる(Web版roomStore.currentRoomNameに相当)。
     // 未設定、または保存済みルームからの再入室(/joinを経由しない)時はnullのまま。
@@ -357,6 +367,20 @@ fun PTTApp(
     val someoneElseIsTalking = currentTalkerUid != null && currentTalkerUid != currentUser?.uid
     val currentTalkerName = currentTalkerUid?.let { uid -> participants[uid]?.name ?: uid } ?: ""
 
+    // [開始/終了時刻] Web版RoomView.vueのisWaitingBeforeStart/isChatOnlyAfterEndの移植。
+    // 「6. 次アクションの提案」item5。
+    val isWaitingBeforeStart = activeRoomId != null && scheduleState == ScheduleState.BEFORE_START
+    val isChatOnlyAfterEnd = scheduleState == ScheduleState.AFTER_END
+    val scheduleStartMillis = roomSchedule?.start
+    val waitingBodyText = if (scheduleStartMillis != null) {
+        val formatter = java.text.DateFormat.getDateTimeInstance(
+            java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT
+        )
+        stringResource(R.string.schedule_waiting_body_with_time, formatter.format(java.util.Date(scheduleStartMillis)))
+    } else {
+        stringResource(R.string.schedule_waiting_body_no_time)
+    }
+
     LaunchedEffect(currentUser?.uid) {
         savedRoomsStore.load(currentUser?.uid)
         // [不具合修正・2026-08-04(iOS 7訂の移植)] 設定タブでサインアウト→再サインインすると、
@@ -389,6 +413,26 @@ fun PTTApp(
             return@LaunchedEffect
         }
         Log.d(TAG, "resume-room-effect: starting stores for roomId=$roomId uid=$uid")
+
+        // [開始/終了時刻] 常に現在の状態を取得してから判定する(Web版RoomView.vueの
+        // `enter()`・iOS版ContentView.enterRoom()と同じ方針)。before_start(開始前)の
+        // 間はchat/ban/badges/connectionを一切開始せず、状態が変わるまでポーリングする
+        // (token-server側token.jsがin_session以外ではLiveKitトークンを発行しないため、
+        // before_start中に接続を試みても意味が無い)。「6. 次アクションの提案」item5。
+        var state = ScheduleState.IN_SESSION
+        while (true) {
+            val idToken = try { authManager.fetchIdToken() } catch (e: Exception) { null }
+            if (idToken == null || activeRoomId != roomId) return@LaunchedEffect
+            val fetched = roomManager.fetchRoomName(tokenServerUrl, idToken, roomId)
+            if (activeRoomId != roomId) return@LaunchedEffect
+            fetched?.name?.let { currentRoomName = it }
+            roomSchedule = fetched?.schedule
+            state = fetched?.scheduleState ?: ScheduleState.IN_SESSION
+            scheduleState = state
+            if (state != ScheduleState.BEFORE_START) break
+            delay(SCHEDULE_WAIT_POLL_INTERVAL_MS)
+        }
+
         chatStore.start(roomId)
         banStore.start(roomId, uid)
         // [Phase13・次アクションitem3] 参加者一覧のバッジ表示(ポーリング)。
@@ -396,24 +440,16 @@ fun PTTApp(
         // [パンくず表示] 変化頻度が低いため入室時に1回だけ取得する
         // (badgesStore.startのようなポーリングはしない。PTTOrgContextStore参照)。
         orgContextStore.fetchOnce(scope, tokenServerUrl, roomId) { authManager.fetchIdToken() }
-        connectionManager.connect(
-            tokenServerUrl = tokenServerUrl,
-            livekitUrl = livekitUrl,
-            roomNameParam = roomId,
-            idTokenProvider = { authManager.fetchIdToken() },
-        )
-        // [ルーム名の再取得] 保存済みルームからの再入室(/joinを経由しない)や、
-        // 入室後にadmin-dashboard側で名前が変更された場合にも対応できるよう、
-        // 入室のたびに最新値を取り直す(iOS版ContentView.enterRoom()・Web版
-        // RoomView.vueのenter()が毎回fetchAutoRecordingを呼ぶのと同じ方針)。
-        // 新規参加(joinRoom())側で既に取得済みの場合も再取得するが、失敗しても
-        // 既存の値を上書きしない(nullを返した場合はcurrentRoomNameを変更しない)。
-        scope.launch {
-            val idToken = try { authManager.fetchIdToken() } catch (e: Exception) { null }
-            if (idToken == null || activeRoomId != roomId) return@launch
-            roomManager.fetchRoomName(tokenServerUrl, idToken, roomId)?.let { fetched ->
-                fetched.name?.let { currentRoomName = it }
-            }
+        // [開始/終了時刻] 終了時刻超過(after_end)はLiveKitトークンが発行されないため接続しない。
+        // チャットの閲覧(read-only)・参加者一覧等はban/chat/badges/orgContext購読により
+        // 引き続き表示される(Web版RoomView.vueのenterSession()と同じ方針)。
+        if (state != ScheduleState.AFTER_END) {
+            connectionManager.connect(
+                tokenServerUrl = tokenServerUrl,
+                livekitUrl = livekitUrl,
+                roomNameParam = roomId,
+                idTokenProvider = { authManager.fetchIdToken() },
+            )
         }
     }
 
@@ -431,6 +467,8 @@ fun PTTApp(
         badgesStore.stop()
         orgContextStore.stop()
         activeRoomId = null
+        scheduleState = null
+        roomSchedule = null
         currentInviteCode = null
         currentRoomName = null
         joinRoomId = ""
@@ -605,7 +643,15 @@ fun PTTApp(
         // `horizontalSizeClass == .regular && activeRoomId != nil`分岐の移植)。
         // 未入室中(ルーム選択画面)はタブレット幅でも既存の4タブ構成のままとする
         // (iOS版と同じくスコープ外。「6. 次アクションの提案」参照)。
-        if (isTabletWidth && activeRoomId != null) {
+        if (isWaitingBeforeStart) {
+            // [開始/終了時刻] 待機画面(before_start)は他の要素を一切表示しない全画面表示と
+            // する(Web版RoomView.vueの`v-if="isWaitingBeforeStart"`と同じ方針。チャットも
+            // 閲覧不可のため見せられる情報が無い)。「6. 次アクションの提案」item5。
+            WaitingBeforeStartScreen(
+                bodyText = waitingBodyText,
+                onLeaveRoom = { leaveRoom() },
+            )
+        } else if (isTabletWidth && activeRoomId != null) {
             TabletThreePaneContent(
                 displayName = displayName,
                 status = status,
@@ -682,12 +728,13 @@ fun PTTApp(
                         }
                     }
                 },
-                canControlRecording = PTTRoomPermissions.canManageRoom(myRole),
+                canControlRecording = PTTRoomPermissions.canManageRoom(myRole) && !isChatOnlyAfterEnd,
                 recordingStarting = recordingStarting,
                 recordingStopping = recordingStopping,
                 recordingError = recordingError,
                 onRequestStartRecording = { showRecordingStartConfirm = true },
                 onStopRecording = { stopRecording() },
+                isChatOnlyAfterEnd = isChatOnlyAfterEnd,
             )
         } else {
         Column(Modifier.fillMaxSize()) {
@@ -780,6 +827,7 @@ fun PTTApp(
                         onStartTalk = { connectionManager.startTalking() },
                         onStopTalk = { connectionManager.stopTalking() },
                         onLeaveRoom = { leaveRoom() },
+                        isChatOnlyAfterEnd = isChatOnlyAfterEnd,
                     )
 
                     RootTab.MEMBERS -> MembersTabContent(
@@ -832,6 +880,7 @@ fun PTTApp(
                         onCancelPendingAttachment = { cancelPendingAttachment() },
                         getAttachmentUrl = { messageId -> resolveAttachmentUrl(messageId) },
                         getThumbnailUrl = { messageId -> resolveThumbnailUrl(messageId) },
+                        isChatOnlyAfterEnd = isChatOnlyAfterEnd,
                     )
 
                     RootTab.SETTINGS -> SettingsTabContent(
@@ -857,7 +906,7 @@ fun PTTApp(
                             }
                         },
                         // [Phase12・十五訂] role分岐はPTTRoomPermissions.ktに集約(token-server/lib/permissions.jsとCI同期)。
-                        canControlRecording = PTTRoomPermissions.canManageRoom(myRole),
+                        canControlRecording = PTTRoomPermissions.canManageRoom(myRole) && !isChatOnlyAfterEnd,
                         isRecording = isRecording,
                         recordingStarting = recordingStarting,
                         recordingStopping = recordingStopping,
@@ -1040,6 +1089,7 @@ private fun TabletThreePaneContent(
     recordingError: String?,
     onRequestStartRecording: () -> Unit,
     onStopRecording: () -> Unit,
+    isChatOnlyAfterEnd: Boolean,
 ) {
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.padding(16.dp)) {
@@ -1114,14 +1164,18 @@ private fun TabletThreePaneContent(
             // 入室中分岐と同じ構成(TalkArea + 退出ボタン)をそのまま流用する。
             Column(Modifier.weight(1f).fillMaxHeight()) {
                 Spacer(Modifier.weight(1f))
-                TalkArea(
-                    isConnected = isConnected,
-                    isSending = isSending,
-                    someoneElseTalking = someoneElseTalking,
-                    talkerName = talkerName,
-                    onStart = onStartTalk,
-                    onStop = onStopTalk,
-                )
+                if (isChatOnlyAfterEnd) {
+                    AfterEndNoticeText()
+                } else {
+                    TalkArea(
+                        isConnected = isConnected,
+                        isSending = isSending,
+                        someoneElseTalking = someoneElseTalking,
+                        talkerName = talkerName,
+                        onStart = onStartTalk,
+                        onStop = onStopTalk,
+                    )
+                }
                 Spacer(Modifier.weight(1f))
                 Button(
                     onClick = onLeaveRoom,
@@ -1153,6 +1207,7 @@ private fun TabletThreePaneContent(
                     onCancelPendingAttachment = onCancelPendingAttachment,
                     getAttachmentUrl = getAttachmentUrl,
                     getThumbnailUrl = getThumbnailUrl,
+                    readOnly = isChatOnlyAfterEnd,
                 )
             }
         }
@@ -1303,18 +1358,23 @@ private fun TalkTabContent(
     onStartTalk: () -> Unit,
     onStopTalk: () -> Unit,
     onLeaveRoom: () -> Unit,
+    isChatOnlyAfterEnd: Boolean,
 ) {
     if (activeRoomId != null) {
         Column(Modifier.fillMaxSize()) {
             Spacer(Modifier.weight(1f))
-            TalkArea(
-                isConnected = isConnected,
-                isSending = isSending,
-                someoneElseTalking = someoneElseTalking,
-                talkerName = talkerName,
-                onStart = onStartTalk,
-                onStop = onStopTalk,
-            )
+            if (isChatOnlyAfterEnd) {
+                AfterEndNoticeText()
+            } else {
+                TalkArea(
+                    isConnected = isConnected,
+                    isSending = isSending,
+                    someoneElseTalking = someoneElseTalking,
+                    talkerName = talkerName,
+                    onStart = onStartTalk,
+                    onStop = onStopTalk,
+                )
+            }
             Spacer(Modifier.weight(1f))
             Button(
                 onClick = onLeaveRoom,
@@ -1414,6 +1474,7 @@ private fun ChatTabContent(
     onCancelPendingAttachment: () -> Unit,
     getAttachmentUrl: suspend (String) -> String,
     getThumbnailUrl: suspend (String) -> String,
+    isChatOnlyAfterEnd: Boolean,
 ) {
     if (activeRoomId != null) {
         Column(Modifier.fillMaxSize().padding(16.dp)) {
@@ -1431,6 +1492,7 @@ private fun ChatTabContent(
                 onCancelPendingAttachment = onCancelPendingAttachment,
                 getAttachmentUrl = getAttachmentUrl,
                 getThumbnailUrl = getThumbnailUrl,
+                readOnly = isChatOnlyAfterEnd,
             )
         }
     } else {
@@ -2113,6 +2175,61 @@ private fun TalkArea(
     }
 }
 
+/**
+ * [開始/終了時刻] 終了時刻超過(after_end)の案内文。Web版`room.afterEndNotice`の
+ * 移植。TalkTabContent・TabletThreePaneContentの両方から、PTTボタンの代わりに
+ * 表示される(「6. 次アクションの提案」item5)。
+ */
+@Composable
+private fun AfterEndNoticeText() {
+    Text(
+        stringResource(R.string.schedule_after_end_notice),
+        fontFamily = Mono,
+        fontSize = 13.sp,
+        color = PTTColors.Muted,
+        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        modifier = Modifier.padding(horizontal = 24.dp),
+    )
+}
+
+/**
+ * [開始/終了時刻] 待機画面(before_start)。ルーム全体を占める全画面表示とする
+ * (Web版RoomView.vueの`v-if="isWaitingBeforeStart"`ブロックの移植。
+ * iOS版ContentView.waitingBeforeStartViewに相当。「6. 次アクションの提案」item5)。
+ */
+@Composable
+private fun WaitingBeforeStartScreen(bodyText: String, onLeaveRoom: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Spacer(Modifier.weight(1f))
+        Text(
+            stringResource(R.string.schedule_waiting_title),
+            fontFamily = Mono,
+            fontSize = 15.sp,
+            fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+            color = PTTColors.Text,
+        )
+        Spacer(Modifier.height(10.dp))
+        Text(
+            bodyText,
+            fontFamily = Mono,
+            fontSize = 13.sp,
+            color = PTTColors.Muted,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
+        Spacer(Modifier.weight(1f))
+        Button(
+            onClick = onLeaveRoom,
+            modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = PTTColors.Danger),
+        ) {
+            Text(stringResource(R.string.room_leave_room), fontFamily = Mono)
+        }
+    }
+}
+
 @Composable
 private fun ParticipantsSection(
     participants: Map<String, ParticipantInfo>,
@@ -2418,6 +2535,11 @@ private fun ChatSection(
     onCancelPendingAttachment: () -> Unit,
     getAttachmentUrl: suspend (String) -> String,
     getThumbnailUrl: suspend (String) -> String,
+    // [開始/終了時刻] 終了時刻超過(after_end)はチャット閲覧のみ可能(送信不可)とする
+    // (Web版ChatPanel.vueのreadOnly propの移植)。実際の拒否はtoken-server側
+    // (routes/messages.js)が最終的に担保するため、ここでの無効化は補助的なもの。
+    // 「6. 次アクションの提案」item5。
+    readOnly: Boolean = false,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -2455,6 +2577,16 @@ private fun ChatSection(
         Text(stringResource(R.string.chat_title), fontFamily = Mono, fontSize = 10.sp, color = PTTColors.Muted)
         Spacer(Modifier.height(6.dp))
 
+        if (readOnly) {
+            Text(
+                stringResource(R.string.schedule_after_end_notice),
+                fontFamily = Mono,
+                fontSize = 11.sp,
+                color = PTTColors.Muted,
+            )
+            Spacer(Modifier.height(6.dp))
+        }
+
         val listItems = remember(messages) { buildChatListItems(messages) }
 
         LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
@@ -2490,7 +2622,7 @@ private fun ChatSection(
                     modifier = Modifier.weight(1f),
                 )
                 Spacer(Modifier.width(6.dp))
-                Button(onClick = onSendPendingAttachment, enabled = !attachmentSending) {
+                Button(onClick = onSendPendingAttachment, enabled = !attachmentSending && !readOnly) {
                     Text(stringResource(R.string.chat_attachment_send), fontFamily = Mono)
                 }
                 Spacer(Modifier.width(6.dp))
@@ -2503,6 +2635,7 @@ private fun ChatSection(
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedButton(
                     onClick = onPickAttachment,
+                    enabled = !readOnly,
                     modifier = Modifier
                         .width(48.dp)
                         .semantics { contentDescription = context.getString(R.string.chat_attachment_pick) },
@@ -2515,12 +2648,13 @@ private fun ChatSection(
                     onValueChange = onInputChange,
                     modifier = Modifier.weight(1f),
                     singleLine = true,
+                    enabled = !readOnly,
                     placeholder = { Text(stringResource(R.string.chat_placeholder), fontFamily = Mono, fontSize = 12.sp) },
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(onSend = { onSend() }),
                 )
                 Spacer(Modifier.width(8.dp))
-                Button(onClick = onSend, enabled = input.isNotBlank()) {
+                Button(onClick = onSend, enabled = input.isNotBlank() && !readOnly) {
                     Text(stringResource(R.string.chat_send), fontFamily = Mono)
                 }
             }

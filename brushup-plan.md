@@ -1,7 +1,7 @@
 # PTTアプリ ブラッシュアップ計画（改定版）
 
 対象リポジトリ: `tad-iizuka/FirebaseRTC`
-作成日: 2026-07-09 ／ 最終改定: 2026-08-09（六十七訂）
+作成日: 2026-07-09 ／ 最終改定: 2026-08-10（七十訂）
 
 > **⚠️ 巻き戻り事故について（2026-08-04 発見・記録）**
 >
@@ -2827,6 +2827,95 @@ git管理下でのHEAD反映を確認した。ただし、item12・13が本来�
 双方で`schedule`値が「保存済みルーム履歴」欄の表示にのみ使われており、
 入室後の状態出し分けUIとしては引き続き実装されていないことを確認した。
 
+六十九訂: 2026-08-10（「6. 次アクションの提案」item5、Room開始/終了時刻
+(Schedule)機能のiOS/Android移植を実装した。Web版(`ptt-client`)・
+`admin-dashboard`のみに実装済みだった、開始前(`before_start`)の待機画面
+（送話・チャット送信不可、退出のみ可）と、終了後(`after_end`)のチャット
+閲覧専用画面（送話不可・チャット送信不可・新規の録音操作も不可）を、
+Web版(`RoomView.vue`・`stores/room.ts`)の設計をそのまま踏襲する形で
+iOS・Android双方に移植した。
+
+**設計方針**: サーバー側(`token-server/lib/roomSchedule.js`・
+`routes/rooms.js`)は既に`GET /rooms/:roomId/join`・
+`GET /rooms/:roomId/recording/status`のレスポンスに`schedule`
+(`start`/`end`)と`scheduleState`(`before_start`/`in_session`/`after_end`)
+を含めており、サーバー側の変更は不要だった（五十五訂で判明した
+`schedule`値自体は既にクライアントへ渡っていたが、`scheduleState`を
+使った画面出し分けが両OSとも未実装だった、というのが今回解消した
+ギャップ）。
+
+- **iOS**: `PTTRoomManager.swift`の`joinRoom`/`fetchRoomName`が
+  `scheduleState`も返すよう拡張。新設した`PTTScheduleStore.swift`が
+  `before_start`中の15秒間隔ポーリング（Web版`SCHEDULE_WAIT_POLL_INTERVAL_MS`
+  と同じ間隔）を担い、状態が変化した時点を`@Published var state`の変化として
+  公開する。`ContentView.swift`側は`.onChange(of: scheduleStore.state)`で
+  これを検知し、`beginSessionIfNeeded()`（chat/ban/badges/orgContext購読の
+  開始、およびin_sessionの場合のみLiveKit接続）を呼ぶ。`enterRoom()`は
+  新規参加(`/join`)時は既知の`scheduleState`をそのまま使い、保存済み
+  ルームからの再入室時はまず`fetchRoomName()`で現在値を取得してから
+  判定する（Web版`enter()`と同じく、入室のたびに最新値を取り直す）。
+  `body`には`isWaitingBeforeStart`時の全画面待機表示を追加し、`talkArea`
+  （PTTボタン）・`chatSection`（入力欄・送信ボタン・添付メニュー）・
+  `recordingControlsSection`（録音操作）はそれぞれ`isChatOnlyAfterEnd`を
+  見て非表示/無効化する。`Localizable.xcstrings`に4件追加。
+- **Android**: `PTTRoomManager.kt`に同等の`ScheduleState` enumと
+  パース処理を追加。`PTTApp.kt`の`LaunchedEffect(activeRoomId, ...)`を
+  「まず`fetchRoomName()`で現在の状態を取得し、`before_start`である間は
+  `delay(15_000)`でポーリングを続け、状態が変わった時点で初めて
+  `chatStore`/`banStore`/`badgesStore`/`orgContextStore`を起動し、
+  `after_end`でなければLiveKit接続する」という単一のコルーチンループへ
+  書き換えた（Composeのコルーチンはキー変更時に自動キャンセルされるため、
+  iOS版のような専用ポーリングストアは設けず、`LaunchedEffect`内に直接
+  書ける）。新規Composable`WaitingBeforeStartScreen`を追加し、body側の
+  分岐に組み込んだ。`TalkArea`・`ChatSection`・録音操作
+  （`canControlRecording`）は`isChatOnlyAfterEnd`を新規パラメータとして
+  受け取り、iOS版と同じ基準で非表示/無効化する。`strings.xml`(ja/en)に
+  4件追加。
+
+**スコープ外・既知の制約**: Web版`RecordingBar.vue`が持つ「入室時に自動的に
+録音を開始する」トグル(`autoRecording`)自体は今回の対象外（十訂で既に
+iOS/Android共通のスコープ外として合意済みの項目であり、変更なし）。
+`schedule`の時刻表示形式（iOSは`DateFormatter`、Androidは
+`java.text.DateFormat`）はOS標準のロケール依存フォーマットとしており、
+Web版の表示形式との文言レベルでの完全一致は取っていない。
+
+**成果物の反映状況について**: 今回の実装はアップロードされたリポジトリ
+一式（HEAD=`7911820`）に対して直接編集し、変更ファイルのみをまとめた
+更新版ZIP2件（`ptt-ios-schedule-updated.zip`・`ptt-android-schedule-updated.zip`）
+と、`git apply --check`で素の`7911820`チェックアウトに適用可能なことを
+確認済みのdiffパッチ1件（`room-schedule-mobile.patch`）として返却した。
+**（重要な留保）** `tad-iizuka/FirebaseRTC`リポジトリ本体への実際の
+コミット・反映、およびXcode/Android Studioでの実機ビルド確認・実機での
+表示確認は、この環境にそれらの実行環境が無いため未実施。六訂・八訂・
+六十八訂で踏んだような`git show`等によるリポジトリ側の直接検証も、
+今回はまだ行われていない（次アクションとして残す）。
+
+**次アクションへの影響**: 「6. 次アクションの提案」item5を完了扱いとし
+「6.1」item41へ移動する。新規item20として、(1)パッチのリポジトリへの
+実際の反映確認、(2)Xcode/Android Studioでの実機ビルド確認、(3)実機での
+待機画面・チャット閲覧専用画面の表示確認、の3点を追加する。
+
+七十訂: 2026-08-10（六十九訂で新設した`PTTScheduleStore.swift`について、
+ユーザーの実機Xcodeビルドで`Type 'PTTScheduleStore' does not conform to
+protocol 'ObservableObject'`（および`Combine`未importに起因する
+`init(wrappedValue:)`関連の2件）のビルドエラーが報告された。原因は単純な
+書き忘れで、`import Foundation`のみでは`@Published`が要求する`Combine`
+モジュールが暗黙にインポートされない。他の全Store（`PTTBadgeStore.swift`・
+`PTTBanStore.swift`・`PTTOrgContextStore.swift`等）は`import Foundation`の
+直後に`import Combine`を明示しているのに対し、`PTTScheduleStore.swift`の
+みこれが漏れていた。`import Combine`を1行追加して修正した。
+
+**原因の再発防止についての所感**: 既存Storeとの一貫性チェック（他ファイルの
+importパターンをテンプレートとして踏襲する）を今回怠ったことが直接原因。
+今後、新規Storeファイルを追加する際は既存の同種ファイル(1つで十分)の
+importブロックを機械的にコピーしてから編集する運用に倣う。
+
+**成果物の反映状況**: 更新版ZIP(`ptt-ios-schedule-updated.zip`)・パッチ
+(`room-schedule-mobile.patch`)を差し替えて返却した。`git apply --check`
+による適用可能性の再確認は実施したが、修正後のXcodeビルドが実際に
+通るかどうかの確認はこれまで通りユーザー側での実施が必要（「6. 次
+アクションの提案」item20に含めて扱う）。
+
 ---
 
 ## 0. README.mdが定義するビジョンの要点（前提の再確認）
@@ -2900,7 +2989,7 @@ Message）はコード上どこにも見当たらず、依然として未着手�
 | **業界別ラベリング(UIのみ差し替え)** | ❌ | ❌ | ❌ | 「警備業向け」の文言・概念が全画面にハードコード |
 | **組織階層(Company/Branch/Site)** | ✅ | ✅ | ✅ | Phase11。管理画面で団体・再帰node・Room割当を管理。各ユーザー向けUIのパンくず表示も2026-08-03(四十五訂)で実装完了 |
 | **参加者一覧のバッジ表示** | ✅ | ✅ | ✅ | Phase13。Room APIを20秒間隔でポーリングし最優先1件を表示 |
-| **開始/終了時刻(Room Schedule)** | ✅ | ❌ | ❌ | 2026-08-05、五十三訂で発見。本体UIの状態出し分け（待機画面/チャット閲覧専用画面）はサーバー(`lib/roomSchedule.js`)・`firestore.rules`・`admin-dashboard`・`ptt-client`のみ実装済みで、iOS/Androidは未着手のまま（「6. 次アクションの提案」item5参照）。ただし2026-08-06(五十五訂)で、保存済みルーム履歴欄の表示用途に限り`PTTRoomManager`のschedule値パース自体はiOS/Androidにも追加済み（詳細は五十五訂参照。本体UIの未実装状態は変わらないためこの行のiOS/Android列は❌のまま） |
+| **開始/終了時刻(Room Schedule)** | ✅ | ✅ | ✅ | 2026-08-05、五十三訂で発見。2026-08-10(六十九訂)で、本体UIの状態出し分け（待機画面(before_start)/チャット閲覧専用画面(after_end)）をiOS(`PTTScheduleStore.swift`新設)・Android(`PTTApp.kt`の`LaunchedEffect`書き換え)双方に実装し3クライアント揃った。サーバー(`lib/roomSchedule.js`)・`firestore.rules`・`admin-dashboard`・`ptt-client`は五十三訂時点で実装済みだったため変更不要。リポジトリ本体への反映・実機ビルド確認は未実施（「6. 次アクションの提案」item20参照） |
 | **チャットUI(LINE風バブル表示・アバター・URLリンク化)** | ✅ | ✅ | ✅ | 2026-08-07、五十六訂でWeb版を実装(アバターは写真>Guestアイコン>生成アバターの優先順位、自分の発言はLINE標準(右寄せ・アバター非表示)。副次的にIME変換確定時の誤送信バグ(Phase5から存在)も修正)。同日、五十七訂でiOSへ移植(Xcodeでのビルド確認は未実施)、五十八訂でAndroidへ移植(`ChatAvatar.kt`・`Linkify.kt`新設、`PTTModels.kt`/`PTTChatStore.kt`へrole/photoUrl追加、`PTTApp.kt`のChatSectionを全面書き換え)。3クライアントとも実機/実ビルドでの最終確認は未実施（「6. 次アクションの提案」参照） |
 | **Web版レイアウト刷新(3ペイン/タブ+PTTミニバー)** | ✅ | - | - | 2026-08-08、コミット`e48725c`・`51ba715`。768pxブレークポイントでMobile幅はタブ+常設PTTミニバー(`PttMiniBar.vue`)、Desktop/Tablet幅は参加者/PTT/チャットの3ペイン同時表示 |
 | **タブレット幅レイアウト(3ペイン)** | - | ✅ | ✅ | 2026-08-08、iOS(`horizontalSizeClass == .regular`)・Android(`screenWidthDp >= 600`)とも入室中のみ3ペイン表示。両OSともXcode/Gradleでの実ビルド確認は未実施（「6. 次アクションの提案」item15参照） |
@@ -3477,7 +3566,7 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
 
 ---
 
-## 6. 次アクションの提案（2026-08-10 六十八訂で更新）
+## 6. 次アクションの提案（2026-08-10 六十九訂で更新）
 
 <details>
 <summary>この一覧のitem番号がどう変遷してきたか（クリックで展開）</summary>
@@ -3645,17 +3734,13 @@ item 6（`isForbidden`系フラグの機械的な棚卸し）に実際に着手�
    `npm install`後`npm run build`(`vue-tsc -b && vite build`)・
    `npm run lint`(`eslint .`)を実際に実行し、いずれも成功（エラー0件）
    することを確認した。「6.1」item38へ移動する
-5. **（優先度高）Room開始/終了時刻(Schedule)機能のiOS/Android移植**：
-   本体UI（「開始前は入室のみ可・送話/チャット不可の待機画面」「終了後は
-   新規入室とチャット閲覧のみ可・送話/チャット送信不可の画面」という、
-   通常のRoom画面とは異なる2状態のUI）はWeb版(`ptt-client`)・
-   `admin-dashboard`のみに実装済みのままで、iOS/Androidは依然として
-   未着手。**（2026-08-06 五十五訂で一部前進）** 「保存済みルーム履歴」欄の
-   表示仕様変更という別目的の作業の過程で、iOS/Androidの`PTTRoomManager`が
-   `schedule`フィールドを一切パースしていなかった状態自体は解消された
-   （`joinRoom()`/`fetchRoomName()`がschedule値を返せるようになった）。
-   本体UIの状態出し分けに必要なのはこの値を使った待機画面/チャット閲覧
-   専用画面の実装であり、その部分は変わらず未着手のまま残る
+5. ✅ **完了（2026-08-10、六十九訂）**: Room開始/終了時刻(Schedule)機能の
+   iOS/Android移植。Web版(`ptt-client`)・`admin-dashboard`のみに実装済み
+   だった「開始前は入室のみ可・送話/チャット不可の待機画面」「終了後は
+   チャット閲覧のみ可・送話/チャット送信不可の画面」を、iOS
+   (`PTTRoomManager.swift`・`PTTScheduleStore.swift`新設・
+   `ContentView.swift`)・Android(`PTTRoomManager.kt`・`PTTApp.kt`)双方に
+   実装した。詳細は文書冒頭「六十九訂」参照。「6.1」item41へ移動する
 6. **（新規）Room Scheduleのロードマップ上の位置づけ整理**：README.mdの
    Target Roadmap（Phase1警備業→Phase2ビジネスチーム→Phase3コンシューマー）
    のどこに位置づくかが本ドキュメントで一度も検討されていない。警備現場の
@@ -3807,6 +3892,15 @@ URLハイパーリンク化・IME誤送信バグ修正をWeb版(`ptt-client`)・
     `-downloadPlatform iOS`側や採用Xcodeバージョンの固定方針を別途
     見直す必要がある）、の2点のみで、この環境にGitHub Actionsの実行
     環境が無いため引き続き未確認のまま残っている
+20. **（新規）Room Schedule機能移植（item5・六十九訂）の反映・実機確認**：
+    (a) パッチ(`room-schedule-mobile.patch`)の`tad-iizuka/FirebaseRTC`
+    リポジトリ本体への実際の反映確認（六訂・八訂・六十八訂と同じく
+    `git show`等による直接検証）、(b) Xcode/Android Studioでの実機
+    ビルド確認、(c) 実機での待機画面(before_start)・チャット閲覧専用
+    画面(after_end)の表示確認（特にAndroid側は`LaunchedEffect`の書き換えに
+    伴い、通常の入室(in_session)フローも含めてこれまで通り接続できることの
+    回帰確認が必要）。いずれもこの環境にはXcode/Android Studio/GitHubの
+    実行環境が無いため、ユーザー側での確認が必要
 
 ### 6.1 完了済みアクション（アーカイブ）
 
@@ -4272,5 +4366,24 @@ URLハイパーリンク化・IME誤送信バグ修正をWeb版(`ptt-client`)・
     LINE風UI）のリポジトリへの反映確認」。`ChatAvatarView.swift`・
     `Linkify.swift`・Android版`ui/ChatAvatar.kt`・`chat/Linkify.kt`が
     いずれもgit管理下でHEAD（`655beef`）に含まれていることを確認した
+41. ✅ **完了（2026-08-10、六十九訂）**: item5「Room開始/終了時刻(Schedule)
+    機能のiOS/Android移植」。Web版(`ptt-client`・`stores/room.ts`・
+    `RoomView.vue`)の設計を踏襲し、開始前(`before_start`)の待機画面
+    （送話・チャット送信不可、退出のみ可）と終了後(`after_end`)のチャット
+    閲覧専用画面（送話不可・チャット送信不可・録音操作不可）を実装した。
+    iOSは新設`PTTScheduleStore.swift`が15秒間隔ポーリングを担い、
+    `ContentView.swift`が`.onChange`で状態変化を検知して入室処理
+    （chat/ban/badges/orgContext開始、in_sessionのみLiveKit接続）を行う。
+    Androidは`PTTApp.kt`の`LaunchedEffect`を「状態取得→before_start中は
+    ポーリング→それ以外で入室処理」という単一コルーチンループに書き換えた。
+    サーバー側(`token-server`)は五十五訂の時点で`schedule`/`scheduleState`
+    を既に返しており変更不要だった。**（留保）** アップロードされた
+    リポジトリ一式（HEAD=`7911820`）に対して直接編集し、更新版ZIP2件
+    （`ptt-ios-schedule-updated.zip`・`ptt-android-schedule-updated.zip`）と
+    `git apply --check`で適用可能なことを確認済みのdiffパッチ1件
+    （`room-schedule-mobile.patch`）として返却したもので、リポジトリ本体
+    への実際の反映・Xcode/Android Studioでの実機ビルド確認・実機での表示
+    確認はいずれも本ドキュメント側では未確認（「6. 次アクションの提案」
+    item20として残す）
 
 </details>

@@ -87,6 +87,9 @@ struct ContentView: View {
     /// [Phase13 バッジ表示UI] Web版ParticipantList.vueの移植。GET /:roomId/badges をポーリングする。
     @StateObject private var badges = PTTBadgeStore()
     @StateObject private var orgContext = PTTOrgContextStore()
+    // [開始/終了時刻] Web版roomStore.schedule/scheduleStateの移植。
+    // 「6. 次アクションの提案」item5。
+    @StateObject private var scheduleStore = PTTScheduleStore()
     @StateObject private var onboarding = PTTOnboardingStore()
     /// [Phase9 バックグラウンド動作] ロック画面/常駐通知/ヘッドセットボタンからの
     /// 送話操作を仲介する。connectionへはattach(to:)経由でweak参照するのみ。
@@ -179,7 +182,12 @@ struct ContentView: View {
                 // 未入室中(ルーム選択画面)はタブレット幅でも従来のtalkTabContentを
                 // そのまま使う(ルーム選択画面自体の専用レイアウトは今回のスコープ外。
                 // 「6. 次アクションの提案」参照)。
-                if horizontalSizeClass == .regular && activeRoomId != nil {
+                // [開始/終了時刻] 待機画面(before_start)は他の要素を一切表示しない
+                // 全画面表示とする(Web版RoomView.vueの`v-if="isWaitingBeforeStart"`と
+                // 同じ方針。チャットも閲覧不可のため見せられる情報が無い)。
+                if isWaitingBeforeStart {
+                    waitingBeforeStartView
+                } else if horizontalSizeClass == .regular && activeRoomId != nil {
                     tabletThreePaneContent
                 } else {
                     VStack(spacing: 0) {
@@ -243,6 +251,15 @@ struct ContentView: View {
             guard isBanned else { return }
             banNotice = String(localized: "このルームから排除されました")
             leaveRoom()
+        }
+        // [開始/終了時刻] 待機画面(before_start)ポーリング中にscheduleStoreが状態変化を
+        // 検知した場合(開始時刻到達)、ここでchat/ban/badges/connectionの開始処理を行う。
+        // Web版RoomView.vueのstartScheduleWaitPolling内で直接enterSession()を呼ぶのと
+        // 異なり、iOS版はストア(PTTScheduleStore)とView(ContentView)の責務を分けている
+        // ため、View側はonChangeで変化を検知して能動的に開始処理を呼ぶ形になる。
+        .onChange(of: scheduleStore.state) { oldValue, newValue in
+            guard let roomId = activeRoomId, oldValue == .beforeStart, let newValue, newValue != .beforeStart else { return }
+            beginSessionIfNeeded(roomId: roomId, state: newValue)
         }
         .alert(
             "BANしますか?",
@@ -1000,9 +1017,12 @@ struct ContentView: View {
     /// [モバイルUI再編・2026-08-04] 録音の開始/停止ボタン本体。頻度の低い操作のため
     /// Moreタブへ移設した(開示バナー自体はrecordingBannerとして常時表示を維持)。
     /// owner/moderatorのみ表示する(サーバー側でも権限を再チェックする)。
+    /// [開始/終了時刻] after_end中はLiveKit未接続で録音操作自体に意味が無いため
+    /// 非表示にする(Web版RecordingBar.vueがisChatOnlyAfterEnd中は録音バーごと
+    /// 非表示にするのと同じ方針)。
     @ViewBuilder
     private var recordingControlsSection: some View {
-        if canControlRecording {
+        if canControlRecording && !isChatOnlyAfterEnd {
             VStack(alignment: .leading, spacing: 8) {
                 Text("録音操作")
                     .font(.system(size: 10, design: .monospaced))
@@ -1190,6 +1210,25 @@ struct ContentView: View {
         return false
     }
 
+    // [開始/終了時刻] Web版RoomView.vueのisWaitingBeforeStart/isChatOnlyAfterEndの移植。
+    private var isWaitingBeforeStart: Bool {
+        activeRoomId != nil && scheduleStore.state == .beforeStart
+    }
+    private var isChatOnlyAfterEnd: Bool {
+        scheduleStore.state == .afterEnd
+    }
+    /// Web版waitingStartTimeLabelの移植。開始予定時刻が未設定の場合はnil。
+    private var waitingBodyText: String {
+        if let start = scheduleStore.schedule?.start {
+            let date = Date(timeIntervalSince1970: start / 1000)
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            formatter.timeStyle = .short
+            return String(format: NSLocalizedString("開始予定時刻: %@", comment: "Scheduled start time"), formatter.string(from: date))
+        }
+        return String(localized: "開始時刻が未定です。しばらくお待ちください")
+    }
+
     /// [送話ロック連携] 自分以外が発話ロックを保持しているか。
     /// trueの間はPTTボタンを無効化し、「誰が話しているか」を表示する。
     private var someoneElseIsTalking: Bool {
@@ -1214,7 +1253,7 @@ struct ContentView: View {
                 let joined = try await roomManager.joinRoom(tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId, inviteCode: inviteCode)
                 currentRoomName = joined.name
                 savedRooms.upsert(roomId: roomId, name: joined.name, inviteCode: inviteCode, schedule: joined.schedule)
-                enterRoom(roomId)
+                enterRoom(roomId, knownSchedule: joined.schedule, knownScheduleState: joined.scheduleState)
             } catch {
                 // roomManager.lastErrorMessage に理由がセットされているのでUIには既に反映済み
             }
@@ -1225,16 +1264,63 @@ struct ContentView: View {
     /// 既にメンバーである前提でそのままトークン取得〜接続に進む。
     /// (メンバーでなくなっていた場合 = BAN等 は /token が403を返すのでconnection側のエラー表示に出る)
     private func rejoinSavedRoom(_ saved: PTTSavedRoomsStore.SavedRoom) {
-        // /join を経由しないため、ルーム名は未取得の状態からスタートする。
-        // enterRoom側でfetchRoomName()を呼んで最新値を取り直す(admin-dashboard側で
-        // 変更されている可能性もあるため、Web版と同じく入室のたびに取り直す)。
+        // /join を経由しないため、ルーム名・開始/終了時刻の状態は未取得の状態から
+        // スタートする。enterRoom側でfetchRoomName()を呼んで最新値を取り直す
+        // (admin-dashboard側で変更されている可能性もあるため、Web版と同じく
+        // 入室のたびに取り直す)。
         currentRoomName = nil
         enterRoom(saved.roomId)
     }
 
-    private func enterRoom(_ roomId: String) {
+    /// [開始/終了時刻] Web版RoomView.vueの`enter()`の移植。knownScheduleState未指定
+    /// (再入室時)の場合はまずGET /recording/statusで現在の状態を取得してから判定する。
+    /// before_startの場合はLiveKit接続・チャット購読等を一切行わず、待機画面のみ表示し
+    /// scheduleStoreにポーリングを委ねる(開始時刻到達はonChange(of: scheduleStore.state)で検知)。
+    private func enterRoom(_ roomId: String, knownSchedule: PTTRoomManager.RoomSchedule? = nil, knownScheduleState: PTTRoomManager.ScheduleState? = nil) {
         banNotice = nil
         activeRoomId = roomId
+
+        if let knownScheduleState {
+            scheduleStore.start(
+                schedule: knownSchedule,
+                state: knownScheduleState,
+                tokenServerURL: tokenServerURL,
+                roomId: roomId,
+                roomManager: roomManager,
+                idTokenProvider: { try await auth.fetchIDToken() }
+            )
+            beginSessionIfNeeded(roomId: roomId, state: knownScheduleState)
+        } else {
+            // 再入室: 現在の状態が不明なため、まず取得してから判定する。
+            Task {
+                let idToken = try? await auth.fetchIDToken()
+                guard let idToken, activeRoomId == roomId else { return }
+                let fetched = await roomManager.fetchRoomName(tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId)
+                guard activeRoomId == roomId else { return }
+                if let name = fetched.name {
+                    currentRoomName = name
+                }
+                let state = fetched.scheduleState ?? .inSession
+                scheduleStore.start(
+                    schedule: fetched.schedule,
+                    state: state,
+                    tokenServerURL: tokenServerURL,
+                    roomId: roomId,
+                    roomManager: roomManager,
+                    idTokenProvider: { try await auth.fetchIDToken() }
+                )
+                beginSessionIfNeeded(roomId: roomId, state: state)
+            }
+        }
+    }
+
+    /// [開始/終了時刻] before_start(待機画面表示中)は何も開始しない。
+    /// in_session/after_endのいずれかが判明した時点で呼ばれ、chat/ban/badges/orgContextの
+    /// 購読を開始する。LiveKit接続(connection.connect)のみ、after_endの間は行わない
+    /// (token-server側のtoken.jsがin_session以外ではトークンを発行しないため。
+    /// Web版RoomView.vueのenterSession()と同じ方針)。
+    private func beginSessionIfNeeded(roomId: String, state: PTTRoomManager.ScheduleState) {
+        guard state != .beforeStart else { return }
         chat.start(roomId: roomId)
         ban.start(roomId: roomId, uid: auth.currentUser?.uid ?? "")
         badges.start(
@@ -1249,12 +1335,14 @@ struct ContentView: View {
             roomId: roomId,
             idTokenProvider: { try await auth.fetchIDToken() }
         )
-        connection.connect(
-            tokenServerURL: tokenServerURL,
-            livekitURL: livekitURL,
-            room: roomId,
-            idTokenProvider: { try await auth.fetchIDToken() }
-        )
+        if state == .inSession {
+            connection.connect(
+                tokenServerURL: tokenServerURL,
+                livekitURL: livekitURL,
+                room: roomId,
+                idTokenProvider: { try await auth.fetchIDToken() }
+            )
+        }
         // [ルーム名] /join を経由しない再入室や、入室後にadmin-dashboard側で
         // 名前が変更された場合にも対応できるよう、入室のたびに最新値を取り直す
         // (Web版RoomView.vueの`enter()`が毎回fetchAutoRecordingを呼ぶのと同じ方針)。
@@ -1274,6 +1362,7 @@ struct ContentView: View {
         ban.stop()
         badges.stop()
         orgContext.reset()
+        scheduleStore.stop()
         activeRoomId = nil
         currentRoomName = nil
         joinRoomId = ""
@@ -1304,7 +1393,20 @@ struct ContentView: View {
     /// [送話ロック連携] 自分以外が発話ロックを保持している間はボタンのヒットテストを無効化し、
     /// 「誰が話しているか」を表示する。実際のロック取得/解放は
     /// connection.startTalking()/stopTalking() が担う(このView自身はサーバーを呼ばない)。
+    /// [開始/終了時刻] 終了時刻超過(after_end)はLiveKit未接続(connection.*系が全て初期値の
+    /// まま)のため、PTTボタンの代わりに案内文のみを表示する(Web版RoomView.vueの
+    /// `v-else`分岐の移植)。talkTabContent・tabletThreePaneContentの両方から
+    /// 参照されるため、ここで一箇所に分岐をまとめる。
+    @ViewBuilder
     private var talkArea: some View {
+        if isChatOnlyAfterEnd {
+            afterEndNoticeView
+        } else {
+            talkAreaButton
+        }
+    }
+
+    private var talkAreaButton: some View {
         let canTalk = isConnected && !someoneElseIsTalking
         return VStack(spacing: 14) {
             Circle()
@@ -1332,6 +1434,42 @@ struct ContentView: View {
                 .foregroundColor(.pttMuted)
         }
         .padding(.vertical, 24)
+    }
+
+    /// [開始/終了時刻] 待機画面(before_start)。ルーム全体を占める全画面表示とする
+    /// (Web版RoomView.vueの`v-if="isWaitingBeforeStart"`ブロックの移植)。
+    private var waitingBeforeStartView: some View {
+        VStack(spacing: 10) {
+            Spacer()
+            Text("まもなく開始します")
+                .font(.system(size: 15, weight: .semibold, design: .monospaced))
+            Text(waitingBodyText)
+                .font(.system(size: 13, design: .monospaced))
+                .foregroundColor(.pttMuted)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
+            Spacer()
+            Button(role: .destructive, action: leaveRoom) {
+                Text("ルームを退出する")
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.pttDanger)
+            .padding(14)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.pttBackground.ignoresSafeArea())
+    }
+
+    /// [開始/終了時刻] 終了時刻超過(after_end)の案内文。Web版`room.afterEndNotice`の移植。
+    private var afterEndNoticeView: some View {
+        Text("このルームは終了時刻を過ぎています。チャットの閲覧のみ可能です")
+            .font(.system(size: 13, design: .monospaced))
+            .foregroundColor(.pttMuted)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 24)
     }
 
     private var talkAreaLabel: String {
@@ -1530,6 +1668,9 @@ struct ContentView: View {
     /// [Phase16] Web版(ptt-client/src/components/ChatPanel.vue)の移植。
     /// 画像/動画/PDFの添付に対応。選択直後には送信せず、送信ボタンが
     /// 押されるまで`chatPendingAttachment*`に保持しておく(Web版のpendingFileと同じ)。
+    /// [開始/終了時刻] 終了時刻超過(after_end)はチャット閲覧のみ可能(送信不可)とする
+    /// (Web版ChatPanel.vueのreadOnly propの移植)。実際の拒否はtoken-server側
+    /// (routes/messages.js)が最終的に担保するため、ここでの無効化は補助的なもの。
     private var chatSection: some View {
         // [モバイルUI再編・2026-08-04] Chatタブの中身がそのままタブ全体を占めるよう、
         // 縦方向いっぱいに広げる(以前は他セクションと縦に並ぶ1ブロックだった)。
@@ -1537,6 +1678,12 @@ struct ContentView: View {
             Text("チャット")
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundColor(.pttMuted)
+
+            if isChatOnlyAfterEnd {
+                Text("このルームは終了時刻を過ぎています。チャットの閲覧のみ可能です")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.pttMuted)
+            }
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
@@ -1585,17 +1732,19 @@ struct ContentView: View {
                             .frame(width: 32, height: 32)
                             .background(.pttPanel.opacity(0.6))
                     }
+                    .disabled(isChatOnlyAfterEnd)
 
                     TextField("メッセージを入力", text: $chatInputText)
                         .font(.system(size: 14, design: .monospaced))
                         .padding(8)
                         .background(.pttPanel.opacity(0.6))
                         .onSubmit { sendChatMessage() }
+                        .disabled(isChatOnlyAfterEnd)
 
                     Button("送信") { sendChatMessage() }
                         .font(.system(size: 12, weight: .medium, design: .monospaced))
                         .foregroundColor(.pttAccent)
-                        .disabled(chatInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(isChatOnlyAfterEnd || chatInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }

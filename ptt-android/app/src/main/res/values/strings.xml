@@ -96,6 +96,12 @@
     <string name="room_leave_room">ルームを退出する</string>
     <string name="room_ptt_hint">ボタンを押している間だけ音声が送信されます</string>
     <string name="room_ban_notice">このルームから排除されました</string>
+    <!-- [開始/終了時刻] Web版locales/ja.jsonのwaitingTitle等・iOS版Localizable.xcstringsと
+         同じ文言。「6. 次アクションの提案」item5。 -->
+    <string name="schedule_waiting_title">まもなく開始します</string>
+    <string name="schedule_waiting_body_with_time">開始予定時刻: %1$s</string>
+    <string name="schedule_waiting_body_no_time">開始時刻が未定です。しばらくお待ちください</string>
+    <string name="schedule_after_end_notice">このルームは終了時刻を過ぎています。チャットの閲覧のみ可能です</string>
     <string name="room_ban_confirm_title">BANしますか?</string>
     <string name="room_ban_confirm_description">%1$s をこのルームからBANしますか?\nこの操作は取り消せません。</string>
     <string name="room_ban_confirm_label">BANする</string>

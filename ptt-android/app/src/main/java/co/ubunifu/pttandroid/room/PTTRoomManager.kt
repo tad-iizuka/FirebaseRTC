@@ -31,18 +31,35 @@ import java.util.concurrent.TimeUnit
 
 /**
  * [開始/終了時刻] Web版 types/api.ts の RoomSchedule・iOS版 PTTRoomManager.RoomSchedule と
- * 同じ形。start/endはそれぞれ未設定の場合nullでありうる(エポックミリ秒)。Android側は
- * 現時点では待機画面等のUIまでは実装しておらず(brushup-plan.md参照)、履歴一覧
- * (PTTSavedRoomsStore)への表示用途のみでこの値を使う。
+ * 同じ形。start/endはそれぞれ未設定の場合nullでありうる(エポックミリ秒)。
  */
 data class RoomSchedule(val start: Long?, val end: Long?)
+
+/**
+ * [開始/終了時刻] Web版 types/api.ts の ScheduleState・iOS版 PTTRoomManager.ScheduleState と
+ * 同じ3値。token-server/lib/roomSchedule.js の resolveScheduleState() が返す文字列と一致させる。
+ */
+enum class ScheduleState(val wireValue: String) {
+    BEFORE_START("before_start"),
+    IN_SESSION("in_session"),
+    AFTER_END("after_end");
+
+    companion object {
+        fun fromWireValue(value: String?): ScheduleState? = entries.firstOrNull { it.wireValue == value }
+    }
+}
 
 /**
  * POST /rooms/:roomId/join のレスポンス。
  * [ルーム名] admin-dashboardで設定されたルーム名(name)。未設定の場合はnull
  * (token-server/routes/rooms.js・Web版JoinRoomResponse型と同じ形)。
  */
-data class JoinedRoom(val roomId: String, val name: String?, val schedule: RoomSchedule?)
+data class JoinedRoom(
+    val roomId: String,
+    val name: String?,
+    val schedule: RoomSchedule?,
+    val scheduleState: ScheduleState?
+)
 
 class RoomApiException(val statusCode: Int, message: String) : Exception(message)
 
@@ -84,7 +101,15 @@ class PTTRoomManager(
         return RoomSchedule(start, end)
     }
 
-    /** 招待コードを検証してルームのmembersに参加する。戻り値にはルームID・ルーム名(name)・開始/終了時刻を含む。 */
+    /** "scheduleState": "before_start"|"in_session"|"after_end" を解釈する。
+     *  欠落・不明な値の場合はnullを返す(呼び出し元でin_session相当として扱う)。 */
+    private fun parseScheduleState(json: JSONObject): ScheduleState? {
+        if (!json.has("scheduleState") || json.isNull("scheduleState")) return null
+        return ScheduleState.fromWireValue(json.getString("scheduleState"))
+    }
+
+    /** 招待コードを検証してルームのmembersに参加する。戻り値にはルームID・ルーム名(name)・
+     *  開始/終了時刻・現在の状態(before_start/in_session/after_end)を含む。 */
     suspend fun joinRoom(tokenServerUrl: String, idToken: String, roomId: String, inviteCode: String): JoinedRoom =
         withContext(Dispatchers.IO) {
             _isWorking.value = true
@@ -113,7 +138,12 @@ class PTTRoomManager(
                     } else {
                         null
                     }
-                    JoinedRoom(json.optString("roomId", roomId), name, parseSchedule(json))
+                    JoinedRoom(
+                        json.optString("roomId", roomId),
+                        name,
+                        parseSchedule(json),
+                        parseScheduleState(json)
+                    )
                 }
             } finally {
                 _isWorking.value = false
@@ -150,7 +180,7 @@ class PTTRoomManager(
                         } else {
                             null
                         }
-                        FetchedRoomStatus(name, parseSchedule(json))
+                        FetchedRoomStatus(name, parseSchedule(json), parseScheduleState(json))
                     }
                 }
             } catch (e: Exception) {
@@ -159,5 +189,5 @@ class PTTRoomManager(
         }
 }
 
-/** GET /rooms/:roomId/recording/status のうち、ここで使うのはname/scheduleのみ。 */
-data class FetchedRoomStatus(val name: String?, val schedule: RoomSchedule?)
+/** GET /rooms/:roomId/recording/status のうち、ここで使うのはname/schedule/scheduleStateのみ。 */
+data class FetchedRoomStatus(val name: String?, val schedule: RoomSchedule?, val scheduleState: ScheduleState?)
