@@ -2747,6 +2747,86 @@ GitHub Actionsの実行環境が無いため、YAML構文の妥当性
 実際のCI再実行結果の確認、(2)リポジトリへの反映確認、の2件を新規item19
 として追加する。
 
+六十八訂: 2026-08-10（アップロードされたリポジトリ一式（HEAD=`655beef`、
+`.git`履歴を含む完全なもの）を用い、これまでの改定の多くが「この環境には
+Xcode/Android SDK/GitHub Actions実行環境が無い」として保留してきた
+確認作業のうち、**Web版のビルドツール一式（npm/node）と`git`コマンドは
+実際にこの環境で動作する**ことが判明したため、「6. 次アクションの提案」
+item2・4・5・8・9・11・12・13・19について直接検証を行った。
+
+**検証環境について**: ネットワークはallowlist方式（`registry.npmjs.org`
+等は許可済み）で、`npm install`が実際に成功することを確認した。過去の
+改定（五十訂・五十六訂等）が「`node_modules`未取得・ネットワーク遮断」を
+理由に未実施としていたビルド確認は、少なくとも本改定を行っている環境
+では実施可能だった（過去の改定時点で本当に不可能だったのか、単に
+`npm install`を試みていなかったのかは、本改定からは判別できない）。
+
+**item4・8(Web分)の解消**: `ptt-client`で`npm install`後、
+`npm run build`(`vue-tsc -b && vite build`)・`npm run lint`(`eslint .`)・
+`npm run test`(`vitest run`)を実行し、いずれも成功（型エラー0件・
+lintエラー0件・テスト14件全てPASS）することを確認した。五十三訂
+（`App.vue`/`AppHeader.vue`修正・ロケールキー削除）・五十五訂
+（`SavedRoomsList.vue`のschedule表示対応、Web分）の変更は現在のHEADに
+含まれた状態でこのビルドを通過しているため、Web版に関する限りitem4・
+item8はここで解消したものとして扱う。あわせて`admin-dashboard`でも同様に
+`npm install`・`npm run build`・`npm run lint`を実行し成功を確認した
+（次アクションに明示的な項目は無かったが、Phase11〜13の一連の変更が
+現在のHEADでビルドを通ることの追加確認として実施）。`token-server`は
+`npm install`後、全`.js`ファイルに対する`node --check`（構文チェック）と
+`scripts/check-role-sync.js`の実行を行い、いずれも成功（role定義の
+サーバー・3クライアント間一致を含む）を確認した。`server.js`自体の
+起動確認は、Firebase Admin SDKの認証情報（サービスアカウント鍵等）が
+この環境に無いため未実施のまま残る。
+
+**item9・11の解消（リポジトリへの反映確認）**: `git ls-files`で対象
+ファイルがgit管理下にあることを確認した。五十五訂
+（`SavedRoomsList.vue`・iOS`PTTRoomManager.swift`の`RoomSchedule`構造体・
+Android`PTTRoomManager.kt`の同等実装）、五十六訂（`ChatAvatarView.swift`・
+`Linkify.swift`・Android版`ui/ChatAvatar.kt`・`chat/Linkify.kt`）のいずれも
+現在のHEAD（`655beef`）に至る一連の`update`コミット群の中で管理されて
+おり、六訂・八訂等で踏んできた`git show`による直接検証と同じ確度で
+反映を確認できた。item9・item11はここで解消する。
+
+**item12・13は一部解消（リポジトリ反映部分のみ）**: 五十七訂・五十八訂で
+修正したファイル（`ChatAvatarView.swift`/`Linkify.swift`のiOSビルド
+エラー修正、Android版`withStyle`未import修正）についても同様に
+git管理下でのHEAD反映を確認した。ただし、item12・13が本来求めていた
+「実機Xcode/Android Studioでの再ビルド確認」「実機日本語IMEでの誤送信
+確認」は、この環境にmacOS/Xcode・Android SDK/エミュレータが無いため
+引き続き未実施であり、範囲を縮小した上で次アクションとして残す。
+
+**item19は一部解消（ロジック検証のみ）**: `.github/workflows/ios-ci.yml`
+のYAML構文を`python3`の`yaml.safe_load`で再確認したほか、六十七訂で
+追加された「Pick available iOS Simulator」ステップのawkロジック本体を
+実際にサンプルの`xcodebuild -showdestinations`出力（26.2/26.5/26.6の
+3候補）を使って単体で実行し、意図通り26.5以上（このケースでは26.5）が
+選択されることを確認した。
+
+**（六十七訂本文の記述訂正）** 六十七訂は同ステップの制約として
+「minorが2桁になるケース（例: 26.10）までは厳密に扱えない」と記録して
+いたが、今回実際に候補行に`OS:26.10`を含めて同じawkロジックを実行した
+ところ、`26.5`という要求値に対して`26.10`は正しく「満たす」と判定され、
+逆に要求値を`26.10`にして候補`26.9`を与えると正しく「満たさない」と
+判定された。原因は、このawkロジックが`split(os, ov, ".")`でmajor/minorを
+文字列としてではなく個別のフィールドに分割してから数値変換して比較して
+おり、"26.10"を単純な小数（26.1）として扱う実装にはなっていなかった
+ため。したがって六十七訂の当該記述は誤りであり、ここで訂正する
+（実装（`ios-ci.yml`本体）自体の修正は不要）。
+
+一方、実際のGitHub Actions上での再実行結果（ランナーに
+`IPHONEOS_DEPLOYMENT_TARGET`(26.5)を満たすSimulatorランタイムが
+実際に用意できるか、修正後のジョブが実際にgreenになるか）は、この
+環境にGitHub Actionsの実行環境が無いため、六十七訂時点から状況は
+変わらず未確認のまま残る。
+
+**item2・5は変更なし（未着手であることの再確認）**: `REQUIREMENTS.md`・
+`DECISIONS.md`・`CHANGELOG.md`・`TESTING.md`・`CONTRIBUTING.md`・
+`DEPLOYMENT.md`の6ファイルはいずれも見出しのみの空テンプレートのまま
+であることを直接確認した。Room Schedule機能の本体UI（待機画面・チャット
+閲覧専用画面）についても、iOS(`ContentView.swift`)・Android(`PTTApp.kt`)
+双方で`schedule`値が「保存済みルーム履歴」欄の表示にのみ使われており、
+入室後の状態出し分けUIとしては引き続き実装されていないことを確認した。
+
 ---
 
 ## 0. README.mdが定義するビジョンの要点（前提の再確認）
@@ -3397,7 +3477,7 @@ Phase10（Guestロール）・Phase11（業界ラベリング層／バッジ）�
 
 ---
 
-## 6. 次アクションの提案（2026-08-09 六十七訂で更新）
+## 6. 次アクションの提案（2026-08-10 六十八訂で更新）
 
 <details>
 <summary>この一覧のitem番号がどう変遷してきたか（クリックで展開）</summary>
@@ -3560,11 +3640,11 @@ item 6（`isForbidden`系フラグの機械的な棚卸し）に実際に着手�
    コミットとコード変更用のコミットを分離する、コミット前に主要
    ドキュメントの行数やリビジョン番号の急激な減少を機械的に検知する、
    等の運用改善を検討する
-4. **今回のWeb版修正（App.vue/AppHeader.vue・ロケールキー削除）のビルド確認**：
-   リポジトリへの反映自体は`git show`で確認済み（五十三訂）。
-   `node_modules`未取得・ネットワーク遮断によりこの環境では
-   `vue-tsc -b`・`eslint .`が実行できておらず、目視確認のみで完了扱いに
-   している点が残課題
+4. ✅ **完了（2026-08-10、六十八訂）**: 今回のWeb版修正
+   （App.vue/AppHeader.vue・ロケールキー削除）のビルド確認。
+   `npm install`後`npm run build`(`vue-tsc -b && vite build`)・
+   `npm run lint`(`eslint .`)を実際に実行し、いずれも成功（エラー0件）
+   することを確認した。「6.1」item38へ移動する
 5. **（優先度高）Room開始/終了時刻(Schedule)機能のiOS/Android移植**：
    本体UI（「開始前は入室のみ可・送話/チャット不可の待機画面」「終了後は
    新規入室とチャット閲覧のみ可・送話/チャット送信不可の画面」という、
@@ -3602,18 +3682,18 @@ item 6（`isForbidden`系フラグの機械的な棚卸し）に実際に着手�
 上記の通り範囲を明確化した文言に更新した。あわせて、今回の変更について
 以下2件を新たな次アクションとして追加する。
 
-8. **（新規）五十五訂の変更のビルド確認**：Web版は`vue-tsc -b`・`eslint .`、
-   iOS版はXcodeビルド、Android版はGradleビルドのいずれも、この環境では
-   `node_modules`/SDK未取得・ネットワーク遮断のため実行できておらず、
-   目視でのコード確認のみで完了扱いにしている。特にiOS/Androidは戻り値の
-   型をタプル/データクラスに変更する等、既存の呼び出し元との整合が
-   必要な変更を含むため、実際のビルド確認の優先度は高い
-9. **（新規）五十五訂の変更のリポジトリへの反映確認**：十訂と同じく、
-   今回はアップロードされたZIPアーカイブに対する直接編集・返却のみで、
-   `tad-iizuka/FirebaseRTC`リポジトリへの実際のコミット・反映は本
-   ドキュメント側では確認できていない。六訂・八訂・三十七訂等で踏んだ
-   `git show`による直接検証を、次回リポジトリ一式が再アップロードされた
-   際に行う
+8. **（2026-08-10 六十八訂でWeb分は解消・iOS/Android分のみ残る）**
+   五十五訂の変更のビルド確認：Web版(`ptt-client`)は`npm run build`
+   (`vue-tsc -b && vite build`)・`npm run lint`(`eslint .`)を実際に実行し
+   成功を確認した。iOS版のXcodeビルド、Android版のGradleビルドは
+   この環境にmacOS/Android SDKが無いため引き続き未実施のまま。特に
+   iOS/Androidは戻り値の型をタプル/データクラスに変更する等、既存の
+   呼び出し元との整合が必要な変更を含むため、実際のビルド確認の優先度は
+   引き続き高い
+9. ✅ **完了（2026-08-10、六十八訂）**: 五十五訂の変更のリポジトリへの
+   反映確認。`git ls-files`により`SavedRoomsList.vue`・iOS/Androidの
+   該当ファイルがgit管理下でHEAD（`655beef`）に含まれていることを
+   確認した。「6.1」item39へ移動する
 
 **（2026-08-07 五十六訂）** チャットUIのLINE風バブル化・アバター表示・
 URLハイパーリンク化・IME誤送信バグ修正をWeb版(`ptt-client`)・
@@ -3632,35 +3712,32 @@ URLハイパーリンク化・IME誤送信バグ修正をWeb版(`ptt-client`)・
     IMEアーキテクチャ上、変換確定操作自体はアプリ側のエディタアクションに
     伝播しない設計のため該当する誤送信経路は無いと判断した(推論に留まり
     実機確認はできていない。詳細は文書冒頭「五十八訂」参照)
-11. **（新規）五十六訂の変更のリポジトリへの反映確認**：十訂・五十五訂と
-    同じく、今回もアップロードされたリポジトリ一式に対する直接編集・
-    パッチ/zip返却のみで、`tad-iizuka/FirebaseRTC`リポジトリへの実際の
-    コミット・反映は本ドキュメント側では確認できていない。六訂・八訂等で
-    踏んだ`git show`による直接検証を、次回リポジトリ一式が再アップロード
-    された際に行う
-12. **（優先度高・更新）五十七訂の変更のビルド確認・リポジトリへの反映確認**：
-    ユーザーの実機Xcodeビルドで4件のエラーが報告され、うち2件
-    (`AttributedString`の`.foregroundColor`/`.underlineStyle`への型推論
-    エラー)は実コードの不具合と判明し修正した。残り2件
-    (`ChatAvatarView`/`Linkify`が「Cannot find in scope」)は、この環境では
-    Xcodeビルドの実行確認自体ができないため、ファイル自体の構文問題か
-    プロジェクト側の取り込み(target membership)の問題かを本ドキュメント側
-    では切り分けられていない。次回、(a) 修正版での再ビルド結果、
-    (b) 上記2件のエラーが解消したか、を確認する。あわせて
-    `tad-iizuka/FirebaseRTC`リポジトリ本体への実際のコミット・反映も、
-    item9・11と同様に`git show`による直接検証を次回リポジトリ一式が
-    再アップロードされた際に行う
-13. **（優先度高・更新）五十八訂の変更のビルド確認・実機IME確認・
-    リポジトリへの反映確認**：ユーザーの実機Android Studioビルドで1件の
-    エラー(`Unresolved reference 'withStyle'`)が報告され、実コードの不具合
+11. ✅ **完了（2026-08-10、六十八訂）**: 五十六訂の変更のリポジトリへの
+    反映確認。`ChatAvatarView.swift`・`Linkify.swift`・Android版
+    `ui/ChatAvatar.kt`・`chat/Linkify.kt`がgit管理下でHEAD（`655beef`）に
+    含まれていることを確認した。「6.1」item40へ移動する
+12. **（2026-08-10 六十八訂でリポジトリ反映部分のみ解消・実機ビルド確認は
+    残る）五十七訂の変更の実機ビルド確認**：ユーザーの実機Xcodeビルドで
+    4件のエラーが報告され、うち2件(`AttributedString`の
+    `.foregroundColor`/`.underlineStyle`への型推論エラー)は実コードの
+    不具合と判明し修正した。残り2件(`ChatAvatarView`/`Linkify`が
+    「Cannot find in scope」)についてファイル自体は正しくgit管理下に
+    存在し構文エラーも無いことをこの環境で確認できたが、
+    target membership（Xcodeプロジェクトへの取り込み設定）に起因する
+    問題かどうかはこの環境にXcodeが無いため切り分けられない。次回、
+    (a) 修正版での実機再ビルド結果、(b) 上記2件のエラーが解消したか、を
+    確認する
+13. **（2026-08-10 六十八訂でリポジトリ反映部分のみ解消・実機ビルド/IME
+    確認は残る）五十八訂の変更の実機ビルド確認・実機IME確認**：
+    ユーザーの実機Android Studioビルドで1件のエラー
+    (`Unresolved reference 'withStyle'`)が報告され、実コードの不具合
     (トップレベル拡張関数への未import参照)と判明し修正した(詳細は文書冒頭
-    「五十八訂・実機ビルドエラーの修正」参照)。本環境にはAndroid SDK/Gradle
-    が無くこの修正後の再ビルド確認自体はできていないため、次回、
-    (a) 修正版での`assembleDebug`再ビルド結果(このエラーが解消したか、
-    新たなエラーが出ていないか)、(b) 実機の日本語IME(Gboard等)でのチャット
-    入力で誤送信が起きないかの確認、(c) `tad-iizuka/FirebaseRTC`リポジトリ
-    本体への実際のコミット・反映(`git show`による直接検証)、の3点を次回
-    リポジトリ一式が再アップロードされた際に行う
+    「五十八訂・実機ビルドエラーの修正」参照)。修正後のファイルが
+    git管理下でHEADに反映されていることは確認できたが、本環境には
+    Android SDK/Gradleが無く`assembleDebug`の実行自体はできないため、
+    次回、(a) 修正版での`assembleDebug`再ビルド結果(このエラーが解消
+    したか、新たなエラーが出ていないか)、(b) 実機の日本語IME(Gboard等)
+    でのチャット入力で誤送信が起きないかの確認、の2点を行う
 
 **（2026-08-08 五十九訂）** Web版レイアウト刷新について仕様検討を実施した
 （詳細は文書冒頭「五十九訂」参照。コード変更は無く、実装は未着手）。以下
@@ -3712,18 +3789,24 @@ URLハイパーリンク化・IME誤送信バグ修正をWeb版(`ptt-client`)・
 18. **（完了・「6.1」item37へ移動）** ~~Phase16(PWA化、六十五訂)のリポジトリ
     反映確認~~ → 2026-08-09、六十六訂でコミット`ea965f0`を`git show`により
     直接検証し解消済み
-19. **（新規）iOS CI（`ios-ci.yml`）シミュレータ選択修正の確認**：
-    六十七訂で、「Pick available iOS Simulator」ステップが
+19. **（2026-08-10 六十八訂でロジック検証・リポジトリ反映確認は解消。
+    実際のCI再実行結果のみ残る）iOS CI（`ios-ci.yml`）シミュレータ選択
+    修正の確認**：六十七訂で、「Pick available iOS Simulator」ステップが
     `IPHONEOS_DEPLOYMENT_TARGET`(26.5)を満たさないシミュレータ(26.2)を
     無条件に選んでしまい、`xcodebuild test`が決定論的に失敗していた原因を
-    特定し、OSバージョンで絞り込む修正を行った。この環境にはGitHub
-    Actionsの実行環境が無く、YAML構文・埋め込みシェルスクリプトの構文・
-    簡易ロジックの手元検証に留まるため、(a)実際のCI再実行で今回の
-    エラーが解消したか、(b)ランナー上でIPHONEOS_DEPLOYMENT_TARGETを満たす
+    特定し、OSバージョンで絞り込む修正を行った。六十八訂で、YAML構文の
+    `yaml.safe_load`による検証に加え、awkロジック本体をサンプルの
+    destination行（26.2/26.5/26.6、および2桁minorのケース26.10）で
+    実際に実行し、いずれも意図通りの選択結果になることを確認した
+    （あわせて、六十七訂が「minorが2桁のケースは厳密に扱えない」と
+    記録していたのは誤りだったと判明し訂正した。詳細は文書冒頭
+    「六十八訂」参照）。リポジトリへの反映も`git ls-files`で確認済み。
+    残るのは、(a)実際のGitHub Actions上での再実行で今回のエラーが
+    解消したか、(b)ランナー上でIPHONEOS_DEPLOYMENT_TARGETを満たす
     Simulatorランタイムがそもそも用意できるか（できない場合は
     `-downloadPlatform iOS`側や採用Xcodeバージョンの固定方針を別途
-    見直す必要がある）、(c)リポジトリへの反映確認、の3点が未確認のまま
-    残っている。詳細は文書冒頭「六十七訂」参照
+    見直す必要がある）、の2点のみで、この環境にGitHub Actionsの実行
+    環境が無いため引き続き未確認のまま残っている
 
 ### 6.1 完了済みアクション（アーカイブ）
 
@@ -4174,5 +4257,20 @@ URLハイパーリンク化・IME誤送信バグ修正をWeb版(`ptt-client`)・
     六十四訂（iOS Liquid Glass回帰）のリポジトリ反映もコミット`c956e72`で
     確認した（ただしiOS版の実機での見た目確認自体は別軸の課題のため、
     item17として引き続き残る）
+38. ✅ **完了（2026-08-10、六十八訂）**: item4「五十三訂のWeb版修正
+    （App.vue/AppHeader.vue・ロケールキー削除）のビルド確認」。`npm install`
+    後`npm run build`(`vue-tsc -b && vite build`)・`npm run lint`
+    (`eslint .`)を実際に実行し、型エラー・lintエラーいずれも0件で
+    完走することを確認した
+39. ✅ **完了（2026-08-10、六十八訂）**: item9「五十五訂の変更
+    （保存済みルーム履歴のschedule表示対応）のリポジトリへの反映確認」。
+    `git ls-files`により、Web版`SavedRoomsList.vue`・iOS版
+    `PTTRoomManager.swift`の`RoomSchedule`構造体・Android版
+    `PTTRoomManager.kt`の同等実装がいずれもgit管理下でHEAD（`655beef`）に
+    含まれていることを確認した
+40. ✅ **完了（2026-08-10、六十八訂）**: item11「五十六訂の変更（チャット
+    LINE風UI）のリポジトリへの反映確認」。`ChatAvatarView.swift`・
+    `Linkify.swift`・Android版`ui/ChatAvatar.kt`・`chat/Linkify.kt`が
+    いずれもgit管理下でHEAD（`655beef`）に含まれていることを確認した
 
 </details>
