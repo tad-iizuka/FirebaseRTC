@@ -1,7 +1,7 @@
 # PTTアプリ ブラッシュアップ計画（改定版）
 
 対象リポジトリ: `tad-iizuka/FirebaseRTC`
-作成日: 2026-07-09 ／ 最終改定: 2026-08-10（七十訂）
+作成日: 2026-07-09 ／ 最終改定: 2026-08-11（七十一訂）
 
 > **⚠️ 巻き戻り事故について（2026-08-04 発見・記録）**
 >
@@ -2916,6 +2916,48 @@ importブロックを機械的にコピーしてから編集する運用に倣�
 通るかどうかの確認はこれまで通りユーザー側での実施が必要（「6. 次
 アクションの提案」item20に含めて扱う）。
 
+七十一訂: 2026-08-11（「6. 次アクションの提案」item2「文書棚卸し漏れの
+解消」を実施。空テンプレートのまま残っていた`REQUIREMENTS.md`・
+`DECISIONS.md`・`CHANGELOG.md`・`TESTING.md`・`CONTRIBUTING.md`・
+`DEPLOYMENT.md`の6ファイルを、実コード（`token-server`のroutes/lib、
+3クライアント、CI設定一式、`firebase.json`/`.firebaserc`/`.env.example`）
+および既存ドキュメント（README.md・ARCHITECTURE.md・API.md・DATA_MODEL.md・
+各`phase*.md`）を根拠に書き起こした。
+
+- `REQUIREMENTS.md`: README.mdのVisionを前提に、`brushup-plan.md`「1. 実
+  コード確認済みの現状」の機能差表と突き合わせてFunctional/Non Functional
+  Requirementsを整理した。実装済み項目は`[x]`、未実装は`[ ]`で明示し、
+  数値目標（レイテンシSLO・稼働率等）が未策定である旨も正直に記録した
+- `DECISIONS.md`: `brushup-plan.md`の各訂・`phase*.md`から、後から
+  「なぜこうなっているか」を追う価値がある意思決定（Room First採用・
+  ジッターバッファ不要判断・Guest昇格導線なし・Room作成と組織階層紐付けの
+  分離・業界ラベリング層の後方移動・role対応表の一元化・タブレットUI/
+  Liquid Glass回帰・PWA化スコープ限定）をADR形式（Decision/Reason/
+  Alternatives/Result）で時系列に抽出した
+- `CHANGELOG.md`: このリポジトリはセマンティックバージョニング・
+  Conventional Commitsを実運用していない（コミットメッセージは`update`/
+  `fix`が中心）という実態を冒頭に明記した上で、`brushup-plan.md`のPhase
+  完了記録を根拠にPhase単位でAdded/Changed/Fixedを整理する形式にした
+  （厳密なリリースバージョンではなく実装マイルストーンの記録として運用）
+- `TESTING.md`: 各クライアント/token-serverの実際のテストファイル・CI設定
+  （`vitest`・XCTest・JUnit・`node --check`）を`find`・`cat`で直接確認し、
+  現状のカバレッジの薄さ（token-serverに単体テストが皆無、Android版は
+  テストファイル自体が存在しない等）を率直に記録した。あわせて
+  `dev-tools/check.sh`にFirebase ID Tokenの実値がハードコードされたまま
+  コミットされている点を発見し、改善提案として記載した
+- `CONTRIBUTING.md`: `git branch -a`で実際には`main`ブランチのみの運用で
+  あることを確認し、テンプレートが示す`develop`/`feature/*`運用やコミット
+  規約は「将来採用する場合の推奨」である旨を明記して実態と乖離させない
+  よう書き分けた
+- `DEPLOYMENT.md`: `firebase.json`・`.firebaserc`・6本のGitHub Actions
+  ワークフロー・`token-server/.env.example`を直接読み、Hosting構成
+  （client/adminの2ターゲット）・Cloud Runデプロイコマンド・Secrets一覧・
+  Universal Link/App Link用`.well-known`設定を書き起こした。あわせて、
+  Cloud Scheduler側のRoom sweepジョブが実際に作成済みかどうかコードからは
+  確認できない懸念（既存item7と同一）を改めて明記した
+
+「6. 次アクションの提案」item2を完了扱いに更新し、「6.1」item42へ移動する。
+
 ---
 
 ## 0. README.mdが定義するビジョンの要点（前提の再確認）
@@ -3716,12 +3758,11 @@ item 6（`isForbidden`系フラグの機械的な棚卸し）に実際に着手�
    3項目ともまだ手つかず。プッシュ通知は「Phase14基盤待ち」として
    通知設計側からも参照されており、依存する側の実装が進むにつれて
    優先度が上がる可能性がある
-2. **文書棚卸し漏れの解消**：`REQUIREMENTS.md`・`DECISIONS.md`・
-   `CHANGELOG.md`・`TESTING.md`・`CONTRIBUTING.md`・`DEPLOYMENT.md`の
-   6ファイルが、七訂の「他ドキュメントの棚卸し」および四十三訂の
-   `UI_UX.md`/`SECURITY.md`/`AI.md`整備のいずれの対象にも含まれておらず、
-   見出しのみの空テンプレートのまま残っている。優先度は低いが、
-   ドキュメント一式の完全性としては棚卸し漏れ
+2. ✅ **完了（2026-08-11、七十一訂）**: 文書棚卸し漏れの解消。
+   `REQUIREMENTS.md`・`DECISIONS.md`・`CHANGELOG.md`・`TESTING.md`・
+   `CONTRIBUTING.md`・`DEPLOYMENT.md`の6ファイルを、実コード・CI設定・
+   既存ドキュメントを根拠に書き起こした。詳細は文書冒頭「七十一訂」参照。
+   「6.1」item42へ移動する
 3. **（優先度高）巻き戻り事故の再発防止策を検討する**：`bf6bfc7`は
    Room owner向けバッジUIという正規のコード変更と、本ドキュメントの
    誤った巻き戻りが同一コミットに混在していた。原因（どのような操作で
@@ -4385,5 +4426,18 @@ URLハイパーリンク化・IME誤送信バグ修正をWeb版(`ptt-client`)・
     への実際の反映・Xcode/Android Studioでの実機ビルド確認・実機での表示
     確認はいずれも本ドキュメント側では未確認（「6. 次アクションの提案」
     item20として残す）
+42. ✅ **完了（2026-08-11、七十一訂）**: item2「文書棚卸し漏れの解消」。
+    空テンプレートのまま残っていた`REQUIREMENTS.md`・`DECISIONS.md`・
+    `CHANGELOG.md`・`TESTING.md`・`CONTRIBUTING.md`・`DEPLOYMENT.md`の
+    6ファイルを、実コード（`token-server/lib/permissions.js`等）・CI設定
+    一式・既存ドキュメント（README.md・ARCHITECTURE.md・API.md・
+    DATA_MODEL.md・各`phase*.md`）を根拠に書き起こした。実態と乖離しない
+    よう、未策定の項目（レイテンシSLO等）や実運用と異なるテンプレート
+    記述（ブランチ戦略・コミット規約）は「未策定」「将来の推奨」と明記し、
+    実装済みと誤解されないようにした。詳細は文書冒頭「七十一訂」参照。
+    **（留保）** アップロードされたリポジトリ一式（HEAD=`80c2b79`）に対して
+    直接編集したもので、`tad-iizuka/FirebaseRTC`リポジトリ本体への実際の
+    コミット・反映は本ドキュメント側では未確認（六訂・八訂等と同じ
+    `git show`等による直接検証が必要。次アクションとして残す）
 
 </details>

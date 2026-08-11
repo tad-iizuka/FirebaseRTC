@@ -1,22 +1,239 @@
 # Design Decisions
 
-## YYYY-MM-DD
+> `brushup-plan.md`および各Phase設計メモ（`phase*.md`）から、実装方針に
+> 影響した主要な意思決定を時系列で抽出したものです。日々の実装判断の
+> 全てを網羅するものではなく、後から「なぜこうなっているか」を追える
+> ようにすることを目的としています。新しい重要な決定はこのファイルの
+> 末尾に追記してください。
+
+## 2026-07-09
 
 ### Decision
 
-Roomを中心モデルとする
+Roomを中心モデルとする（Friendモデルを採用しない）
 
 ### Reason
 
-個人間の関係ではなく、
-期間限定のコミュニケーションを重視するため。
+個人間の関係ではなく、期間限定のコミュニケーションを重視するため
+（README.md Core Principle「Room First」「Temporary Relationships」）。
 
 ### Alternatives
 
-Friendモデル
-
-Channelモデル
+- Friendモデル：SNS的な個人間フォロー/フレンド関係を中心に据える案
+- Channelモデル：Discordのような恒久的なチャンネル構造を中心に据える案
 
 ### Result
 
-採用
+採用（Room First）。以後の全機能はRoomを主語として設計する。
+
+---
+
+## 2026-07-25
+
+### Decision
+
+音声のジッターバッファは自前実装しない
+
+### Reason
+
+3クライアントとも LiveKit（内部はWebRTC/libwebrtc）経由で音声の送受信・
+再生を行っており、WebRTCの音声エンジン（NetEQ）が適応型ジッターバッファ・
+パケットロス隠蔽・タイムストレッチを標準で備えているため。旧`ptt-ios`
+READMEにLiveKit移行前（自前WebSocket+AVAudioEngine時代）の記述が残って
+おり、これを根拠に「未実装」と誤判断していたことが発覚し訂正した。
+
+### Alternatives
+
+- 自前でジッターバッファを実装する
+- WebRTC/NetEQの挙動を信頼し実装しない
+
+### Result
+
+実装しない。誤判断の再発防止のため、根拠となった`ptt-ios`READMEをLiveKit
+移行後の実態に合わせて書き直した。
+
+---
+
+## 2026-07-25
+
+### Decision
+
+GuestロールにMember昇格導線を設けない
+
+### Reason
+
+GuestIDと他ID体系（Member）を紐付けると、監査ログ上「継続」として扱う
+べきか「別人物」として扱うべきかの整合性判断が複雑化する。Guestは匿名
+認証由来で本人確認がないため、昇格を許すとなりすまし・権限昇格の抜け道
+になり得る。
+
+### Alternatives
+
+- Guest→Member昇格APIを実装し、GuestIDをMemberIDに引き継ぐ
+- 昇格導線を設けず、GuestとMemberを常に別ID・別記録として扱う
+
+### Result
+
+昇格導線は実装しない。GuestIDは生成された状態のまま保持し、`promotedFrom`
+等の紐付けフィールドも持たせない。
+
+---
+
+## 2026-07-26
+
+### Decision
+
+Room作成と組織階層（Company/Branch/Site等）への紐付けを分離する
+
+### Reason
+
+Room作成時に組織階層へ自動で紐付ける機能を持たせると、「ユーザーがどの
+団体に属するか」というユーザー×団体の所属関係の設計が前提として必要に
+なり、Room First原則（作成の身軽さ）と衝突する。
+
+### Alternatives
+
+- Room作成時に作成者の所属団体を自動判定し紐付ける
+- Room作成と組織階層への紐付けを分離し、必要なRoomのみ運用者が事後に
+  手動で紐付ける
+
+### Result
+
+分離する方針を採用。Room作成は従来通りPTTクライアントから行い、紐付けが
+必要なRoomのみadmin-dashboardのRoom詳細画面から管理者が事後に手動で行う。
+ユーザー×団体の所属関係の設計は当面行わない（後に`phase11-org-roster-design.md`
+で必要性が再浮上し、後追いで設計検討を実施）。
+
+---
+
+## 2026-07-26
+
+### Decision
+
+業界ラベリング層（i18nの「言語×業種プロファイル」拡張）をロードマップ
+後方（Phase15）へ移動し、着手条件を「Phase2の具体的要件確定後」とする
+
+### Reason
+
+README.mdが定義する原則（実装は業界に依存させず、業界ごとの名称はUIだけ
+変更する）としては正しいが、2つ目の業種（Phase2: イベント運営等）の実
+要件が無いまま抽象化の軸を設計すると、後で作り直すリスクの方が高い。
+
+### Alternatives
+
+- Phase11直後に業界ラベリング層に着手する（ロードマップ原案通り）
+- Phase2の要件確定を待ってから着手する
+
+### Result
+
+後者を採用。Phase1の実ユーザーに直接効く土台整備（組織階層・権限整理・
+バッジ基本機能）をPhase11〜13として先に優先する。
+
+---
+
+## 2026-08-03（Phase12実装時）
+
+### Decision
+
+role×操作の対応表を`token-server/lib/permissions.js`に一元化し、
+admin-dashboard向けのサイト管理者権限とは別軸として扱う
+
+### Reason
+
+Room内role（owner/moderator/member/guest）の権限チェックが
+`routes/rooms.js`・`routes/recording.js`等に個別のホワイトリストとして
+分散実装されており、role構成の変更時に全箇所を漏れなく追随させるのが
+困難だった。一方、admin-dashboard向けのサイト管理者権限
+（`adminUsers/{uid}.permissions`）はRoom内roleと無関係に付与される別軸の
+権限であり、同じ対応表に混在させると設計意図が不明瞭になる。
+
+### Alternatives
+
+- 両者を1つの対応表に統合する
+- Room内role用とサイト管理者権限用で対応表を分離する
+
+### Result
+
+分離する。`lib/permissions.js`はRoom内role専用とし、サイト管理者権限は
+`middleware/requireAdmin.js`側で完結させる。クライアント側の複製定義との
+同期はCI（`role-sync-check.yml`・`scripts/check-role-sync.js`）で機械的に
+検証する（コード生成は行わず、差分検知のみ）。
+
+---
+
+## 2026-08-08
+
+### Decision
+
+タブレット幅レイアウト（iOS/Android）の実装に新規ライブラリを導入しない
+
+### Reason
+
+iOS版の`NavigationSplitView`、Android版の`material3-window-size-class`は
+いずれもタブレット対応の標準的な選択肢だが、既存の画面構成・状態管理
+との統合コストが見合わないと判断。
+
+### Alternatives
+
+- 標準ライブラリ（NavigationSplitView / material3-window-size-class）を
+  導入する
+- 既存の標準API（`horizontalSizeClass` / `LocalConfiguration.screenWidthDp`）
+  のみで自前レイアウトを組む
+
+### Result
+
+後者を採用。iOS版は`horizontalSizeClass == .regular`、Android版は
+`LocalConfiguration.screenWidthDp >= 600`を判定条件とし、入室中のみ3ペイン
+レイアウトへ切り替える自前実装とした。
+
+---
+
+## 2026-08-09
+
+### Decision
+
+iOS版のLiquid Glass系実装（カスタムタブバー・`.glassEffect()`等）を標準
+コンポーネントへ回帰させる
+
+### Reason
+
+HIG準拠・今後のiOSアップデートへの追従を優先。標準TabBar/標準マテリアル
+に戻すことで、OS側の見た目変更に自動追従できる。
+
+### Alternatives
+
+- Liquid Glass系のカスタム実装を継続し、都度OSの変更に追従する
+- 標準コンポーネント（`TabView`・`.regularMaterial`・`.bordered`系ボタン
+  スタイル）へ回帰する
+
+### Result
+
+後者を採用。標準TabBarの背景レンダリング問題への追加対応として
+`.preferredColorScheme(.dark)`も追加した。実機での見た目の最終確認は
+本ドキュメント側では検証できないため引き続き次アクションとして残る。
+
+---
+
+## 2026-08-09
+
+### Decision
+
+Webクライアント（ptt-client）をPWA化する。Web Push通知は対象外とする
+
+### Reason
+
+インストール可能なApp Shell体験を提供する価値があるが、Push通知は
+Phase14（通知基盤全体の設計）待ちであり、PWA化単体のスコープに含めると
+設計が肥大化する。
+
+### Alternatives
+
+- PWA化と同時にWeb Push通知も実装する
+- App Shellのキャッシュ（Service Worker）のみを先行実装し、Push通知は
+  Phase14に切り出す
+
+### Result
+
+後者を採用。`public/sw.js`はApp Shellのみをキャッシュ対象とし、
+Firestore/LiveKit/token-server（Cloud Run）へのリクエストは同一オリジン
+判定により自然に対象外となる設計とした。
