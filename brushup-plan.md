@@ -187,6 +187,15 @@ Phase9〜13・16は実装完了。実装内容そのものは`CHANGELOG.md`、�
 実装、iOS README書き直し等はすべて完了している（`CHANGELOG.md`「Phase 9」
 参照）。
 
+**（2026-08-11追記）** Room開始/終了時刻（Schedule）機能は、実装に着手した
+時期の都合でPhase16（PWA化等の改善要望群）としてまとめて実装したが、
+README.mdのTarget Roadmap上はこのPhase9（Phase1=警備業の完成度）に概念上
+属する機能である。警備現場のシフト運用（「この時間帯だけこのRoomを開けて
+おく」）に直結するため。`ROADMAP.md`側でも同様に「Phase 2 / Security
+Industry」（README.mdのPhase1警備業に相当する区分）に位置づけ済み。
+実装Phaseの区分（Phase16）と機能としての位置づけ（Phase1警備業/Phase9）が
+異なる点を明記しておく。
+
 ### Phase 10: Permission ModelにGuestロールを追加 → 完了
 詳細は「5. Guestロール・バッジシステム詳細仕様」・`CHANGELOG.md`「Phase 10」
 参照。
@@ -232,7 +241,9 @@ PWA化・チャット添付(Image/File Event)・招待リンク/QRコード参�
 Schedule機能・チャットUI刷新・タブレット幅レイアウトを含む。詳細は
 `CHANGELOG.md`「Phase 16」参照。**このPhaseに含まれる複数の変更について、
 実機ビルド確認・リポジトリ反映確認がまだ完了していない項目が残っている
-（「6. 次アクション」item5〜9参照）。**
+（「6. 次アクション」item5〜9参照）。** なお、このうちRoom Schedule機能は
+README.mdのTarget Roadmap上はPhase1(警備業)/Phase9に概念上属する（詳細は
+Phase9参照）。
 
 ---
 ## 5. Guestロール・バッジシステム 詳細仕様
@@ -320,12 +331,12 @@ Phase10（Guestロール）・Phase13（バッジ）の実装済み仕様。実�
    自体が起きない運用になったことを確認した。コミット分離や機械的検知の
    仕組み自体は導入していないが、根本原因への対応としてこれで十分と判断
    し、次アクションから外す（詳細は`DECISIONS.md`2026-08-11参照）
-3. **Room Scheduleのロードマップ上の位置づけ整理**：README.mdのTarget
-   Roadmap（Phase1警備業→Phase2ビジネスチーム→Phase3コンシューマー）の
-   どこに位置づくかが未検討。警備現場のシフト運用（「この時間帯だけこの
-   Roomを開けておく」）に直結する機能に見えるため、Phase1(警備業)の文脈で
-   扱うのが自然だが、「3. 優先順位付きロードマップ案」への組み込み方を
-   検討する
+3. ✅ **完了（2026-08-11）**: Room Scheduleのロードマップ上の位置づけ整理。
+   README.mdのTarget Roadmap上はPhase1(警備業)/Phase9に概念上属する機能
+   であることを明記した（実装自体はPhase16としてまとめて行ったため、
+   実装Phaseの区分と機能としての位置づけが異なる点も併記）。`ROADMAP.md`
+   側の「Phase 2 / Security Industry」区分ともこれで整合が取れている。
+   詳細は「3. 優先順位付きロードマップ案」Phase9・Phase16参照
 4. **GCP側Cloud Schedulerジョブの実在確認**：`.env.example`・
    `.github/workflows/token-server.yml`はSecret Manager登録・Cloud Runへの
    `INTERNAL_SWEEP_SECRET`受け渡しまでは準備済みだが、
