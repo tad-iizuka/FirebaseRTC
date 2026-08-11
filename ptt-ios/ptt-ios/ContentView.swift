@@ -1295,7 +1295,25 @@ struct ContentView: View {
             Task {
                 let idToken = try? await auth.fetchIDToken()
                 guard let idToken, activeRoomId == roomId else { return }
-                let fetched = await roomManager.fetchRoomName(tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId)
+                // [不具合修正・2026-08-12] 取得失敗(ネットワーク瞬断等)を
+                // scheduleState=nilとして即座に.inSession扱いにすると、実際は
+                // before_start/after_endだったルームにまで接続を試みてしまい、
+                // token-server側の403エラー("このルームはまだ開始時刻前です"等)が
+                // そのままユーザーに露出する不具合が実機で確認された。サーバー側は
+                // 成功時scheduleStateを必ず返す(resolveScheduleStateがnullを返す
+                // ことはない)ため、fetchedのscheduleStateがnilなのは「取得失敗」を
+                // 意味すると判断してよい。数回まで再試行し、それでも失敗した場合の
+                // み.inSessionへフォールバックする(無限リトライで画面が固まるのを
+                // 避けるため上限を設ける。この場合は既存のconnect()失敗時のエラー
+                // 表示に委ねる)。
+                var fetched = await roomManager.fetchRoomName(tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId)
+                var attempts = 0
+                while fetched.scheduleState == nil, attempts < 3, activeRoomId == roomId {
+                    attempts += 1
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    guard activeRoomId == roomId else { return }
+                    fetched = await roomManager.fetchRoomName(tokenServerURL: tokenServerURL, idToken: idToken, roomId: roomId)
+                }
                 guard activeRoomId == roomId else { return }
                 if let name = fetched.name {
                     currentRoomName = name

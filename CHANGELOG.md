@@ -22,6 +22,15 @@
   `brushup-plan.md`本体は現状サマリと現在有効な次アクションのみを保持する
   運用に変更（詳細は`DECISIONS.md`2026-08-11参照）
 
+### Fixed
+
+- Room Schedule機能: 保存済みルームへの再入室時、schedule状態の再取得
+  (`GET /rooms/:roomId/recording/status`)が失敗した場合に即座に
+  `in_session`とみなしてしまい、実際にはbefore_start/after_endだった
+  Roomへ誤って接続を試み、token-server側の403エラーがそのままユーザーに
+  露出する不具合をiOS/Android双方で修正。最大3回・3秒間隔で再試行する
+  ように変更した（詳細は`DECISIONS.md`2026-08-12参照）
+
 ---
 
 ## Phase 16 — PWA化・チャット添付・Room Schedule拡張（〜2026-08-10）

@@ -299,3 +299,47 @@ Firestore/LiveKit/token-server（Cloud Run）へのリクエストは同一オ�
 
 3番目（運用ルールの変更のみ）を採用。`brushup-plan.md`「6. 次アクション」
 item2は完了として扱う。
+
+## 2026-08-12
+
+### Decision
+
+Room Schedule機能で、保存済みルームへの再入室時（`GET /rooms/:roomId/
+recording/status`によるschedule状態の再取得）にAPIリクエストが失敗した
+場合のフォールバック挙動を、iOS/Android共通で「即座に`in_session`とみなす」
+から「最大3回・3秒間隔で再試行し、それでも失敗した場合のみ`in_session`
+とみなす」に変更する。
+
+### Reason
+
+実機確認で、Android版がbefore_start（開始時刻前）のRoomへ再入室する際に、
+専用の待機画面ではなく通常の入室後画面がそのまま表示され、上に
+「エラー: このルームはまだ開始時刻前です」という文言が重なって出る不具合が
+見つかった。調査の結果、これはAndroid固有のUI実装漏れではなく、
+`fetchRoomName`が何らかの理由（ネットワーク瞬断等）で失敗した場合に
+`fetched?.scheduleState ?: ScheduleState.IN_SESSION`という行が
+`in_session`にフォールバックし、before_start中のRoomへ誤って
+`connect()`を試みてしまうことが原因と判明した。token-server側は成功時
+`scheduleState`を必ず返す（`resolveScheduleState`がnullを返すことはない）
+ため、`scheduleState`がnullなのは「取得に成功したが未設定」ではなく
+「取得失敗」を意味する。この設計上の弱点はiOS版
+（`fetchRoomName`が失敗時`(nil, nil, nil)`を返す設計）にも同様に存在し、
+今回はAndroidで先に顕在化しただけの共通の不具合と判断した。
+
+### Alternatives
+
+- Android側にiOS相当の専用待機画面を新規実装する（→ 調査の結果、
+  両OSともWeb版を含め同じ`WaitingBeforeStartScreen`/
+  `waitingBeforeStartView`相当の実装が既に存在しており、的外れな対応と
+  判断し不採用）
+- 取得失敗時は無限に再試行する（→ 権限エラー等の恒久的な失敗の場合に
+  画面が固まったまま何も表示されなくなるため不採用）
+- 取得失敗時は一定回数だけ再試行し、それでも失敗したら現状の
+  `in_session`フォールバックへ委ねる（既存のconnect()失敗時のエラー
+  表示に任せる）
+
+### Result
+
+3番目を採用。iOS(`ContentView.swift`)・Android(`PTTApp.kt`)双方に、
+最大3回・3秒間隔の再試行ロジックを追加した。恒久的な失敗（BAN等）は
+再試行後に従来通り`connect()`側のエラー表示で顕在化する。

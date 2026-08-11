@@ -141,6 +141,10 @@ private const val TAG = "PTTApp"
 // [開始/終了時刻] Web版 SCHEDULE_WAIT_POLL_INTERVAL_MS・iOS版
 // PTTScheduleStore.pollIntervalSecondsと同じ間隔。「6. 次アクションの提案」item5。
 private const val SCHEDULE_WAIT_POLL_INTERVAL_MS = 15_000L
+// [不具合修正・2026-08-12] GET /recording/status の取得失敗(ネットワーク瞬断等)を
+// 即座にIN_SESSION扱いにしてしまう不具合への対応。詳細は呼び出し箇所のコメント参照。
+private const val SCHEDULE_FETCH_RETRY_INTERVAL_MS = 3_000L
+private const val SCHEDULE_FETCH_MAX_RETRIES = 3
 
 /**
  * [表示仕様・2026-08-06] 開始/終了時刻をローカル履歴一覧の下段用に整形する。
@@ -420,14 +424,36 @@ fun PTTApp(
         // (token-server側token.jsがin_session以外ではLiveKitトークンを発行しないため、
         // before_start中に接続を試みても意味が無い)。「6. 次アクションの提案」item5。
         var state = ScheduleState.IN_SESSION
+        var fetchFailureCount = 0
         while (true) {
             val idToken = try { authManager.fetchIdToken() } catch (e: Exception) { null }
             if (idToken == null || activeRoomId != roomId) return@LaunchedEffect
             val fetched = roomManager.fetchRoomName(tokenServerUrl, idToken, roomId)
             if (activeRoomId != roomId) return@LaunchedEffect
-            fetched?.name?.let { currentRoomName = it }
-            roomSchedule = fetched?.schedule
-            state = fetched?.scheduleState ?: ScheduleState.IN_SESSION
+            if (fetched == null) {
+                // [不具合修正・2026-08-12] 取得失敗(ネットワーク瞬断等)をIN_SESSIONと
+                // みなして接続を試みると、実際はbefore_start/after_endだったルームに
+                // まで接続を試みてしまい、token-server側の403エラー("このルームは
+                // まだ開始時刻前です"等)がそのままユーザーに露出する不具合が実機で
+                // 確認された。サーバー側は成功時scheduleStateを必ず返す
+                // (resolveScheduleStateがnullを返すことはない)ため、fetchedが
+                // nullなのは「取得失敗」を意味すると判断してよい。3回まで再試行し、
+                // それでも失敗した場合のみIN_SESSIONへフォールバックする(無限
+                // リトライで画面が固まるのを避けるため上限を設ける。この場合は
+                // 既存のconnect()失敗時のエラー表示に委ねる)。
+                fetchFailureCount += 1
+                if (fetchFailureCount >= SCHEDULE_FETCH_MAX_RETRIES) {
+                    state = ScheduleState.IN_SESSION
+                    scheduleState = state
+                    break
+                }
+                delay(SCHEDULE_FETCH_RETRY_INTERVAL_MS)
+                continue
+            }
+            fetchFailureCount = 0
+            fetched.name?.let { currentRoomName = it }
+            roomSchedule = fetched.schedule
+            state = fetched.scheduleState ?: ScheduleState.IN_SESSION
             scheduleState = state
             if (state != ScheduleState.BEFORE_START) break
             delay(SCHEDULE_WAIT_POLL_INTERVAL_MS)
