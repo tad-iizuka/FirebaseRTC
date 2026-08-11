@@ -337,13 +337,19 @@ Phase10（Guestロール）・Phase13（バッジ）の実装済み仕様。実�
    実装Phaseの区分と機能としての位置づけが異なる点も併記）。`ROADMAP.md`
    側の「Phase 2 / Security Industry」区分ともこれで整合が取れている。
    詳細は「3. 優先順位付きロードマップ案」Phase9・Phase16参照
-4. **GCP側Cloud Schedulerジョブの実在確認**：`.env.example`・
-   `.github/workflows/token-server.yml`はSecret Manager登録・Cloud Runへの
-   `INTERNAL_SWEEP_SECRET`受け渡しまでは準備済みだが、
-   `POST /internal/rooms/sweep-expired`を実際に定期実行するCloud Scheduler
-   ジョブ自体が作成されているかはリポジトリのコードからは確認できない。
-   管理者がスケジュールを変更しない限り「終了時刻を過ぎたRoomがsweepされず
-   残り続ける」ため、ユーザーへの確認が必要
+4. ✅ **完了（2026-08-11、GCP Cloud Schedulerコンソールのスクリーンショット
+   により確認）**: GCP側Cloud Schedulerジョブの実在確認。ユーザーから
+   提示されたスクリーンショットにより、`sweep-expired-rooms`ジョブが
+   実在し（Region: `asia-northeast1`、Frequency: `* * * * *`＝毎分、
+   State: Enabled）、Target URLが`POST /internal/rooms/sweep-expired`
+   （`https://ptt-token-server-768163479600.asia-northeast1.run.app/
+   internal/rooms/sweep-expired`）を指していること、直近の実行
+   （Aug 11, 2026）が「Success」であることを確認した。ユーザーからも
+   「実際に動作も確認ずみ」との申告を受けている。**（確度について）**
+   GCPコンソールのスクリーンショットという第三者（Google Cloud）が
+   表示した実データに基づく確認であり、十七訂のGitHub Actions実行画面
+   確認と同様、ユーザー申告のみの確認より確度は高い。ただしこの環境から
+   直接GCPへアクセスして確認したものではない点は留意する
 5. **保存済みルーム履歴のschedule表示対応(iOS/Android)のビルド確認**：
    Web版は`vue-tsc -b`・`eslint .`で確認済み。iOS版のXcodeビルド、
    Android版のGradleビルドはこの環境にmacOS/Android SDKが無いため未実施
