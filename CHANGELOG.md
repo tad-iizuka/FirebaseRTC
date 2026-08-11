@@ -14,6 +14,14 @@
 
 - （次回の変更をここに追記）
 
+### Changed
+
+- `brushup-plan.md`を整理し、初訂〜七十一訂の全改定履歴と「6.1 完了済み
+  アクション」を`brushup-plan-history.md`へ分離（4,400行超→385行）。今後は
+  Phase単位の実装内容を本ファイル、設計判断を`DECISIONS.md`に集約し、
+  `brushup-plan.md`本体は現状サマリと現在有効な次アクションのみを保持する
+  運用に変更（詳細は`DECISIONS.md`2026-08-11参照）
+
 ---
 
 ## Phase 16 — PWA化・チャット添付・Room Schedule拡張（〜2026-08-10）
