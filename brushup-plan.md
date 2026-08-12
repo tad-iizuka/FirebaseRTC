@@ -402,14 +402,19 @@ Phase10（Guestロール）・Phase13（バッジ）の実装済み仕様。実�
     「起きていない」との回答を得た。**（確度について）** (a)はスクリー
     ンショットではなくユーザー申告のみに基づく確認のため、その旨を記録
     する。(b)は(a)が解消したため対象外
-11. **iOS CI（`ios-ci.yml`）シミュレータ選択修正の実行結果確認**：
-    `IPHONEOS_DEPLOYMENT_TARGET`を満たさないシミュレータを選んでしまい
-    `xcodebuild test`が決定論的に失敗していた問題への修正は、ロジック検証
-    ・リポジトリ反映確認まで完了済み。残るのは、(a) 実際のGitHub Actions
-    上での再実行で今回のエラーが解消したか、(b) ランナー上で
-    `IPHONEOS_DEPLOYMENT_TARGET`を満たすSimulatorランタイムがそもそも
-    用意できるか、の2点のみで、この環境にGitHub Actionsの実行環境が無い
-    ため未確認のまま
+11. ✅ **完了（2026-08-12、GitHub Actions実行画面により確認）**: iOS CI
+    （`ios-ci.yml`）シミュレータ選択修正の実行結果確認。ユーザーから
+    提示されたGitHub Actions実行画面（"iOS CI" update #56、
+    `build-and-test`ジョブ）により、(a)再実行で「succeeded yesterday in
+    11m 26s」と成功していること、"Pick available iOS Simulator"(8s)・
+    "Boot simulator explicitly and wait"(2m 44s)・"Build (Debug,
+    Simulator)"(2m 42s)・"Unit Tests (ptt-iosTests)"(2m 56s)がいずれも
+    green(✓)で完走していることを確認した。(b)についても、Boot/Build/Test
+    の各ステップが正常完走している時点で、ランナー上に
+    `IPHONEOS_DEPLOYMENT_TARGET`を満たすSimulatorランタイムが用意できた
+    ことの証跡になる。**（確度について）** 十七訂等と同様、GitHub Actions
+    実行画面という第三者記録に基づく確認であり、特定の実行(update #56)に
+    紐づいている
 12. **文書棚卸し(`REQUIREMENTS.md`等6ファイル書き起こし)のリポジトリ反映
     確認**：`REQUIREMENTS.md`・`DECISIONS.md`・`CHANGELOG.md`・
     `TESTING.md`・`CONTRIBUTING.md`・`DEPLOYMENT.md`の書き起こしは
