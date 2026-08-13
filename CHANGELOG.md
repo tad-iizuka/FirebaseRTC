@@ -12,7 +12,25 @@
 
 ### Added
 
-- （次回の変更をここに追記）
+- **Phase14: Firebase App Check導入**（token-server・ptt-client・
+  admin-dashboard・ptt-ios・ptt-android全対応）。詳細な設計判断は
+  `DECISIONS.md`2026-08-13参照
+  - `token-server`: `middleware/requireAppCheck.js`新設。
+    `X-Firebase-AppCheck`ヘッダーを`admin.appCheck().verifyToken()`で検証し、
+    `server.js`にグローバルミドルウェアとして追加（`/webhooks`・
+    `/internal`・ヘルスチェックは対象外）。環境変数`APP_CHECK_ENFORCE`
+    （既定`false`）によるsoft-enforce運用とした
+  - `ptt-client`/`admin-dashboard`: `lib/firebase.ts`に
+    `initializeAppCheck`（reCAPTCHA v3プロバイダ、開発時はデバッグ
+    トークン自動有効化）を追加。`lib/api.ts`の`authedFetch`に
+    `X-Firebase-AppCheck`ヘッダー付与を追加
+  - `ptt-ios`: `PTTAppCheckProvider.swift`新設（実機App Attest／
+    シミュレータはDebugProviderへフォールバック）。Xcodeプロジェクトに
+    `FirebaseAppCheck`（firebase-ios-sdk）のSPM製品参照を追加。8ファイル・
+    17箇所の`URLRequest`組み立て箇所にヘッダー付与を追加
+  - `ptt-android`: `firebase-appcheck-playintegrity`依存を追加。
+    `appcheck/PTTAppCheckProvider.kt`新設（Play Integrityプロバイダ）。
+    8ファイル・17箇所の`Request.Builder`組み立て箇所にヘッダー付与を追加
 
 ### Changed
 

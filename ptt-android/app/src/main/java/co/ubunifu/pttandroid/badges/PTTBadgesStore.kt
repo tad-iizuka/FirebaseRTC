@@ -42,6 +42,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
+import co.ubunifu.pttandroid.appcheck.PTTAppCheckProvider
 
 private const val POLL_INTERVAL_MS = 20_000L
 
@@ -129,6 +130,7 @@ class PTTBadgesStore(
                 val request = Request.Builder()
                     .url("${tokenServerUrl.trimEnd('/')}/rooms/$encodedRoomId/badges")
                     .addHeader("Authorization", "Bearer $idToken")
+                    .apply { PTTAppCheckProvider.token()?.let { addHeader("X-Firebase-AppCheck", it) } }
                     .get()
                     .build()
 
@@ -208,6 +210,7 @@ class PTTBadgesStore(
             Request.Builder()
                 .url("${tokenServerUrl.trimEnd('/')}/rooms/$encodedRoomId/members/$encodedTargetUid/badges")
                 .addHeader("Authorization", "Bearer $idToken")
+                .apply { PTTAppCheckProvider.token()?.let { addHeader("X-Firebase-AppCheck", it) } }
                 .post(body.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
                 .build()
         }
@@ -221,11 +224,12 @@ class PTTBadgesStore(
             Request.Builder()
                 .url("${tokenServerUrl.trimEnd('/')}/rooms/$encodedRoomId/members/$encodedTargetUid/badges/$encodedBadgeId")
                 .addHeader("Authorization", "Bearer $idToken")
+                .apply { PTTAppCheckProvider.token()?.let { addHeader("X-Firebase-AppCheck", it) } }
                 .delete()
                 .build()
         }
 
-    private suspend fun mutateBadge(tokenServerUrl: String, roomId: String, targetUid: String, buildRequest: () -> Request) =
+    private suspend fun mutateBadge(tokenServerUrl: String, roomId: String, targetUid: String, buildRequest: suspend () -> Request) =
         withContext(Dispatchers.IO) {
             _isGranting.value = true
             _grantErrorMessage.value = null
@@ -256,6 +260,7 @@ class PTTBadgesStore(
                         val refetchRequest = Request.Builder()
                             .url("${serverUrl.trimEnd('/')}/rooms/$encodedRoomId/badges")
                             .addHeader("Authorization", "Bearer $freshIdToken")
+                            .apply { PTTAppCheckProvider.token()?.let { addHeader("X-Firebase-AppCheck", it) } }
                             .get()
                             .build()
                         httpClient.newCall(refetchRequest).execute().use { response ->

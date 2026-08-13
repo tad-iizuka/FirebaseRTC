@@ -49,6 +49,9 @@ final class PTTReportStore: ObservableObject {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+        if let appCheckToken = await PTTAppCheck.token() {
+            request.setValue(appCheckToken, forHTTPHeaderField: "X-Firebase-AppCheck")
+        }
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: [
             "roomId": roomId,

@@ -48,6 +48,7 @@ const badgesRouter = require('./routes/badges'); // [Phase13] /admin/badges*, /a
 const roomBadgesRouter = require('./routes/roomBadges'); // [Phase13] GET/POST/DELETE /rooms/:roomId/(members/:uid/)badges*
 const usersRouter = require('./routes/users'); // [2026-07-27] /admin/users*, /admin/users/:uid/badges* (ユーザー管理画面)
 const internalRouter = require('./routes/internal'); // [開始/終了時刻] POST /internal/rooms/sweep-expired (Cloud Scheduler専用)
+const { requireAppCheck } = require('./middleware/requireAppCheck'); // [Phase14] App Check検証(既定はsoft-enforce。詳細はファイル内コメント参照)
 
 const PORT = process.env.PORT || 8080;
 
@@ -101,6 +102,10 @@ app.use((req, res, next) => {
 
 // Cloud Run のヘルスチェック用 (認証不要)
 app.get('/', (req, res) => res.send('ptt-token-server OK'));
+
+// [Phase14] App Check検証。requireFirebaseAuth(各ルート内)より前段でグローバルに適用する。
+// /webhooks・/internal・ヘルスチェックはミドルウェア内部でスキップする(詳細はファイル内コメント参照)。
+app.use(requireAppCheck);
 
 app.use('/rooms', roomsRouter);
 app.use('/rooms', talkRouter); // POST /rooms/:roomId/talk/{start,heartbeat,stop}

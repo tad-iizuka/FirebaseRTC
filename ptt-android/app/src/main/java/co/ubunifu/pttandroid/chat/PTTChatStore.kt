@@ -60,6 +60,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okio.BufferedSink
 import okio.source
 import org.json.JSONObject
+import co.ubunifu.pttandroid.appcheck.PTTAppCheckProvider
 
 class ChatApiException(val statusCode: Int, message: String) : Exception(message)
 
@@ -190,6 +191,7 @@ class PTTChatStore(
             val uploadUrlRequest = Request.Builder()
                 .url("${tokenServerUrl.trimEnd('/')}/rooms/$encodedRoomId/attachments/upload-url")
                 .addHeader("Authorization", "Bearer $idToken")
+                .apply { PTTAppCheckProvider.token()?.let { addHeader("X-Firebase-AppCheck", it) } }
                 .post(uploadUrlBody.toString().toRequestBody(jsonMediaType))
                 .build()
 
@@ -240,6 +242,7 @@ class PTTChatStore(
             val request = Request.Builder()
                 .url("${tokenServerUrl.trimEnd('/')}/rooms/$encodedRoomId/messages")
                 .addHeader("Authorization", "Bearer $idToken")
+                .apply { PTTAppCheckProvider.token()?.let { addHeader("X-Firebase-AppCheck", it) } }
                 .post(body.toString().toRequestBody(jsonMediaType))
                 .build()
 
@@ -439,6 +442,7 @@ class PTTChatStore(
         val request = Request.Builder()
             .url("${tokenServerUrl.trimEnd('/')}/rooms/$encodedRoomId/messages/$encodedMessageId/$suffix")
             .addHeader("Authorization", "Bearer $idToken")
+            .apply { PTTAppCheckProvider.token()?.let { addHeader("X-Firebase-AppCheck", it) } }
             .get()
             .build()
 

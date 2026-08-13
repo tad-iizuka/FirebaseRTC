@@ -25,6 +25,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
+import co.ubunifu.pttandroid.appcheck.PTTAppCheckProvider
 
 class ReportApiException(val statusCode: Int, message: String) : Exception(message)
 
@@ -63,6 +64,7 @@ class PTTReportStore(
                 val request = Request.Builder()
                     .url("${tokenServerUrl.trimEnd('/')}/reports")
                     .addHeader("Authorization", "Bearer $idToken")
+                    .apply { PTTAppCheckProvider.token()?.let { addHeader("X-Firebase-AppCheck", it) } }
                     .post(body.toString().toRequestBody(jsonMediaType))
                     .build()
 

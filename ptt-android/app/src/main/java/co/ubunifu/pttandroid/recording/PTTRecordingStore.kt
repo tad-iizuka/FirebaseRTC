@@ -28,6 +28,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
+import co.ubunifu.pttandroid.appcheck.PTTAppCheckProvider
 
 class RecordingApiException(val statusCode: Int, message: String) : Exception(message)
 
@@ -60,6 +61,7 @@ class PTTRecordingStore(
                 val request = Request.Builder()
                     .url("${tokenServerUrl.trimEnd('/')}/rooms/$encodedRoomId/recording/start")
                     .addHeader("Authorization", "Bearer $idToken")
+                    .apply { PTTAppCheckProvider.token()?.let { addHeader("X-Firebase-AppCheck", it) } }
                     .post("".toRequestBody(null))
                     .build()
 
@@ -93,6 +95,7 @@ class PTTRecordingStore(
                 val request = Request.Builder()
                     .url("${tokenServerUrl.trimEnd('/')}/rooms/$encodedRoomId/recording/stop")
                     .addHeader("Authorization", "Bearer $idToken")
+                    .apply { PTTAppCheckProvider.token()?.let { addHeader("X-Firebase-AppCheck", it) } }
                     .post("".toRequestBody(null))
                     .build()
 

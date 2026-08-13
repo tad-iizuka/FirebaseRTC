@@ -343,3 +343,62 @@ recording/status`によるschedule状態の再取得）にAPIリクエストが�
 3番目を採用。iOS(`ContentView.swift`)・Android(`PTTApp.kt`)双方に、
 最大3回・3秒間隔の再試行ロジックを追加した。恒久的な失敗（BAN等）は
 再試行後に従来通り`connect()`側のエラー表示で顕在化する。
+
+---
+
+## 2026-08-13
+
+### Decision
+
+Phase14のFirebase App Check導入にあたり、以下3点を決定した。
+
+1. **段階的ロールアウト方式**: サーバー側検証は環境変数`APP_CHECK_ENFORCE`
+   （既定`false`）によるsoft-enforce運用とし、ヘッダー欠如・検証失敗でも
+   即座には拒否せず警告ログのみでリクエストを通す。3クライアントの
+   App Check対応版が実機・ストアに行き渡り、CI合格・実機動作確認が
+   取れてから`APP_CHECK_ENFORCE=true`へ切り替える
+2. **プロバイダ選定**: Web=reCAPTCHA v3、iOS=App Attest（実機）／
+   DebugProvider（シミュレータ）、Android=Play Integrity
+3. **クライアント側の失敗時の扱い**: App Checkトークンの取得に失敗しても
+   例外を投げず、ヘッダーを付けずにリクエストを続行する（soft-enforce運用
+   と対称的な設計とし、App Check自体の不具合でアプリの主要機能が止まる
+   ことを避ける）
+
+### Reason
+
+1. App Checkは「登録済みの実アプリからのリクエストであること」を検証する
+   仕組みだが、有効化した瞬間に旧バージョンのアプリ（トークンを送ってこない）
+   を全て弾いてしまうと、ストア審査・ユーザーへの行き渡りに時間がかかる
+   モバイルアプリの特性上、即断線につながる。Guestロール導入（十四訂）や
+   role×操作整理（Phase12）で踏んできた「サーバー側の挙動を変える際は
+   段階を踏む」という方針を踏襲した
+2. 各プラットフォームでFirebaseが推奨する標準プロバイダを選定した
+   （DeviceCheckは非推奨方向のためApp Attestを優先し、シミュレータの
+   Secure Enclave非搭載という制約にのみDebugProviderで対応する）
+3. token-server側が既にsoft-enforceである以上、クライアント側だけが
+   「取得できなければ致命的エラー」という非対称な設計にする理由がない。
+   PTTアプリは警備現場での利用を前提とするため、App Check自体の一時的な
+   不調（ネットワーク・OS側の問題等）で送話やBAN等の主要機能が止まる
+   リスクの方を重く見た
+
+### Alternatives
+
+- 初回導入時から`APP_CHECK_ENFORCE=true`で拒否運用にする（→ 3クライアント
+  全ての行き渡りを待たずに導入すると、旧バージョン利用者が即座に使えなく
+  なるため不採用）
+- クライアント側でApp Checkトークン取得失敗時にリクエスト自体を中断する
+  （→ App Check自体の可用性がPTTアプリ全体の可用性に直結してしまうため
+  不採用。soft-enforce運用の意図と矛盾する）
+- iOS/Androidともに、サーバーからApp Check要否を動的configとして配信し
+  クライアント側の挙動を切り替える（→ Phase12でrole判定の同期方式を
+  検討した際と同様、起動時ネットワーク依存を新たに持ち込むリスクの方が
+  大きいと判断し不採用。環境変数によるサーバー側切り替えのみで十分と判断）
+
+### Result
+
+上記3点を採用し、`token-server`・`ptt-client`・`admin-dashboard`・
+`ptt-ios`・`ptt-android`全てに実装した。詳細は`CHANGELOG.md`
+「Phase14: Firebase App Check導入」参照。iOS/Androidのビルド確認は
+この環境ではXcode/Android SDKが無く実施できておらず、CI
+（`ios-ci.yml`・`android-ci.yml`）での確認を次アクションとして残した
+（詳細は`brushup-plan.md`「6. 次アクション」参照）。

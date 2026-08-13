@@ -25,6 +25,7 @@ import okhttp3.Request
 import org.json.JSONObject
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
+import co.ubunifu.pttandroid.appcheck.PTTAppCheckProvider
 
 data class OrgBreadcrumbNode(
     val nodeId: String,
@@ -67,6 +68,7 @@ class PTTOrgContextStore(
                     val request = Request.Builder()
                         .url("${tokenServerUrl.trimEnd('/')}/rooms/$encodedRoomId/org-context")
                         .addHeader("Authorization", "Bearer $idToken")
+                        .apply { PTTAppCheckProvider.token()?.let { addHeader("X-Firebase-AppCheck", it) } }
                         .get()
                         .build()
 

@@ -2,6 +2,7 @@ package co.ubunifu.pttandroid
 
 import android.app.Application
 import com.google.firebase.FirebaseApp
+import co.ubunifu.pttandroid.appcheck.PTTAppCheckProvider
 
 /**
  * PTTApplication
@@ -14,5 +15,7 @@ class PTTApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         FirebaseApp.initializeApp(this)
+        // [Phase14] App Checkプロバイダの登録。FirebaseApp初期化の直後に行う。
+        PTTAppCheckProvider.install()
     }
 }

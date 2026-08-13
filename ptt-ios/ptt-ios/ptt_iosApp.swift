@@ -8,6 +8,7 @@
 import SwiftUI
 import AVFAudio
 import FirebaseCore
+import FirebaseAppCheck
 import GoogleSignIn
 import LiveKit
 
@@ -15,6 +16,11 @@ import LiveKit
 struct ptt_iosApp: App {
 
     init() {
+        // [Phase14] App Checkプロバイダの登録は FirebaseApp.configure() より
+        // 前に行う必要がある(登録が後だと反映されない)。詳細は
+        // PTTAppCheckProvider.swift 参照。
+        AppCheck.setAppCheckProviderFactory(PTTAppCheckProviderFactory())
+
         // GoogleService-Info.plist を読み込んでFirebaseを初期化する。
         // このファイルはFirebase Consoleからダウンロードして
         // Xcodeプロジェクトに追加しておく必要がある(リポジトリには含めない)。

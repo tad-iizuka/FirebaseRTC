@@ -62,6 +62,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+import co.ubunifu.pttandroid.appcheck.PTTAppCheckProvider
 
 class TokenFetchException(val statusCode: Int, message: String) : Exception(message)
 
@@ -338,6 +339,7 @@ class PTTConnectionManager(
         val request = Request.Builder()
             .url(url)
             .addHeader("Authorization", "Bearer $idToken")
+            .apply { PTTAppCheckProvider.token()?.let { addHeader("X-Firebase-AppCheck", it) } }
             .post("".toRequestBody(null))
             .build()
 
@@ -408,6 +410,7 @@ class PTTConnectionManager(
         val request = Request.Builder()
             .url(url)
             .addHeader("Authorization", "Bearer $idToken")
+            .apply { PTTAppCheckProvider.token()?.let { addHeader("X-Firebase-AppCheck", it) } }
             .build()
 
         httpClient.newCall(request).execute().use { response ->

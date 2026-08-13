@@ -53,6 +53,9 @@ final class PTTRecordingStore: ObservableObject {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+        if let appCheckToken = await PTTAppCheck.token() {
+            request.setValue(appCheckToken, forHTTPHeaderField: "X-Firebase-AppCheck")
+        }
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
@@ -79,6 +82,9 @@ final class PTTRecordingStore: ObservableObject {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+        if let appCheckToken = await PTTAppCheck.token() {
+            request.setValue(appCheckToken, forHTTPHeaderField: "X-Firebase-AppCheck")
+        }
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }

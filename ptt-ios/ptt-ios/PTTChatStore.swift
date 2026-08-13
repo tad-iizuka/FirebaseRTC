@@ -113,6 +113,9 @@ final class PTTChatStore: ObservableObject {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+        if let appCheckToken = await PTTAppCheck.token() {
+            request.setValue(appCheckToken, forHTTPHeaderField: "X-Firebase-AppCheck")
+        }
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["text": trimmed])
 
@@ -166,6 +169,9 @@ final class PTTChatStore: ObservableObject {
             var uploadUrlRequest = URLRequest(url: uploadUrlEndpoint)
             uploadUrlRequest.httpMethod = "POST"
             uploadUrlRequest.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+            if let appCheckToken = await PTTAppCheck.token() {
+                uploadUrlRequest.setValue(appCheckToken, forHTTPHeaderField: "X-Firebase-AppCheck")
+            }
             uploadUrlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
             uploadUrlRequest.httpBody = try JSONSerialization.data(withJSONObject: [
                 "contentType": uploadType,
@@ -196,6 +202,9 @@ final class PTTChatStore: ObservableObject {
             var confirmRequest = URLRequest(url: messagesEndpoint)
             confirmRequest.httpMethod = "POST"
             confirmRequest.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+            if let appCheckToken = await PTTAppCheck.token() {
+                confirmRequest.setValue(appCheckToken, forHTTPHeaderField: "X-Firebase-AppCheck")
+            }
             confirmRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
             confirmRequest.httpBody = try JSONSerialization.data(withJSONObject: [
                 "text": text.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -320,6 +329,9 @@ final class PTTChatStore: ObservableObject {
         }
         var request = URLRequest(url: url)
         request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+        if let appCheckToken = await PTTAppCheck.token() {
+            request.setValue(appCheckToken, forHTTPHeaderField: "X-Firebase-AppCheck")
+        }
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {

@@ -110,6 +110,9 @@ final class PTTBadgeStore: ObservableObject {
         }
         var request = URLRequest(url: url)
         request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+        if let appCheckToken = await PTTAppCheck.token() {
+            request.setValue(appCheckToken, forHTTPHeaderField: "X-Firebase-AppCheck")
+        }
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
@@ -193,6 +196,9 @@ final class PTTBadgeStore: ObservableObject {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+        if let appCheckToken = await PTTAppCheck.token() {
+            request.setValue(appCheckToken, forHTTPHeaderField: "X-Firebase-AppCheck")
+        }
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["badgeId": badgeId])
 
@@ -210,6 +216,9 @@ final class PTTBadgeStore: ObservableObject {
         var request = URLRequest(url: url)
         request.httpMethod = "DELETE"
         request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+        if let appCheckToken = await PTTAppCheck.token() {
+            request.setValue(appCheckToken, forHTTPHeaderField: "X-Firebase-AppCheck")
+        }
 
         try await performMutation(request: request, tokenServerURL: tokenServerURL, roomId: roomId)
     }

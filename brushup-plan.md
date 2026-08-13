@@ -214,15 +214,75 @@ CI同期チェック、招待コード可視範囲の解決、組織ロースタ
 実装済み。団体/業種プロファイル単位への拡張はPhase15へ持ち越し。詳細は
 `CHANGELOG.md`「Phase 13」・`phase13-badge-schema.md`参照。
 
-### Phase 14: Phase2(ビジネスチーム)展開に向けた仕上げ → **未着手**
-- Firebase App Check導入
+### Phase 14: Phase2(ビジネスチーム)展開に向けた仕上げ → **一部着手（2026-08-13、Firebase App Check実装）**
+- ✅ **実装完了（2026-08-13）**: Firebase App Check導入。詳細は下記
+  「Firebase App Check実装内容」参照。ただしリポジトリ本体への反映確認は
+  未実施（「6. 次アクション」item1参照。六訂・八訂で踏んだのと同じ確認
+  プロセスをここでも次アクションとして残す）
 - プッシュ通知（Web版PWA化(Phase16)で導入したService Worker基盤を再利用する
-  想定）
+  想定）→ 未着手
 - 自動テスト・E2Eテストの拡充（現状はCIでの構文/Lintチェックが中心。詳細は
-  `TESTING.md`参照）
+  `TESTING.md`参照）→ 未着手
 
-Phase9〜13が完了し、ロードマップ上は次に着手すべきフェーズ。3項目とも
-まだ手つかず（「6. 次アクション」item1参照）。
+**Firebase App Check実装内容(2026-08-13)：**
+
+App Checkは「誰がリクエストしたか」(Firebase Auth ID Token)とは別に、
+「正規のアプリ自体からのリクエストか」を検証する仕組み。3項目のうち
+この1項目のみ着手し、残る2項目(プッシュ通知・自動テスト拡充)は次アクション
+として残す。
+
+- `token-server`: `middleware/requireAppCheck.js`を新設し、
+  `X-Firebase-AppCheck`ヘッダーを`admin.appCheck().verifyToken()`で検証する
+  グローバルミドルウェアとして`server.js`に追加(`/webhooks`・`/internal`・
+  ヘルスチェックの`/`は対象外)。**段階的ロールアウトの方針**として、環境変数
+  `APP_CHECK_ENFORCE`(既定`false`)によるsoft-enforce運用とした。未対応の
+  既存インストール済みアプリを即断線させないため、既定では検証はするが
+  ヘッダー欠如・検証失敗でも警告ログのみでリクエストは通す。3クライアントの
+  App Check対応版が行き渡り、CI合格・実機動作確認が取れてから
+  `APP_CHECK_ENFORCE=true`へ切り替える運用とする(六訂・八訂・十七訂で
+  踏んだ「実配布・CI合格の確認を経てから本番挙動を変える」進め方に倣う)
+- `ptt-client`(Web)・`admin-dashboard`: `firebase/app-check`の
+  `initializeAppCheck`(reCAPTCHA v3プロバイダ)を`lib/firebase.ts`に追加。
+  サイトキー未設定時は初期化自体をスキップ(soft-enforce運用のため機能は
+  壊れない)。開発時(`import.meta.env.DEV`)は自動でデバッグトークンを
+  有効化する。`lib/api.ts`の`authedFetch`に`X-Firebase-AppCheck`ヘッダー
+  付与を追加。**`npm install`→`vue-tsc`→`vite build`まで実行しビルド成功を
+  確認済み**(この環境内で完結する検証のため確度は高い)
+- `ptt-ios`: `PTTAppCheckProvider.swift`を新設。実機はApp Attestプロバイダ、
+  シミュレータ(Secure Enclave非搭載)はDebugProviderにフォールバックする
+  設計。`ptt_iosApp.swift`の`FirebaseApp.configure()`より前で
+  `AppCheck.setAppCheckProviderFactory(...)`を呼ぶよう追加。Xcodeプロジェクト
+  (`project.pbxproj`)にSPM製品`FirebaseAppCheck`(firebase-ios-sdkパッケージ)
+  の参照を追加。`PTTRoomManager`/`PTTBanStore`/`PTTChatStore`/
+  `PTTConnectionManager`/`PTTOrgContextStore`/`PTTRecordingStore`/
+  `PTTReportStore`/`PTTBadgeStore`の計17箇所の`URLRequest`組み立て箇所に
+  `X-Firebase-AppCheck`ヘッダーを追加(チャット添付の署名付きURLへの直接PUT
+  1箇所は対象外。token-server宛てではないため)
+- `ptt-android`: `app/build.gradle.kts`に
+  `firebase-appcheck-playintegrity`を追加。`appcheck/
+  PTTAppCheckProvider.kt`を新設(Play Integrityプロバイダ)。
+  `PTTApplication.onCreate()`の`FirebaseApp.initializeApp()`直後に
+  `PTTAppCheckProvider.install()`を追加。iOS版と対応する8ファイル・
+  計17箇所の`Request.Builder`組み立て箇所に`X-Firebase-AppCheck`ヘッダーを
+  追加(同じくGCS直接PUT1箇所は対象外)。実装中、`PTTBadgesStore.kt`の
+  `mutateBadge`が受け取る`buildRequest`パラメータの型が非suspendの
+  `() -> Request`のままだと、追加したsuspend関数呼び出し
+  (`PTTAppCheckProvider.token()`)がコンパイルエラーになることに気づき、
+  `suspend () -> Request`へ修正した(呼び出し元は元々`withContext(Dispatchers.IO)`
+  というsuspendコンテキスト内で呼んでいるため、型変更のみで対応できた)
+- **iOS/Androidの検証について**: この環境にXcode/Android SDKが無く
+  コンパイル確認はできていない。構文面では、iOSは`project.pbxproj`の
+  括弧バランス確認・各Swiftファイルの中括弧バランス確認、Androidは各
+  Kotlinファイルの中括弧・丸括弧バランス確認、および上記の型不整合の
+  発見・修正を行ったが、実際のビルド成否はCI(`ios-ci.yml`・
+  `android-ci.yml`)での確認が必要(六訂・十七訂で踏んだプロセスに倣う)
+- **運用者側の別途作業**: Firebase Consoleでの設定(reCAPTCHA v3サイトキー
+  発行・iOS/Androidアプリ登録・Firestore側のApp Check適用有効化)はコード
+  変更では完結せず、運用者側の作業として別途必要(詳細は
+  `token-server/README.md`「認証: Firebase App Check【Phase14】」節参照)
+
+Phase9〜13が完了し、ロードマップ上は次に着手すべきフェーズ。3項目のうち
+App Checkのみ着手（「6. 次アクション」item1参照）。
 
 ### Phase 15: 業界ラベリング層の設計・導入 → **着手条件待ち**
 **着手条件: Phase2（イベント運営・展示会・自治体等）の具体的な案件・
@@ -313,20 +373,35 @@ Phase10（Guestロール）・Phase13（バッジ）の実装済み仕様。実�
 
 ---
 
-## 6. 次アクションの提案（2026-08-12 更新）
+## 6. 次アクションの提案（2026-08-13 更新）
 
 過去の改定で完了した項目、および項目番号の変遷の経緯は
-`brushup-plan-history.md`「第2部」に集約した。2026-08-11の整理以降、
-item2〜13はすべてユーザーからの実機/CI/GCPコンソールのスクリーンショット
-提示、およびリポジトリ一式の再取得・内容比較により完了扱いとなった
-（各項目の確認内容・確度は該当項目の記述を参照）。**2026-08-12時点で
-残っている次アクションはitem1のみ**。
+`brushup-plan-history.md`「第2部」に集約した。2026-08-13時点の次アクションは
+以下の通り。
 
-1. **Phase14への着手**：Phase9〜13・16が完了し、ロードマップ上は次の
-   フェーズ。Firebase App Check導入・プッシュ通知・自動テスト/E2Eテストの
-   拡充の3項目ともまだ手つかず。プッシュ通知はPhase16で導入したService
-   Workerを土台にできる
-2. ✅ **完了（2026-08-11）**: ドキュメント巻き戻り事故の再発防止策。過去に
+1. **Firebase App Check実装のリポジトリ反映確認**：今回の変更はアップロード
+   されたZIPアーカイブに対して行い、更新版ZIPとして返却したものであり、
+   `tad-iizuka/FirebaseRTC`リポジトリ本体への実際のコミットは本ドキュメント
+   側では未確認。六訂・八訂・旧item12(現item16)で踏んだのと同じ確認プロセス
+   （`git show`等によるリポジトリ反映の直接検証、またはリポジトリ一式の
+   再取得・内容比較）をここでも次アクションとして残す
+2. **Firebase App Check: iOS/AndroidのCI合格確認**：この環境にはXcode/
+   Android SDKが無くコンパイル確認ができていない。構文面のチェック
+   （括弧バランス確認・型不整合の発見と修正）は行ったが、実際のビルド
+   成否は`ios-ci.yml`・`android-ci.yml`での確認が必要(六訂・十七訂で
+   踏んだプロセスに倣う)
+3. **Firebase App Check: Firebase Console側の設定**：reCAPTCHA v3サイトキー
+   発行・iOS/Androidアプリ登録・Firestore側のApp Check適用有効化は運用者
+   側の作業として別途必要（コード変更では完結しない。詳細は
+   `token-server/README.md`「認証: Firebase App Check【Phase14】」節参照）
+4. **Firebase App Check: `APP_CHECK_ENFORCE`切り替えタイミングの判断**：
+   3クライアントの対応版が実機・ストアに行き渡り、soft-enforce運用下での
+   ログ（未対応クライアントからのリクエスト比率）が十分小さくなったことを
+   確認してから、環境変数`APP_CHECK_ENFORCE=true`への切り替えを検討する
+5. **Phase14の残り2項目に着手**：プッシュ通知（Phase16のService Worker基盤
+   を再利用する想定）・自動テスト/E2Eテストの拡充。App Check以外は
+   まだ手つかず
+6. ✅ **完了（2026-08-11）**: ドキュメント巻き戻り事故の再発防止策。過去に
    1度、正規のコード変更コミットへ本ドキュメントの誤った巻き戻りが
    混在する事故が発生していた（原因未特定）。ユーザーの運用ルール変更
    （並行作業を行わない／作業が並行した場合は必ず最新のドキュメントを
@@ -334,13 +409,13 @@ item2〜13はすべてユーザーからの実機/CI/GCPコンソールのスク
    自体が起きない運用になったことを確認した。コミット分離や機械的検知の
    仕組み自体は導入していないが、根本原因への対応としてこれで十分と判断
    し、次アクションから外す（詳細は`DECISIONS.md`2026-08-11参照）
-3. ✅ **完了（2026-08-11）**: Room Scheduleのロードマップ上の位置づけ整理。
+7. ✅ **完了（2026-08-11）**: Room Scheduleのロードマップ上の位置づけ整理。
    README.mdのTarget Roadmap上はPhase1(警備業)/Phase9に概念上属する機能
    であることを明記した（実装自体はPhase16としてまとめて行ったため、
    実装Phaseの区分と機能としての位置づけが異なる点も併記）。`ROADMAP.md`
    側の「Phase 2 / Security Industry」区分ともこれで整合が取れている。
    詳細は「3. 優先順位付きロードマップ案」Phase9・Phase16参照
-4. ✅ **完了（2026-08-11、GCP Cloud Schedulerコンソールのスクリーンショット
+8. ✅ **完了（2026-08-11、GCP Cloud Schedulerコンソールのスクリーンショット
    により確認）**: GCP側Cloud Schedulerジョブの実在確認。ユーザーから
    提示されたスクリーンショットにより、`sweep-expired-rooms`ジョブが
    実在し（Region: `asia-northeast1`、Frequency: `* * * * *`＝毎分、
@@ -353,7 +428,7 @@ item2〜13はすべてユーザーからの実機/CI/GCPコンソールのスク
    表示した実データに基づく確認であり、十七訂のGitHub Actions実行画面
    確認と同様、ユーザー申告のみの確認より確度は高い。ただしこの環境から
    直接GCPへアクセスして確認したものではない点は留意する
-5. ✅ **完了（2026-08-11、実機スクリーンショットにより確認）**: 保存済み
+9. ✅ **完了（2026-08-11、実機スクリーンショットにより確認）**: 保存済み
    ルーム履歴のschedule表示対応(iOS/Android)のビルド確認。ユーザーから
    提示された実機スクリーンショットにより、iOS版・Android版とも実機で
    ビルド・起動できており、保存済みルーム一覧（`0802`
@@ -361,7 +436,7 @@ item2〜13はすべてユーザーからの実機/CI/GCPコンソールのスク
    が意図通り表示されていることを確認した。戻り値の型変更に伴う呼び出し元
    との不整合があればそもそもビルドが通らないため、この実機動作自体が
    ビルド成功の証跡になる
-6. ✅ **完了（2026-08-11、実機スクリーンショットにより確認）**: チャットUI
+10. ✅ **完了（2026-08-11、実機スクリーンショットにより確認）**: チャットUI
    刷新(iOS版)の実機ビルド確認。ユーザーから提示された実機スクリーン
    ショットにより、実機でアプリが起動し、チャット画面でアバター表示
    （`ChatAvatarView`）・吹き出し（LINE風バブル）が問題なく描画されて
@@ -369,21 +444,21 @@ item2〜13はすべてユーザーからの実機/CI/GCPコンソールのスク
    実機で起動できないため、この動作自体が(a)実機再ビルド成功、
    (b)`ChatAvatarView`/`Linkify`の「Cannot find in scope」エラー解消の
    両方の証跡になる
-7. ✅ **完了（2026-08-11）**: チャットUI刷新(Android版)の実機ビルド確認・
+11. ✅ **完了（2026-08-11）**: チャットUI刷新(Android版)の実機ビルド確認・
    実機IME確認。(a)実機での`assembleDebug`再ビルド成功はスクリーンショット
    で確認済み。(b)実機の日本語IME(Gboard等)でのチャット入力時の誤送信有無
    についても、ユーザーから「iOS/Androidとも問題ないことを確認している」
    との報告を受けた。**（確度について）** (b)はスクリーンショット等の
    証跡ではなくユーザー申告のみに基づく確認のため、十一訂等と同じ位置づけ
    （申告に基づく完了）として記録する
-8. ✅ **完了（2026-08-11、シミュレータ/実機スクリーンショットにより確認）**:
+12. ✅ **完了（2026-08-11、シミュレータ/実機スクリーンショットにより確認）**:
    タブレット幅レイアウト(iOS/Android)のビルド確認。iOSはiPad Pro
    11-inch(M5)のXcodeシミュレータ(iOS 26.0)、Androidはタブレット幅の
    実機/エミュレータの両方のスクリーンショットで、参加者・PTT・チャットの
    3ペインレイアウトへ正しく切り替わっていることを確認した。未入室中
    （ルーム選択画面）のタブレット幅専用レイアウトは両OSとも意図的に
    スコープ外のまま（変更なし）
-9. ✅ **完了（2026-08-12、実機スクリーンショットにより確認）**: Room
+13. ✅ **完了（2026-08-12、実機スクリーンショットにより確認）**: Room
    Schedule機能(iOS/Android移植)の反映・実機確認。(b)両OSとも実機ビルド・
    起動は確認済み。(c)で見つかったAndroid版の不具合（before_start中の
    Roomで専用の待機画面が表示されない事象）は、保存済みルームへの再入室時
@@ -393,9 +468,9 @@ item2〜13はすべてユーザーからの実機/CI/GCPコンソールのスク
    スクリーンショットにより、iOS・Androidとも「まもなく開始します／
    開始予定時刻: 2026/08/15 0:00」の専用待機画面が正しく表示され、両OSの
    見た目が揃っていることを確認した。(a)のリポジトリ本体への反映確認も、
-   item12の比較検証で`ContentView.swift`・`PTTApp.kt`のバイト単位一致を
-   確認済み（詳細はitem12参照）
-10. ✅ **完了（2026-08-12、実機スクリーンショット＋ユーザー申告により確認）**:
+   旧item12(現item16)の比較検証で`ContentView.swift`・`PTTApp.kt`のバイト単位一致を
+   確認済み（詳細は現item16参照）
+14. ✅ **完了（2026-08-12、実機スクリーンショット＋ユーザー申告により確認）**:
     iOS版: Liquid Glass関連実装の標準コンポーネントへの回帰・実機確認。
     ユーザーから提示された実機スクリーンショット（通話・設定・チャット・
     参加者の4タブ）により、(c)見た目はいずれも統一されたフラットな配色で
@@ -405,7 +480,7 @@ item2〜13はすべてユーザーからの実機/CI/GCPコンソールのスク
     「起きていない」との回答を得た。**（確度について）** (a)はスクリー
     ンショットではなくユーザー申告のみに基づく確認のため、その旨を記録
     する。(b)は(a)が解消したため対象外
-11. ✅ **完了（2026-08-12、GitHub Actions実行画面により確認）**: iOS CI
+15. ✅ **完了（2026-08-12、GitHub Actions実行画面により確認）**: iOS CI
     （`ios-ci.yml`）シミュレータ選択修正の実行結果確認。ユーザーから
     提示されたGitHub Actions実行画面（"iOS CI" update #56、
     `build-and-test`ジョブ）により、(a)再実行で「succeeded yesterday in
@@ -418,7 +493,7 @@ item2〜13はすべてユーザーからの実機/CI/GCPコンソールのスク
     ことの証跡になる。**（確度について）** 十七訂等と同様、GitHub Actions
     実行画面という第三者記録に基づく確認であり、特定の実行(update #56)に
     紐づいている
-12. ✅ **完了（2026-08-12、リポジトリ一式の再取得・内容比較により確認）**:
+16. ✅ **完了（2026-08-12、リポジトリ一式の再取得・内容比較により確認）**:
     文書棚卸し(`REQUIREMENTS.md`等6ファイル書き起こし)のリポジトリ反映
     確認。ユーザーから改めてアップロードされたリポジトリ一式
     （`FirebaseRTC-main__2_.zip`）と、こちら側の作業用コピーを直接
@@ -431,8 +506,8 @@ item2〜13はすべてユーザーからの実機/CI/GCPコンソールのスク
     単位の直接検証はできていない。ただし内容そのものがバイト単位で
     一致していることは確認できており、実質的にリポジトリへの反映を
     裏付ける証跡として扱う
-13. ✅ **完了（2026-08-12、item12と同じ比較により確認）**: 本改定
+17. ✅ **完了（2026-08-12、旧item12(現item16)と同じ比較により確認）**: 本改定
     （brushup-plan.mdの整理・`brushup-plan-history.md`分離）のリポジトリ
-    反映確認。item12と同じ比較で`brushup-plan.md`・
+    反映確認。旧item12(現item16)と同じ比較で`brushup-plan.md`・
     `brushup-plan-history.md`がバイト単位で完全一致していることを確認
-    した（確度についてはitem12と同様）
+    した（確度については現item16と同様）

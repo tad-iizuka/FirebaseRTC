@@ -1,4 +1,4 @@
-import { firebaseAuth } from '@/lib/firebase'
+import { firebaseAuth, getAppCheckToken } from '@/lib/firebase'
 import type { ServerErrorResponse } from '@/types/api'
 
 /**
@@ -39,6 +39,8 @@ export async function authedFetch<T>(
     throw new ApiError(401, 'サインインしていません')
   }
   const idToken = await user.getIdToken()
+  // [Phase14: App Check] soft-enforce運用のため、取得できなければヘッダーを付けずに続行する。
+  const appCheckToken = await getAppCheckToken()
 
   const res = await fetch(`${baseUrl.replace(/\/$/, '')}${path}`, {
     ...options,
@@ -46,6 +48,7 @@ export async function authedFetch<T>(
       ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
       ...(options.headers ?? {}),
       Authorization: `Bearer ${idToken}`,
+      ...(appCheckToken ? { 'X-Firebase-AppCheck': appCheckToken } : {}),
     },
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
   })

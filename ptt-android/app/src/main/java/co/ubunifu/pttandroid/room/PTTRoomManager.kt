@@ -28,6 +28,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
+import co.ubunifu.pttandroid.appcheck.PTTAppCheckProvider
 
 /**
  * [開始/終了時刻] Web版 types/api.ts の RoomSchedule・iOS版 PTTRoomManager.RoomSchedule と
@@ -120,6 +121,7 @@ class PTTRoomManager(
                 val request = Request.Builder()
                     .url("${tokenServerUrl.trimEnd('/')}/rooms/$encodedRoomId/join")
                     .addHeader("Authorization", "Bearer $idToken")
+                    .apply { PTTAppCheckProvider.token()?.let { addHeader("X-Firebase-AppCheck", it) } }
                     .post(body.toString().toRequestBody(jsonMediaType))
                     .build()
 
@@ -166,6 +168,7 @@ class PTTRoomManager(
                 val request = Request.Builder()
                     .url("${tokenServerUrl.trimEnd('/')}/rooms/$encodedRoomId/recording/status")
                     .addHeader("Authorization", "Bearer $idToken")
+                    .apply { PTTAppCheckProvider.token()?.let { addHeader("X-Firebase-AppCheck", it) } }
                     .get()
                     .build()
 

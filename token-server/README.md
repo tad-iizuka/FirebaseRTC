@@ -60,6 +60,22 @@ identity・uid相当の値は一切信用しない。
 Firebase ID Tokenを持たないため、代わりに `WebhookReceiver` によるLiveKit独自の
 署名検証を行う(下記「録音機能(Egress)」の節を参照)。
 
+### 認証: Firebase App Check【Phase14】
+`Authorization`(ID Token、リクエストしたユーザー)とは別に、
+`X-Firebase-AppCheck` ヘッダー(リクエスト元が正規のptt-client(Web)/
+ptt-ios/ptt-androidアプリ自体であること)も検証する。`middleware/
+requireAppCheck.js` に実装し、`server.js` でグローバルミドルウェアとして
+適用している(`/webhooks`・`/internal`・ヘルスチェックの`/`は対象外)。
+
+- 環境変数 `APP_CHECK_ENFORCE` が `true` でない限り(既定)、ヘッダー欠如・
+  検証失敗は警告ログを出すだけでリクエストは通す(soft-enforce)。
+  3クライアントのApp Check対応版が実機・ストアに行き渡り、CIの合格と
+  併せて動作確認が取れてから `APP_CHECK_ENFORCE=true` に切り替える運用とする
+- Firestoreへの直接読み取り(自分自身の`members/{uid}`ドキュメント等)への
+  App Check適用は、このAPIサーバーとは別に、Firebase Console側の
+  「App Check > Firestore > 適用」設定で有効化する(コード変更不要。
+  有効化前にクライアント3種のApp Check初期化が完了している必要がある)
+
 ### 認可: 招待制ルーム
 「ルームIDを知っていれば誰でも入れる」状態を避けるため、ルームは
 `invite_only` とし、参加には招待コードの検証を必須にした。
@@ -361,7 +377,7 @@ gcloud run deploy ptt-token-server \
   --region asia-northeast1 \
   --allow-unauthenticated \
   --set-secrets LIVEKIT_API_KEY=livekit-api-key:latest,LIVEKIT_API_SECRET=livekit-api-secret:latest,RECORDING_GCS_CREDENTIALS_JSON=recording-gcs-credentials:latest \
-  --set-env-vars LIVEKIT_HOST=https://your-project.livekit.cloud,FIREBASE_PROJECT_ID=your-firebase-project-id,ALLOWED_ORIGINS=https://ptt-client.example.com,RECORDING_GCS_BUCKET=your-recording-bucket
+  --set-env-vars LIVEKIT_HOST=https://your-project.livekit.cloud,FIREBASE_PROJECT_ID=your-firebase-project-id,ALLOWED_ORIGINS=https://ptt-client.example.com,RECORDING_GCS_BUCKET=your-recording-bucket,APP_CHECK_ENFORCE=false
 ```
 
 * `--allow-unauthenticated`は維持（Cloud Run自体のIAM認証はかけず、
@@ -369,7 +385,12 @@ gcloud run deploy ptt-token-server \
   `/webhooks/livekit` もこの延長で、LiveKit独自の署名検証をアプリケーション
   レイヤーで行う）。
 * `LIVEKIT_HOST` / `FIREBASE_PROJECT_ID` / `ALLOWED_ORIGINS` /
-  `RECORDING_GCS_BUCKET` は秘匿情報ではないため `--set-env-vars`で問題ない。
+  `RECORDING_GCS_BUCKET` / `APP_CHECK_ENFORCE` は秘匿情報ではないため
+  `--set-env-vars`で問題ない。
+* `APP_CHECK_ENFORCE`: 未設定時は`false`相当(soft-enforce)。3クライアントの
+  App Check対応版が行き渡り動作確認が取れるまでは`false`のまま運用し、
+  切り替え時のみ`true`へ変更してデプロイし直す（詳細は「認証: Firebase
+  App Check【Phase14】」節を参照）。
 * 過去に`--set-env-vars`で平文デプロイしたリビジョンが残っている場合、
   切り替え後に不要な旧リビジョンを削除すること（`gcloud run revisions list` → `gcloud run revisions delete`）。
 
@@ -483,10 +504,13 @@ NAT配下で複数の正規ユーザーが同一IPになるケースを考慮し
 
 ## 未実装・今後の検討事項
 
-- **Firebase App Check**: 本物のアプリ経由のリクエストであることを検証する
-  仕組み。不特定多数への公開を想定する場合、スクリプトからの直接叩き・
-  トークン乱発を防ぐために実質必須だが、クライアント側の追加実装
-  (reCAPTCHA/DeviceCheck設定)が必要なため今回のスコープからは外している。
+- ~~**Firebase App Check**~~ **実装完了(Phase14)**: サーバー側は
+  `middleware/requireAppCheck.js`(soft-enforce、`APP_CHECK_ENFORCE=true`で
+  拒否に切替可能)、クライアント側もWeb(reCAPTCHA v3)・iOS(App Attest)・
+  Android(Play Integrity)全てに対応済み。詳細は上記「認証: Firebase App
+  Check【Phase14】」節を参照。Firebase Console側でのプロジェクト設定
+  (reCAPTCHA v3サイトキー発行・iOS/Androidアプリ登録・App Check適用の
+  有効化)は運用者側の作業として別途必要。
 - **クライアント側UI(録音の開始/停止ボタン)**: Web/iOS/Androidの全クライアントで
   実装済み。録音中フラグはRoom Metadata経由で受信し、開始/停止操作は
   `/rooms/:roomId/recording/start`・`/stop`を通じて行う。

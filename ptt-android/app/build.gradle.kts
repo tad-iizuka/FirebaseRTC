@@ -53,6 +53,9 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:33.4.0"))
     implementation("com.google.firebase:firebase-auth-ktx")
     implementation("com.google.firebase:firebase-firestore-ktx")
+    // [Phase14] App Check(Play Integrityプロバイダ)。token-server側のsoft-enforce
+    // 検証(middleware/requireAppCheck.js)と対になる送信側実装
+    implementation("com.google.firebase:firebase-appcheck-playintegrity")
 
     // Google Sign-In (Firebase Authへの認証情報として使う)
     implementation("com.google.android.gms:play-services-auth:21.2.0")
