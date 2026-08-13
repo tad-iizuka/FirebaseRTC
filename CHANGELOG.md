@@ -23,7 +23,15 @@
   - `ptt-client`/`admin-dashboard`: `lib/firebase.ts`に
     `initializeAppCheck`（reCAPTCHA v3プロバイダ、開発時はデバッグ
     トークン自動有効化）を追加。`lib/api.ts`の`authedFetch`に
-    `X-Firebase-AppCheck`ヘッダー付与を追加
+    `X-Firebase-AppCheck`ヘッダー付与を追加。`firebaseConfig`に
+    `appId`（`VITE_FIREBASE_APP_ID`、既定値あり）を明示追加。
+    admin-dashboardには専用のFirebaseアプリ登録が無いため、ptt-client
+    （「FirebaseRTC」アプリ）のreCAPTCHA v3キーを共用する方針とした
+    （詳細は`DECISIONS.md`2026-08-13「App Checkプロバイダの割り当て方針」
+    参照）。`.github/workflows/web-deploy.yml`・`admin-deploy.yml`の
+    ビルドステップに`VITE_APP_CHECK_RECAPTCHA_SITE_KEY`
+    （GitHub Actions Variables `APP_CHECK_RECAPTCHA_SITE_KEY`から注入）
+    を追加
   - `ptt-ios`: `PTTAppCheckProvider.swift`新設（実機App Attest／
     シミュレータはDebugProviderへフォールバック）。Xcodeプロジェクトに
     `FirebaseAppCheck`（firebase-ios-sdk）のSPM製品参照を追加。8ファイル・

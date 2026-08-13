@@ -49,7 +49,14 @@ jobs:
         run: npm run test
 
       - name: Build (type-check + vite build)
+        # [Phase14: App Check] Viteはビルド時に環境変数を埋め込むため、
+        # ここでVITE_APP_CHECK_RECAPTCHA_SITE_KEYを渡す必要がある。
+        # 未設定でもビルド・デプロイ自体は成功する(App Check初期化がスキップ
+        # されるだけ。soft-enforce運用のため機能は壊れない)。GitHub Actions
+        # の Variables に APP_CHECK_RECAPTCHA_SITE_KEY を登録しておくこと。
         run: npm run build
+        env:
+          VITE_APP_CHECK_RECAPTCHA_SITE_KEY: "${{ vars.APP_CHECK_RECAPTCHA_SITE_KEY }}"
 
       # 後続のdeployジョブ(PR preview / production)で使い回すため、
       # ビルド成果物だけをartifactとして保存する。

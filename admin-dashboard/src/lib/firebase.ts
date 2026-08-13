@@ -9,10 +9,19 @@ import type { AppCheck } from 'firebase/app-check'
 // dev-tools/get-firebase-token.html と同じプロジェクトを指している。
 // 本番運用では Vite の環境変数(.env)経由に切り出すことを推奨するが、
 // 既存実装(ptt-client/public/index.html)と同じく公開値なのでハードコードでも実害はない。
+// [Phase14追記, 2026-08-13] appIdを明示。Firebaseコンソールで確認した
+// 「FirebaseRTC」ウェブアプリ(Hostingサイト fir-rtc-de1f4)のApp ID。
+// admin-dashboard(Hostingサイト fir-rtc-de1f4-admin)には専用のFirebase
+// アプリ登録が存在しないため、ptt-client側と同じFirebaseアプリ登録
+// (App ID・apiKey共に同一)を意図的に共用している(DECISIONS.md 2026-08-13
+// 「App Checkプロバイダの割り当て方針」参照)。App Checkはこのappid単位で
+// reCAPTCHA v3プロバイダに紐づくため、以前(appId未指定)は挙動が曖昧に
+// なりうる状態だった。
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY ?? 'AIzaSyD8TErGVlJFrn3Sldgr3junEvFufz_7wW0',
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN ?? 'fir-rtc-de1f4.firebaseapp.com',
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID ?? 'fir-rtc-de1f4',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID ?? '1:768163479600:web:94f6a8bf446244e2842df5',
 }
 
 export const firebaseApp = initializeApp(firebaseConfig)

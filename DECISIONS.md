@@ -402,3 +402,62 @@ Phase14のFirebase App Check導入にあたり、以下3点を決定した。
 この環境ではXcode/Android SDKが無く実施できておらず、CI
 （`ios-ci.yml`・`android-ci.yml`）での確認を次アクションとして残した
 （詳細は`brushup-plan.md`「6. 次アクション」参照）。
+
+---
+
+## 2026-08-13（続き）: App Checkプロバイダの割り当て方針
+
+### Decision
+
+Web版のApp Check reCAPTCHA v3プロバイダについて、`ptt-client`・
+`admin-dashboard`で**同一のFirebaseアプリ登録・同一のreCAPTCHA v3サイト
+キーを共用する**ことを決定した。
+
+### Reason
+
+Firebaseコンソールで実機確認したところ、以下が判明した。
+
+- `admin-dashboard`(Hostingサイト`fir-rtc-de1f4-admin`)に対応する
+  独立したFirebase「アプリ」登録がプロジェクト内に存在しない
+- `admin-dashboard/src/lib/firebase.ts`の`firebaseConfig`(apiKey等)は
+  元々`ptt-client`用にFirebaseコンソールで発行された「FirebaseRTC」
+  アプリの値をそのまま流用していた(コピー元と同一)
+- `admin-dashboard`はFirestoreへ直接アクセスしない(全データはtoken-server
+  経由のAPI)。ただしFirebase Authenticationへの直接アクセス
+  (`signInWithPopup`によるGoogle/Appleサインイン)はあり、かつApp Check
+  ヘッダーはtoken-server宛てAPIリクエストの検証に使うため、Firestore直接
+  アクセスの有無とは無関係にApp Check SDKの初期化(reCAPTCHA v3プロバイダの
+  設定)自体は必要
+
+新規にadmin-dashboard専用のFirebaseアプリ登録を追加する案も検討したが、
+既にapiKeyを共用している現状の構成と一貫性が取れる「既存の
+「FirebaseRTC」アプリのreCAPTCHA v3キーを、許可ドメインに
+`fir-rtc-de1f4-admin.web.app`を追加登録した上で共用する」方式を採用した。
+
+### Alternatives
+
+- admin-dashboard専用のFirebaseウェブアプリを新規登録する（→
+  reCAPTCHA v3キーもドメインごとに分離でき将来的な独立運用はしやすいが、
+  apiKey等は既に共用済みという現状の設計判断と非対称になり、変更範囲も
+  大きくなるため見送り）
+- admin-dashboardではApp Check自体を導入しない（→ token-server側の
+  soft-enforce運用のため機能は壊れないが、Guestロール・moderator任命API
+  等と同様、admin-dashboard発のリクエストだけ検証対象外のままになるのは
+  一貫性を欠くため見送り）
+
+### Result
+
+- `ptt-client/src/lib/firebase.ts`・`admin-dashboard/src/lib/firebase.ts`
+  双方の`firebaseConfig`に、Firebaseコンソールで確認した「FirebaseRTC」
+  アプリのApp ID(`1:768163479600:web:94f6a8bf446244e2842df5`)を
+  `VITE_FIREBASE_APP_ID`環境変数(既定値あり)として明示追加した
+  （従来`appId`未指定だったため、App Checkがどのアプリ登録に紐づくかが
+  コード上あいまいだった点を解消）
+- `.github/workflows/web-deploy.yml`・`admin-deploy.yml`のビルドステップに
+  `VITE_APP_CHECK_RECAPTCHA_SITE_KEY`(GitHub Actions Variables
+  `APP_CHECK_RECAPTCHA_SITE_KEY`から注入、両ワークフロー共通の同一値)を
+  追加した
+- 運用者側の作業として、Firebaseコンソールで「FirebaseRTC」アプリを
+  App Check(reCAPTCHA v3)に登録する際、許可ドメインに
+  `fir-rtc-de1f4.web.app`と`fir-rtc-de1f4-admin.web.app`の**両方**を
+  含める必要がある点を`brushup-plan.md`の次アクションに記録した
