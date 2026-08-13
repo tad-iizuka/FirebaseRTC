@@ -461,3 +461,70 @@ Firebaseコンソールで実機確認したところ、以下が判明した。
   App Check(reCAPTCHA v3)に登録する際、許可ドメインに
   `fir-rtc-de1f4.web.app`と`fir-rtc-de1f4-admin.web.app`の**両方**を
   含める必要がある点を`brushup-plan.md`の次アクションに記録した
+
+---
+
+## 2026-08-13（続き2）: App Check導入の反映確認・登録作業完了
+
+### Decision
+
+Firebase App Check導入(Phase14)について、以下2点を完了・確認済みとして
+記録する。
+
+1. リポジトリ本体への反映確認・iOS/AndroidのCI合格確認
+2. Firebaseコンソール・GitHub Actions側の実運用登録作業
+
+### Reason
+
+ユーザーからGitHub Actions実行画面のスクリーンショットが提示され、以下が
+確認できた。
+
+- コミット`3dde700`（App Check本体実装）に対し、`token-server CI/CD #39`・
+  `Android CI #46`・`iOS CI #58`・`Web (ptt-client) Deploy #56`が
+  いずれもgreenで完走
+- 続くコミット`0a1356e`（`appId`明示追加・ワークフローへの
+  `VITE_APP_CHECK_RECAPTCHA_SITE_KEY`配線）に対し、
+  `Admin Dashboard Deploy #39`・`Web (ptt-client) Deploy #57`が
+  green で完走
+
+`iOS CI`・`Android CI`のgreenは特に重要で、この環境ではXcode/Android SDK
+が無く、`project.pbxproj`への`FirebaseAppCheck` SPM製品参照の手動追加、
+`build.gradle.kts`へのPlay Integrity依存追加、8ファイル×17箇所×
+2プラットフォームのKotlin/Swiftファイル機械的編集について、コンパイル
+確認ができないまま実装していた。実際のビルド成功がCI上で確認できたことで、
+この不確実性が解消された。
+
+続けてFirebaseコンソール側でのApp Check登録作業をユーザーと画面共有しながら
+進め、以下が完了した。
+
+- Web(「FirebaseRTC」アプリ、ptt-client・admin-dashboard共用): reCAPTCHA v3。
+  許可ドメインに`fir-rtc-de1f4.web.app`・`fir-rtc-de1f4-admin.web.app`の
+  両方を登録
+- Android(`co.ubunifu.pttandroid`): Play Integrity。SHA-256フィンガー
+  プリントはデバッグ用keystore(`~/.android/debug.keystore`、
+  `keytool -list -v`で取得)の値を暫定登録
+- iOS(`co.ubunifu.ptt-ios`): App Attest。Team ID(`MTP6LLLBBQ`、
+  Apple Developerサイトの「Membership details」で確認)を登録
+- GitHub Actions Variablesへの`APP_CHECK_RECAPTCHA_SITE_KEY`登録も完了
+
+登録作業の過程で、リリース用のAndroid署名鍵がこのプロジェクトに存在しない
+（`build.gradle.kts`に`signingConfigs`が無く、CIも`assembleDebug`のみ）
+ことが判明した。デバッグ用SHA-256の登録のみでは、実際にPlayストアへ本番
+配信する際にPlay Integrityが機能しないため、配信計画が具体化した時点で
+Play App Signing方式によるアップロード鍵作成・実配信用署名鍵のSHA-256
+追加登録が必要になる。
+
+### Alternatives
+
+（本エントリは実装方針の分岐ではなく確認作業の記録のため、該当なし）
+
+### Result
+
+- `brushup-plan.md`「6. 次アクションの提案」の該当項目(旧item1・2)を
+  完了扱いとし、リリース用Android署名鍵の整備を新たな次アクションとして
+  追加した
+- Phase14のFirebase App Check導入は、コード実装・CI合格・Firebase
+  コンソール登録・GitHub Actions Variables登録まで一通り完了した。
+  残るのは`APP_CHECK_ENFORCE=true`への切り替えタイミングの判断（3クライアント
+  の対応版が実機・ストアに十分行き渡ってから）と、Phase14の残り2項目
+  （プッシュ通知・自動テスト拡充）のみ

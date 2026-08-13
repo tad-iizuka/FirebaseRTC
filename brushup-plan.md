@@ -379,47 +379,43 @@ Phase10（Guestロール）・Phase13（バッジ）の実装済み仕様。実�
 `brushup-plan-history.md`「第2部」に集約した。2026-08-13時点の次アクションは
 以下の通り。
 
-1. **Firebase App Check実装のリポジトリ反映確認**：今回の変更はアップロード
-   されたZIPアーカイブに対して行い、更新版ZIPとして返却したものであり、
-   `tad-iizuka/FirebaseRTC`リポジトリ本体への実際のコミットは本ドキュメント
-   側では未確認。六訂・八訂・旧item12(現item16)で踏んだのと同じ確認プロセス
-   （`git show`等によるリポジトリ反映の直接検証、またはリポジトリ一式の
-   再取得・内容比較）をここでも次アクションとして残す
-2. **Firebase App Check: iOS/AndroidのCI合格確認**：この環境にはXcode/
-   Android SDKが無くコンパイル確認ができていない。構文面のチェック
-   （括弧バランス確認・型不整合の発見と修正）は行ったが、実際のビルド
-   成否は`ios-ci.yml`・`android-ci.yml`での確認が必要(六訂・十七訂で
-   踏んだプロセスに倣う)
-3. **Firebase App Check: Firebase Console側の設定**：運用者側の作業として
-   別途必要（コード変更では完結しない）。2026-08-13の検討・実機確認により
-   以下まで詳細化した（詳細は`DECISIONS.md`2026-08-13「App Checkプロバイダの
-   割り当て方針」参照）
-   - Firebaseコンソール「App Check」で「FirebaseRTC」ウェブアプリ
-     （Hostingサイト`fir-rtc-de1f4`＝ptt-client用に登録されているアプリ）を
-     reCAPTCHA v3で登録する
-   - **admin-dashboardは専用のFirebaseアプリ登録を持たないため**、上記
-     「FirebaseRTC」のreCAPTCHA v3キーを共用する方針(選択肢B)を採用した。
-     登録時、許可ドメインに`fir-rtc-de1f4.web.app`と
-     `fir-rtc-de1f4-admin.web.app`の**両方**を含めること（片方だけだと
-     もう一方でApp Checkトークン取得が失敗する）
-   - 発行されたサイトキーをGitHub Actions「Variables」に
-     `APP_CHECK_RECAPTCHA_SITE_KEY`として登録する
-     （`.github/workflows/web-deploy.yml`・`admin-deploy.yml`双方の
-     ビルドステップから`VITE_APP_CHECK_RECAPTCHA_SITE_KEY`として参照する
-     よう実装済み。未登録でもビルド・デプロイは成功するが、その場合
-     App Check初期化自体がスキップされる＝soft-enforce運用のため機能は
-     壊れないが、実質的にApp Checkが機能していない状態になる）
-   - `co.ubunifu.pttandroid`をPlay Integrityで、`co.ubunifu.ptt-ios`を
-     App Attestで登録する（GitHub側の追加登録は不要。既存の
-     `ANDROID_GOOGLE_SERVICES_JSON`/`IOS_GOOGLE_SERVICE_INFO_PLIST`
-     secretsが同じFirebaseプロジェクトに紐づいているため）
-   - `ptt-svc`という3つ目のウェブアプリ登録(Hostingサイト
-     `fir-rtc-de1f4-94f2e`)は、`.firebaserc`・各deploy workflow・
-     `token-server.yml`のALLOWED_ORIGINSのいずれにも登場せず、
-     ptt-client/admin-dashboardと無関係と判断。App Check登録は不要
-   - Firestore側のApp Check適用有効化は上記アプリ登録が完了してから
-     着手する（Firestoreへの直接アクセスはadmin-dashboardには無く、
-     3クライアントの`members/{uid}`等の自己参照読み取りが対象）
+1. ✅ **完了（2026-08-13、GitHub Actions実行画面により確認）**: Firebase App
+   Check実装のリポジトリ反映確認、およびiOS/AndroidのCI合格確認。ユーザーから
+   提示されたGitHub Actions実行画面（`tad-iizuka/FirebaseRTC` Actions一覧）
+   により、コミット`3dde700`（App Check本体実装: token-server middleware・
+   3クライアント本体）に対し`token-server CI/CD #39`・`Android CI #46`・
+   `iOS CI #58`・`Web (ptt-client) Deploy #56`が、続くコミット`0a1356e`
+   （`appId`明示追加・ワークフローへの`VITE_APP_CHECK_RECAPTCHA_SITE_KEY`
+   配線）に対し`Admin Dashboard Deploy #39`・`Web (ptt-client) Deploy #57`
+   が、いずれもgreenで完走していることを確認した。特に`iOS CI`・
+   `Android CI`は、この環境ではXcode/Android SDKが無くコンパイル確認
+   できていなかった`project.pbxproj`の手動編集・`build.gradle.kts`変更・
+   Kotlin/Swiftファイルへの機械的編集（8ファイル×17箇所×2プラットフォーム）
+   について、実際のビルド成功を確認できたことを意味する。**（確度に
+   ついて）** 十七訂のGitHub Actions実行画面確認と同じ位置づけ（第三者
+   記録・特定コミットハッシュに紐づく）。旧item1・item2をここへ統合し
+   完了扱いとする
+2. ✅ **完了（2026-08-13、実機・コンソール画面により確認）**: Firebase
+   Console側のApp Check登録作業。「FirebaseRTC」ウェブアプリを
+   reCAPTCHA v3（許可ドメインに`fir-rtc-de1f4.web.app`・
+   `fir-rtc-de1f4-admin.web.app`両方を登録）、`co.ubunifu.pttandroid`を
+   Play Integrity（SHA-256フィンガープリントはデバッグ用keystore
+   `~/.android/debug.keystore`の値を暫定登録。**リリース用keystoreは
+   このプロジェクトに未整備**なため、Playストア配信時に別途追加登録が
+   必要な点を持ち越し事項として残す）、`co.ubunifu.ptt-ios`をApp Attest
+   （Team ID `MTP6LLLBBQ`）でそれぞれ登録し、App Check「アプリ」一覧で
+   3件とも「登録済み」になっていることをスクリーンショットで確認した。
+   GitHub Actions Variablesへの`APP_CHECK_RECAPTCHA_SITE_KEY`登録も完了
+   済み。`ptt-svc`(Hostingサイト`fir-rtc-de1f4-94f2e`)は無関係と判断し
+   対応不要とした
+3. **Firebase App Check: リリース用Android署名鍵の整備**（2026-08-13、
+   item2の作業中に判明した持ち越し事項）：`ptt-android/app/build.gradle.kts`
+   に`signingConfigs`が存在せず、CI(`android-ci.yml`)も`assembleDebug`
+   のみでリリースビルド自体を行っていない。Playストア配信を計画する
+   タイミングで、Play App Signing方式でのアップロード鍵作成・
+   Google Play Consoleでの実配信用署名鍵確認・そのSHA-256のFirebase
+   App Checkへの追加登録が必要になる（現時点では計画未定のため対応不要、
+   実施時期が決まり次第着手する）
 4. **Firebase App Check: `APP_CHECK_ENFORCE`切り替えタイミングの判断**：
    3クライアントの対応版が実機・ストアに行き渡り、soft-enforce運用下での
    ログ（未対応クライアントからのリクエスト比率）が十分小さくなったことを

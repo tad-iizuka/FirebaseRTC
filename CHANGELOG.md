@@ -39,6 +39,14 @@
   - `ptt-android`: `firebase-appcheck-playintegrity`依存を追加。
     `appcheck/PTTAppCheckProvider.kt`新設（Play Integrityプロバイダ）。
     8ファイル・17箇所の`Request.Builder`組み立て箇所にヘッダー付与を追加
+  - **2026-08-13追記**: リポジトリへの反映後、GitHub Actions実行画面により
+    `token-server CI/CD`・`Android CI`・`iOS CI`・`Web (ptt-client) Deploy`・
+    `Admin Dashboard Deploy`が全てgreenで完走していることを確認した。
+    Firebaseコンソール側でWeb(reCAPTCHA v3)・Android(Play Integrity)・
+    iOS(App Attest)の3クライアント全てのApp Check登録、およびGitHub Actions
+    Variablesへの`APP_CHECK_RECAPTCHA_SITE_KEY`登録も完了した
+    （詳細は`DECISIONS.md`2026-08-13「App Check導入の反映確認・登録作業
+    完了」参照）
 
 ### Changed
 
