@@ -1,19 +1,27 @@
-//
-//  ptt_iosTests.swift
-//  ptt-iosTests
-//
-//  Created by Tadashi on 2026/06/21.
-//
-
+import Foundation
 import Testing
+import LiveKit
 @testable import ptt_ios
 
 struct ptt_iosTests {
-
-    @Test func example() async throws {
-        // Write your test here and use APIs like `#expect(...)` to check expected conditions.
-        // Swift Testing Documentation
-        // https://developer.apple.com/documentation/testing
+    @Test @MainActor func audioWarmupDoesNotBlockMainThread() async throws {
+        try await PTTAudioWorker.run {
+            #expect(!Thread.isMainThread)
+        }
     }
 
+    @Test @MainActor func keepAliveTrackIsMutedBeforePublication() async throws {
+        let track = LocalAudioTrack.createTrack()
+        try await track.mute()
+        #expect(track.isMuted)
+
+    }
+
+    @Test @MainActor func disconnectedPressCannotStartTransmission() {
+        let connection = PTTConnectionManager()
+        connection.startTalking()
+        connection.startTalking()
+        #expect(!connection.isAcquiringTalk)
+        #expect(!connection.isSending)
+    }
 }

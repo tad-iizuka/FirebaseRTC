@@ -7,7 +7,7 @@
 //  [背景] token-server側のmiddleware/requireAppCheck.js(soft-enforce)と
 //  対になる、iOS版の送信側実装。実機(iOS 14+)ではApp Attestプロバイダを使う。
 //  シミュレータはApp Attestに対応していないため、DEBUGビルドかつ
-//  シミュレータ実行時のみDeviceCheckProviderFactory(のAppCheckDebugProvider相当)
+//  シミュレータ実行時のみAppCheckDebugProvider
 //  にフォールバックする設計とし、ローカル開発でシミュレータを使う場合でも
 //  ビルド・起動自体は妨げないようにする。
 //
@@ -21,14 +21,16 @@ import FirebaseAppCheck
 
 final class PTTAppCheckProviderFactory: NSObject, AppCheckProviderFactory {
     func createProvider(with app: FirebaseApp) -> AppCheckProvider? {
-        #if targetEnvironment(simulator)
+        #if DEBUG && targetEnvironment(simulator)
         // シミュレータはSecure Enclaveが無くApp Attestを使えないため、
         // デバッグプロバイダにフォールバックする。デバッグトークンは
         // 初回起動時のコンソールログに出力されるので、Firebase Consoleの
         // 「App Check > アプリ > デバッグトークンを管理」に登録すること。
+        print("[AppCheck] provider=debug simulator=true (register debug token in Firebase Console)")
         return AppCheckDebugProvider(app: app)
         #else
         if #available(iOS 14.0, *) {
+            print("[AppCheck] provider=appAttest environment=production")
             return AppAttestProvider(app: app)
         } else {
             // iOS 14未満(App Attest非対応)向けのフォールバック。
@@ -45,12 +47,35 @@ final class PTTAppCheckProviderFactory: NSObject, AppCheckProviderFactory {
 /// 呼び出し側はヘッダーを付けずにリクエストを継続する。
 enum PTTAppCheck {
     static func token() async -> String? {
-        do {
-            let result = try await AppCheck.appCheck().token(forcingRefresh: false)
-            return result.token
-        } catch {
-            print("[AppCheckトークン取得失敗]", error)
-            return nil
+        await PTTAppCheckTokenSource.shared.token()
+    }
+}
+
+/// Coalesce concurrent app requests; SDK retains responsibility for expiry and refresh.
+private actor PTTAppCheckTokenSource {
+    static let shared = PTTAppCheckTokenSource()
+    private var inFlight: Task<String?, Never>?
+
+    func token() async -> String? {
+        if let inFlight { return await inFlight.value }
+        let task = Task<String?, Never> {
+            let started = DispatchTime.now().uptimeNanoseconds
+            do {
+                let result = try await AppCheck.appCheck().token(forcingRefresh: false)
+                print(String(format: "[AppCheck] result=success elapsed_ms=%.3f",
+                             Double(DispatchTime.now().uptimeNanoseconds - started) / 1_000_000))
+                return result.token
+            } catch {
+                let nsError = error as NSError
+                print(String(format: "[AppCheck] result=failure domain=%@ code=%d elapsed_ms=%.3f",
+                             nsError.domain, nsError.code,
+                             Double(DispatchTime.now().uptimeNanoseconds - started) / 1_000_000))
+                return nil
+            }
         }
+        inFlight = task
+        let result = await task.value
+        inFlight = nil
+        return result
     }
 }

@@ -29,6 +29,7 @@
 //
 
 import Foundation
+import AVFoundation
 import Combine
 import LiveKit
 import AVFAudio
@@ -45,6 +46,9 @@ final class PTTConnectionManager: NSObject, ObservableObject {
     @Published private(set) var participants: [String: PTTParticipantInfo] = [:]
     @Published private(set) var logLines: [String] = []
     @Published private(set) var isSending = false
+    @Published private(set) var isAcquiringTalk = false
+    private var talkAttempt = 0
+    private var talkOperationTask: Task<Void, Never>?
     /// [送話ロック連携] サーバー(routes/talk.js)がLiveKitのRoom Metadataに書き込む
     /// currentTalker(uid)。nilなら誰も発話ロックを保持していない。
     /// 自分以外のuidが入っている間、UI側はPTTボタンを無効化する。
@@ -64,6 +68,17 @@ final class PTTConnectionManager: NSObject, ObservableObject {
     private var roomName = ""
     private var idTokenProvider: (() async throws -> String)?
 
+    private struct TalkRequestContext {
+        let roomName: String
+        let tokenServerURL: String
+        let idTokenProvider: (() async throws -> String)?
+    }
+
+    private var talkRequestContext: TalkRequestContext {
+        TalkRequestContext(roomName: roomName, tokenServerURL: tokenServerURL,
+                           idTokenProvider: idTokenProvider)
+    }
+
     /// PTTボタンが現在物理的に押され続けているか。talk/start の応答待ち中に
     /// ボタンが離された場合を検知するために使う(Web版のpttHeldと同じ役割)。
     private var pttHeld = false
@@ -74,12 +89,11 @@ final class PTTConnectionManager: NSObject, ObservableObject {
     private var talkHeartbeatTask: Task<Void, Never>?
     /// keep-aliveトラック(マイクをmuted状態でpublishし、Egressの
     /// 「最低1トラック」要件を満たすためのもの)を、この接続で既にpublish済みかどうか。
-    /// publishKeepAliveAudioTrackIfNeeded()の冪等性ガードとして使う。
     /// connect()の開始時とdisconnect()でfalseにリセットする。
     private var keepAliveTrackPublished = false
     /// [音声エンジン事前ウォームアップ] AudioManager.shared.startLocalRecording()で
     /// ADMの録音を明示的に開始済みかどうか。disconnect()時にtrueであれば
-    /// stopLocalRecording()で後始末する。詳細はconnect()内のコメント参照。
+    /// stopLocalRecording()で後始末する。同期処理はPTTAudioWorkerで実行する。
     private var localRecordingWarmupActive = false
     /// サーバー側 LOCK_TTL_MS(15秒, token-server/routes/talk.js) より
     /// 十分短い間隔で延長する。Web版のTALK_LOCK_HEARTBEAT_MSと同じ値。
@@ -104,6 +118,7 @@ final class PTTConnectionManager: NSObject, ObservableObject {
         isRecording = false
         recordingStartedAt = nil
         keepAliveTrackPublished = false
+        talkAttempt = 0
 
         Task {
             do {
@@ -116,50 +131,40 @@ final class PTTConnectionManager: NSObject, ObservableObject {
                 try await newRoom.connect(url: livekitURL, token: token)
                 logCurrentAudioSession(context: "room_connected(before_warmup)")
 
-                // [音声エンジン事前ウォームアップ・経緯]
-                // 実機での症状(PTTボタンを押すまでWeb→iOSの音声が一切聞こえず、ボタンを押した
-                // 瞬間に溜まっていた音声が再生される)から、「音声エンジンがRoom接続時点では
-                // 起動しておらず、ローカルのマイク入力を開始した時に初めて起動する」実装に
-                // なっていると判断した。以下2つのAPIを順に試したが、実機診断ログにより
-                // どちらも実際にはエンジンを起動していないことが判明した。
-                //   1. setRecordingAlwaysPreparedMode(true): async throwsであり@MainActor上での
-                //      awaitがハング(疑い)を引き起こし撤回
-                //   2. acquireSessionRequirement(.playbackOnly / .playbackAndRecording):
-                //      SDKソース確認の結果、これは`audioSession.acquire(requirement:)`という
-                //      「要求の登録」のみを行うAPIで、ADM(Audio Device Module)を直接起動する
-                //      ものではないと判明。実機ログでも、この呼び出し直後に
-                //      `AudioManager.shared.isEngineRunning`が`false`のままであることを確認した
-                //      (Bluetooth HFPではなく本体スピーカー/マイクでも同一症状のため、
-                //      Bluetooth固有の問題という仮説も棄却した)
-                // これらを踏まえ、SDKソースで`AudioManager.shared.startLocalRecording()`
-                // (`RTC.audioDeviceModule.initAndStartRecording()`を直接呼ぶ、同期`throws`関数)
-                // を確認した。ドキュメントに「Roomや接続なしでもマイク入力を開始できる」と
-                // 明記されている通り、LiveKitのRoom/トラックpublish(=SDP再ネゴシエーション)とは
-                // 完全に独立してADMを直接起動できるAPIであり、`acquireSessionRequirement`とは
-                // 異なり実際に`isEngineRunning`をtrueにする効果を持つ想定である。これを採用する。
-                //
-                // 音声を実際に外部へ送信するわけではない(トラックがpublishされていないため)。
-                // 後でPTTボタンが押されてsetMicrophone(enabled: true)が呼ばれた際、内部で
-                // 二重にrecordingを開始しようとする可能性があるが、WebRTCのADM実装は通常
-                // start/stopを冪等(既に開始中なら無害)に扱うため許容する。disconnect()で
-                // stopLocalRecording()を呼び後始末する。失敗してもRoom接続自体は継続してよい
-                // (あくまで再生開始を早めるための最適化)ため、独立したdo/catchで握りつぶす。
-                do {
-                    try AudioManager.shared.startLocalRecording()
-                    localRecordingWarmupActive = true
-                    appendLog(String(localized: "[診断] 音声エンジンの事前ウォームアップ(startLocalRecording)を開始しました"))
-                } catch {
-                    appendLog(String(format: NSLocalizedString("音声エンジンの事前ウォームアップに失敗しました(接続は継続): %@", comment: "Engine warmup failure (non-fatal)"), error.localizedDescription))
+                guard self.room === newRoom, case .connecting = status else { return }
+                let preparationStarted = DispatchTime.now().uptimeNanoseconds
+                let permissionGranted = await LiveKitSDK.ensureDeviceAccess(for: [.audio])
+                appendLog("[PTTPrepare] microphone_permission=\(permissionGranted) elapsed_ms=\(Double(DispatchTime.now().uptimeNanoseconds - preparationStarted) / 1_000_000)")
+                guard self.room === newRoom, case .connecting = status else { return }
+                if permissionGranted {
+                    let warmupStarted = DispatchTime.now().uptimeNanoseconds
+                    appendLog("[PTTPrepare] warmup_begin")
+                    do {
+                        try await PTTAudioWorker.run { try AudioManager.shared.startLocalRecording() }
+                        guard self.room === newRoom, case .connecting = status else {
+                            try? await PTTAudioWorker.run { try AudioManager.shared.stopLocalRecording() }
+                            return
+                        }
+                        localRecordingWarmupActive = true
+                        appendLog("[PTTPrepare] warmup_complete elapsed_ms=\(Double(DispatchTime.now().uptimeNanoseconds - warmupStarted) / 1_000_000) engine=\(AudioManager.shared.isEngineRunning)")
+                    } catch {
+                        appendLog("[PTTPrepare] warmup_failed: \(error.localizedDescription)")
+                    }
+                    // Publish only a disabled track. Never enable a microphone before talk/start succeeds.
+                    do {
+                        let track = LocalAudioTrack.createTrack()
+                        try await track.mute()
+                        let publication = try await newRoom.localParticipant.publish(audioTrack: track)
+                        keepAliveTrackPublished = publication.isMuted
+                        appendLog("[PTTPrepare] muted_publish_complete muted=\(publication.isMuted)")
+                    } catch {
+                        appendLog("[PTTPrepare] muted_publish_failed: \(error.localizedDescription)")
+                    }
                 }
                 logCurrentAudioSession(context: "room_connected(after_warmup)")
-                appendLog(String(format: NSLocalizedString("[診断] isEngineRunning=%@", comment: "Engine running diagnostic"), AudioManager.shared.isEngineRunning ? "true" : "false"))
+                appendLog("[PTTPrepare] complete elapsed_ms=\(Double(DispatchTime.now().uptimeNanoseconds - preparationStarted) / 1_000_000) engine=\(AudioManager.shared.isEngineRunning) muted_track=\(keepAliveTrackPublished)")
 
-                // [CallKit統合を撤回(2026-07-30)] 以前はCallKit(PTTCallKitManager)の
-                // didActivateがエンジンを.defaultに戻すまで待つ必要があり、connect直後に
-                // ここでkeep-aliveトラックをpublishすると不安定になっていた。CallKit連携を
-                // 撤回し、ptt_iosApp.swiftの起動時点でエンジンが常に.default(利用可能)に
-                // なったため、その問題は解消されている。connect直後に直接publishする。
-                publishKeepAliveAudioTrackIfNeeded()
+                guard self.room === newRoom, case .connecting = status else { return }
 
                 // 接続時点で既に誰かが発話ロックを保持していた場合や、既に録音中だった場合に
                 // 備え、room.metadataから初期状態を読み込む(メタデータ更新デリゲートは
@@ -193,41 +198,26 @@ final class PTTConnectionManager: NSObject, ObservableObject {
         }
     }
 
-    /// `connect()`から接続完了直後に呼ばれる。keep-aliveトラック
-    /// (マイクをmuted状態でpublish。Egress起動に必要な「最低1トラック」要件を
-    /// 満たすためのもの。token-server/routes/recording.js参照)をpublishする。
-    ///
-    /// [CallKit統合を撤回(2026-07-30)] 以前はCallKit(PTTCallKitManager)のdidActivateが
-    /// エンジンを.defaultに戻すまで待つ設計だったが撤回した。エンジンは起動時から
-    /// 常に.default(利用可能)なので、connect直後にそのまま呼んでよい。
-    ///
-    /// - 既にpublish済みの接続では何もしない(冪等性のためのガード)。
-    /// - 現在PTTで送話中(isSending)の場合も何もしない
-    ///   (ここでenabled: falseを呼ぶと送話中のマイクをミュートしてしまう)。
-    func publishKeepAliveAudioTrackIfNeeded() {
-        guard let room, case .connected = status else { return }
-        guard !keepAliveTrackPublished, !isSending else { return }
-
-        Task {
-            do {
-                try await room.localParticipant.setMicrophone(enabled: false)
-                keepAliveTrackPublished = true
-            } catch {
-                appendLog(String(format: NSLocalizedString("keep-aliveトラックのpublishに失敗しました: %@", comment: "Keep-alive track publish failure"), error.localizedDescription))
-            }
-        }
-    }
-
     func disconnect() {
         guard let room else { return }
+        status = .disconnected
         pttHeld = false
+        isAcquiringTalk = false
         talkRequestToken += 1
         stopTalkHeartbeat()
-        Task {
+        let previous = talkOperationTask
+        let context = talkRequestContext
+        talkOperationTask = Task {
+            await previous?.value
+            do {
+                try await room.localParticipant.setMicrophone(enabled: false)
+            } catch {
+                await room.disconnect()
+            }
             // 自分がロックを保持したまま切断すると、サーバー側はTTL(15秒)経過まで
             // 他の人をブロックし続けてしまうため、ベストエフォートで明示的に解放しておく。
             // (失敗しても実害はTTL経過まで待つだけなので、エラーは握りつぶしてよい)
-            try? await self.talkRequest(.stop)
+            try? await self.talkRequest(.stop, context: context)
 
             await room.disconnect()
             self.room = nil
@@ -238,7 +228,7 @@ final class PTTConnectionManager: NSObject, ObservableObject {
             recordingStartedAt = nil
             keepAliveTrackPublished = false
             if localRecordingWarmupActive {
-                try? AudioManager.shared.stopLocalRecording()
+                try? await PTTAudioWorker.run { try AudioManager.shared.stopLocalRecording() }
                 localRecordingWarmupActive = false
             }
             status = .disconnected
@@ -248,69 +238,104 @@ final class PTTConnectionManager: NSObject, ObservableObject {
 
     /// PTTボタンが押された
     func startTalking() {
-        guard let room, case .connected = status, !isSending else { return }
-        // 他人が発話ロックを保持中の場合、UI側(ContentView)がボタンのヒットテストを
-        // 無効化する想定だが、念のためここでも二重に弾く。
+        // DragGesture.onChanged fires repeatedly while held. Accept one request per press.
+        guard let room, case .connected = status, !pttHeld, !isSending else { return }
         guard currentTalkerUid == nil else { return }
-
+        talkAttempt += 1
+        let trace = PTTStartTrace(attempt: talkAttempt)
+        trace.mark("button_event")
+        trace.mark("ui_change_begin")
         pttHeld = true
+        isAcquiringTalk = true
+        trace.mark("ui_pending_complete")
         talkRequestToken += 1
         let myToken = talkRequestToken
+        let previous = talkOperationTask
+        let context = talkRequestContext
 
-        Task {
+        talkOperationTask = Task {
+            // Serialize start/stop so a delayed stop cannot release a newer press's lock.
+            await previous?.value
+            trace.mark("operation_queue_complete")
+            guard self.room === room, self.pttHeld, myToken == self.talkRequestToken else {
+                trace.mark("cancelled_before_acquire")
+                return
+            }
             do {
-                try await talkRequest(.start)
+                trace.mark("lock_acquire_begin")
+                try await talkRequest(.start, trace: trace, context: context)
+                trace.mark("lock_acquire_complete")
             } catch {
-                // 他人が発話中(409 talk_locked)など。RoomMetadataの更新でほぼ同時に
-                // ボタンも無効化されるはずだが、競合(ほぼ同時押下)によるレースは起こりうる。
                 appendLog(String(format: NSLocalizedString("発話を開始できませんでした: %@", comment: "Talk start failure"), error.localizedDescription))
-                if myToken == self.talkRequestToken { self.pttHeld = false }
+                if myToken == self.talkRequestToken {
+                    // Keep the physical-press guard until release, including failures.
+                    self.isAcquiringTalk = false
+                }
+                trace.mark("lock_acquire_failed_ui_complete")
                 return
             }
 
-            // [レース対策] talk/start の応答待ち(Cloud Runのコールドスタート等で
-            // 1秒近くかかることがある)の間にボタンが離されていた場合、ここで送話を
-            // 開始してしまうと「離したのに喋り続ける」状態になる。ロックは既に
-            // 取得できてしまっているので、使わないままサーバー側に解放を伝える。
-            guard self.pttHeld, myToken == self.talkRequestToken else {
-                Task { try? await self.talkRequest(.stop) }
+            // stopTalking/disconnect has queued cleanup if the button was released.
+            guard self.room === room, self.pttHeld, myToken == self.talkRequestToken else {
+                trace.mark("released_before_microphone")
                 return
             }
-
             do {
-                appendLog(String(format: NSLocalizedString("[診断] マイク有効化開始 isEngineRunning(前)=%@", comment: "Mic enable start diagnostic"), AudioManager.shared.isEngineRunning ? "true" : "false"))
-                let micEnableStart = Date()
-                try await room.localParticipant.setMicrophone(enabled: true)
-                let micEnableElapsed = Date().timeIntervalSince(micEnableStart)
-                appendLog(String(format: NSLocalizedString("[診断] マイク有効化完了 所要%.2f秒 isEngineRunning(後)=%@", comment: "Mic enable complete diagnostic"), micEnableElapsed, AudioManager.shared.isEngineRunning ? "true" : "false"))
+                trace.mark("microphone_enable_begin")
+                guard let publication = try await room.localParticipant.setMicrophone(enabled: true) else {
+                    throw LiveKitError(.invalidState, message: "Microphone publication missing")
+                }
+                trace.mark("microphone_enable_complete")
+                // The SDK returns after publish/unmute. This is not a first RTP packet timestamp.
+                trace.mark("audio_publish_or_unmute_complete muted=\(publication.isMuted)")
+                guard self.room === room, self.pttHeld, myToken == self.talkRequestToken else {
+                    // Keep the lock until audio is muted; queued stop performs release afterward.
+                    try await room.localParticipant.setMicrophone(enabled: false)
+                    trace.mark("released_during_enable_muted")
+                    return
+                }
                 self.isSending = true
-                self.startTalkHeartbeat()
+                self.isAcquiringTalk = false
+                self.startTalkHeartbeat(context: context)
+                trace.mark("ui_sending_complete")
             } catch {
                 self.appendLog(String(format: NSLocalizedString("マイク有効化エラー: %@", comment: "Microphone enable error"), error.localizedDescription))
-                Task { try? await self.talkRequest(.stop) }
+                if myToken == self.talkRequestToken {
+                    // Keep the physical-press guard until release, including failures.
+                    self.isAcquiringTalk = false
+                }
+                // Do not release a granted lock while a partially enabled mic might send.
+                do {
+                    try await room.localParticipant.setMicrophone(enabled: false)
+                    try? await self.talkRequest(.stop, context: context)
+                } catch {
+                    await room.disconnect()
+                }
+                trace.mark("microphone_failed_cleanup_complete")
             }
         }
     }
 
-    /// PTTボタンが離された。
-    /// - Parameter forced: heartbeat失敗などサーバー側で既にロックを失っている場合にtrue。
-    ///   この場合 talk/stop の呼び出し自体は冪等なので害はないが、二重に呼ぶ必要はない。
+    /// Queue microphone mute before lock release, including release during acquisition/publish.
     func stopTalking(forced: Bool = false) {
         pttHeld = false
-        talkRequestToken += 1 // 進行中のstartTalkingがあれば、その結果を無視させる
+        isAcquiringTalk = false
+        talkRequestToken += 1
         guard let room else { return }
         stopTalkHeartbeat()
         isSending = false
-
-        Task {
+        let previous = talkOperationTask
+        let context = talkRequestContext
+        talkOperationTask = Task {
+            await previous?.value
             do {
                 try await room.localParticipant.setMicrophone(enabled: false)
             } catch {
                 self.appendLog(String(format: NSLocalizedString("マイク無効化エラー: %@", comment: "Microphone disable error"), error.localizedDescription))
+                // Disconnect transport before allowing another participant to acquire the lock.
+                await room.disconnect()
             }
-            if !forced {
-                try? await self.talkRequest(.stop)
-            }
+            if !forced { try? await self.talkRequest(.stop, context: context) }
         }
     }
 
@@ -322,7 +347,7 @@ final class PTTConnectionManager: NSObject, ObservableObject {
         case stop
     }
 
-    private func startTalkHeartbeat() {
+    private func startTalkHeartbeat(context: TalkRequestContext) {
         stopTalkHeartbeat()
         talkHeartbeatTask = Task { [weak self] in
             guard let self else { return }
@@ -330,7 +355,7 @@ final class PTTConnectionManager: NSObject, ObservableObject {
                 try? await Task.sleep(nanoseconds: Self.talkLockHeartbeatNanoseconds)
                 if Task.isCancelled { break }
                 do {
-                    try await self.talkRequest(.heartbeat)
+                    try await self.talkRequest(.heartbeat, context: context)
                 } catch {
                     // サーバー側で最大発話時間(MAX_HOLD_MS)を超えた等、ロックを失った
                     // 場合はここに来る。本来は次のRoomMetadata更新でもUIが追従するが、
@@ -348,24 +373,32 @@ final class PTTConnectionManager: NSObject, ObservableObject {
         talkHeartbeatTask = nil
     }
 
-    private func talkRequest(_ action: TalkAction) async throws {
-        guard let idTokenProvider else {
+    private func talkRequest(_ action: TalkAction, trace: PTTStartTrace? = nil, context: TalkRequestContext? = nil) async throws {
+        let context = context ?? talkRequestContext
+        guard let idTokenProvider = context.idTokenProvider else {
             throw TokenFetchError.serverError(statusCode: 401, message: String(localized: "サインインしていません"))
         }
+        trace?.mark("firebase_auth_begin")
         let idToken = try await idTokenProvider()
+        trace?.mark("firebase_auth_complete")
 
-        let encodedRoomId = roomName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? roomName
-        guard let url = URL(string: "\(tokenServerURL)/rooms/\(encodedRoomId)/talk/\(action.rawValue)") else {
+        let encodedRoomId = context.roomName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? context.roomName
+        guard let url = URL(string: "\(context.tokenServerURL)/rooms/\(encodedRoomId)/talk/\(action.rawValue)") else {
             throw URLError(.badURL)
         }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+        trace?.mark("firebase_appcheck_begin")
         if let appCheckToken = await PTTAppCheck.token() {
             request.setValue(appCheckToken, forHTTPHeaderField: "X-Firebase-AppCheck")
         }
 
+        trace?.mark("firebase_appcheck_complete")
+        request.setValue(trace?.id, forHTTPHeaderField: "X-PTT-Trace-ID")
+        trace?.mark("talk_http_begin")
         let (data, response) = try await URLSession.shared.data(for: request)
+        trace?.mark("talk_http_complete")
         guard let http = response as? HTTPURLResponse else {
             throw URLError(.badServerResponse)
         }
@@ -485,8 +518,13 @@ extension PTTConnectionManager: RoomDelegate {
 
     nonisolated func room(_ room: Room, didUpdateConnectionState connectionState: ConnectionState, from oldConnectionState: ConnectionState) {
         Task { @MainActor in
+            guard self.room === room else { return }
             self.appendLog(String(format: NSLocalizedString("接続状態: %@ → %@", comment: "Connection state changed"), String(describing: oldConnectionState), String(describing: connectionState)))
             if connectionState == .disconnected {
+                self.pttHeld = false
+                self.isAcquiringTalk = false
+                self.talkRequestToken += 1
+                self.stopTalkHeartbeat()
                 self.participants.removeAll()
                 self.isSending = false
                 self.currentTalkerUid = nil
@@ -494,7 +532,7 @@ extension PTTConnectionManager: RoomDelegate {
                 self.recordingStartedAt = nil
                 self.room = nil
                 if self.localRecordingWarmupActive {
-                    try? AudioManager.shared.stopLocalRecording()
+                    try? await PTTAudioWorker.run { try AudioManager.shared.stopLocalRecording() }
                     self.localRecordingWarmupActive = false
                 }
                 if case .error = self.status {

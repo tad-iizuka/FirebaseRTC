@@ -27,3 +27,45 @@ func logCurrentAudioSession(context: String) {
           "route.outputs=\(s.currentRoute.outputs.map { $0.portType.rawValue }) " +
           "route.inputs=\(s.currentRoute.inputs.map { $0.portType.rawValue })")
 }
+
+/// Monotonic milestones; no tokens, user IDs or audio are logged.
+@MainActor
+final class PTTStartTrace {
+    let id = UUID().uuidString
+    private let attempt: Int
+    private let started = DispatchTime.now().uptimeNanoseconds
+    private var previous: UInt64
+
+    init(attempt: Int) {
+        self.attempt = attempt
+        previous = started
+    }
+
+    func mark(_ stage: String) {
+        let now = DispatchTime.now().uptimeNanoseconds
+        print(String(format: "[PTTStart] id=%@ attempt=%d first=%@ stage=%@ total_ms=%.3f delta_ms=%.3f main=%@",
+                     id, attempt, attempt == 1 ? "true" : "false", stage,
+                     Double(now - started) / 1_000_000,
+                     Double(now - previous) / 1_000_000,
+                     Thread.isMainThread ? "true" : "false"))
+        previous = now
+    }
+}
+
+/// Synchronous ADM operations can block. Keep them on a serial worker queue.
+enum PTTAudioWorker {
+    nonisolated private static let queue = DispatchQueue(label: "ptt.audio.worker", qos: .userInitiated)
+
+    nonisolated static func run(_ operation: @escaping @Sendable () throws -> Void) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            queue.async {
+                do {
+                    try operation()
+                    continuation.resume()
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+}

@@ -35,6 +35,7 @@
  */
 
 const express = require('express');
+const { performance } = require('node:perf_hooks');
 const { db } = require('../lib/firebaseAdmin');
 const { syncRoomMetadata } = require('../lib/roomMetadata');
 const { requireFirebaseAuth, requireRoomMembership } = require('../middleware/requireAuth');
@@ -78,9 +79,23 @@ router.post(
   const { roomId } = req.params;
   const roomRef = db.collection('rooms').doc(roomId);
 
+  const traceId = /^[a-f0-9-]{36}$/i.test(req.get('X-PTT-Trace-ID') || '')
+    ? req.get('X-PTT-Trace-ID') : 'none';
+  const started = performance.now();
+  let previous = started;
+  let transactionAttempt = 0;
+  const mark = (stage) => {
+    const now = performance.now();
+    console.log(`[PTTStartServer] id=${traceId} stage=${stage} total_ms=${(now - started).toFixed(3)} delta_ms=${(now - previous).toFixed(3)} tx_attempt=${transactionAttempt}`);
+    previous = now;
+  };
   try {
+    mark('firestore_transaction_begin');
     const result = await db.runTransaction(async (tx) => {
+      transactionAttempt += 1;
+      mark('firestore_read_begin');
       const snap = await tx.get(roomRef);
+      mark('firestore_read_complete');
       if (!snap.exists) {
         throw { httpStatus: 404, message: 'ルームが見つかりません' };
       }
@@ -105,14 +120,18 @@ router.post(
       return talkLock;
     });
 
+    mark('firestore_transaction_commit_complete');
+
     // LiveKit管理APIへのメタデータ更新(syncRoomMetadata)は、他クライアントへの
     // 周知が目的の副作用にすぎず、ロックの成否(=Firestoreトランザクションの結果)には
     // 影響しない。実測でこの呼び出しに1〜2秒かかることが分かったため、
     // クライアントへのレスポンスをブロックしないよう意図的にawaitしない。
     syncRoomMetadata(roomId);
     console.log(`[talk/start] room=${roomId} uid=${uid}`);
+    mark('response_ready');
     res.json({ acquired: true, expiresInMs: LOCK_TTL_MS });
   } catch (e) {
+    mark('acquire_failed');
     if (e && e.httpStatus) {
       return res.status(e.httpStatus).json({ error: e.message, code: e.code });
     }

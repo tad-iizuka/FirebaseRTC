@@ -1429,7 +1429,7 @@ struct ContentView: View {
         return VStack(spacing: 14) {
             Circle()
                 .strokeBorder(connection.isSending ? Color.pttAccent : .pttLine, lineWidth: 2)
-                .background(Circle().fill(.pttPanel.opacity(0.6)))
+                .background(Circle().fill(connection.isAcquiringTalk ? Color.pttAccent.opacity(0.2) : .pttPanel.opacity(0.6)))
                 .frame(width: 150, height: 150)
                 .overlay(
                     Text(talkAreaLabel)
@@ -1438,7 +1438,7 @@ struct ContentView: View {
                         .foregroundColor(connection.isSending ? .pttAccent : .pttMuted)
                         .padding(.horizontal, 10)
                 )
-                .scaleEffect(connection.isSending ? 0.97 : 1.0)
+                .scaleEffect(connection.isSending || connection.isAcquiringTalk ? 0.97 : 1.0)
                 .opacity(canTalk ? 1.0 : 0.3)
                 .gesture(
                     DragGesture(minimumDistance: 0)
@@ -1492,6 +1492,7 @@ struct ContentView: View {
 
     private var talkAreaLabel: String {
         if connection.isSending { return String(localized: "送話中") }
+        if connection.isAcquiringTalk { return String(localized: "発話権を取得中…") }
         if someoneElseIsTalking {
             return String(format: NSLocalizedString("%@ が送話中", comment: "Someone else is talking"), currentTalkerName)
         }

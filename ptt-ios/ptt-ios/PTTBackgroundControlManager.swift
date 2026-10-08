@@ -153,7 +153,8 @@ final class PTTBackgroundControlManager: NSObject, ObservableObject {
             guard let optionsValue = info[AVAudioSessionInterruptionOptionKey] as? UInt else { return }
             let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
             if options.contains(.shouldResume) {
-                try? AVAudioSession.sharedInstance().setActive(true)
+                // LiveKit owns audio-session reactivation; avoid a main-thread setActive.
+                logCurrentAudioSession(context: "interruption_ended")
             }
         @unknown default:
             break
