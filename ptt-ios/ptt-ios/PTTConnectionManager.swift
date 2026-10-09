@@ -45,8 +45,13 @@ final class PTTConnectionManager: NSObject, ObservableObject {
     /// uid -> 表示用情報 の辞書に置き換えた。ローカル参加者(自分)は含めない。
     @Published private(set) var participants: [String: PTTParticipantInfo] = [:]
     @Published private(set) var logLines: [String] = []
+    @Published private(set) var isStoppingTalk = false
+    @Published private(set) var talkStopError: String?
     @Published private(set) var isSending = false
     @Published private(set) var isAcquiringTalk = false
+    private var publishDiagnosticGeneration = "none"
+    private weak var diagnosticPreparedTrack: LocalAudioTrack?
+    private var activeTalkTrace: PTTStartTrace?
     private var talkAttempt = 0
     private var talkOperationTask: Task<Void, Never>?
     /// [送話ロック連携] サーバー(routes/talk.js)がLiveKitのRoom Metadataに書き込む
@@ -91,20 +96,73 @@ final class PTTConnectionManager: NSObject, ObservableObject {
     /// 「最低1トラック」要件を満たすためのもの)を、この接続で既にpublish済みかどうか。
     /// connect()の開始時とdisconnect()でfalseにリセットする。
     private var keepAliveTrackPublished = false
-    /// [音声エンジン事前ウォームアップ] AudioManager.shared.startLocalRecording()で
-    /// ADMの録音を明示的に開始済みかどうか。disconnect()時にtrueであれば
-    /// stopLocalRecording()で後始末する。同期処理はPTTAudioWorkerで実行する。
-    private var localRecordingWarmupActive = false
     /// サーバー側 LOCK_TTL_MS(15秒, token-server/routes/talk.js) より
     /// 十分短い間隔で延長する。Web版のTALK_LOCK_HEARTBEAT_MSと同じ値。
     private static let talkLockHeartbeatNanoseconds: UInt64 = 5_000_000_000
+
+    /// A session owns its task and Room, including the period before token acquisition.
+    private final class ConnectionSession {
+        let id = UUID().uuidString
+        var valid = true
+        var room: Room?
+        var task: Task<Void, Never>?
+        var warmedUp = false
+        var connected = false
+    }
+
+    /// Narrow async boundaries for deterministic lifecycle tests; live defaults preserve SDK calls.
+    struct ConnectionOperations {
+        var token: (() async throws -> String)?
+        var connect: (Room, String, String) async throws -> Void = { try await $0.connect(url: $1, token: $2) }
+        var permission: () async -> Bool = { await LiveKitSDK.ensureDeviceAccess(for: [.audio]) }
+        var warmup: () async throws -> Void = { try await PTTAudioWorker.run { try AudioManager.shared.startLocalRecording() } }
+        var stopWarmup: () async -> Void = { try? await PTTAudioWorker.run { try AudioManager.shared.stopLocalRecording() } }
+        var publish: (Room, LocalAudioTrack) async throws -> Bool = { try await $0.localParticipant.publish(audioTrack: $1).isMuted }
+        var disconnect: (Room) async -> Void = { await $0.disconnect() }
+        var mute: (Room) async throws -> Void = { _ = try await $0.localParticipant.setMicrophone(enabled: false) }
+        var releaseTalk: (() async -> Void)?
+    }
+
+    private var connectionSession: ConnectionSession?
+    private var connectionCleanupTask: Task<Void, Never>?
+    private let connectionOperations: ConnectionOperations
+
+    /// Async boundaries for deterministic PTT tests. Nil uses the original live operation.
+    struct TalkOperations {
+        var request: ((String) async throws -> Void)?
+        var enable: ((Room) async throws -> Void)?
+    }
+    private let talkOperations: TalkOperations
+
+    func waitForTalkOperations() async { await talkOperationTask?.value }
+
+    init(connectionOperations: ConnectionOperations = ConnectionOperations(), talkOperations: TalkOperations = TalkOperations()) {
+        self.talkOperations = talkOperations
+        self.connectionOperations = connectionOperations
+        super.init()
+    }
+
+    private func owns(_ session: ConnectionSession) -> Bool {
+        connectionSession?.id == session.id && session.valid && !Task<Never, Never>.isCancelled
+            && (session.room == nil || self.room === session.room)
+    }
+
+    private func ownsRoom(_ room: Room) -> Bool {
+        guard let session = connectionSession else { return false }
+        return session.valid && session.room === room && self.room === room
+    }
+
+    // Read-only synchronization points used by lifecycle tests.
+    var ownedConnectionRoom: Room? { connectionSession?.room }
+    func waitForConnectionPreparation() async { await connectionSession?.task?.value }
+    func waitForConnectionCleanup() async { await connectionCleanupTask?.value }
 
     // MARK: - Public API
 
     /// - Parameter idTokenProvider: token-server呼び出し時に都度呼ばれ、有効なFirebase ID Tokenを
     ///   返すクロージャ。呼び出し側(PTTAuthManager)が期限切れ検知・自動リフレッシュを担う。
     func connect(tokenServerURL: String, livekitURL: String, room roomName: String, idTokenProvider: @escaping () async throws -> String) {
-        guard room == nil else {
+        guard connectionSession == nil else {
             appendLog(String(localized: "すでに接続中/接続試行中です"))
             return
         }
@@ -119,52 +177,86 @@ final class PTTConnectionManager: NSObject, ObservableObject {
         recordingStartedAt = nil
         keepAliveTrackPublished = false
         talkAttempt = 0
+        let session = ConnectionSession()
+        connectionSession = session
+        let previousCleanup = connectionCleanupTask
+        let diagnosticGeneration = session.id
+        publishDiagnosticGeneration = diagnosticGeneration
+        diagnosticPreparedTrack = nil
+        print("[PTTConnection] generation=\(session.id) stage=prepare_begin uptime_ns=\(DispatchTime.now().uptimeNanoseconds)")
 
-        Task {
+        session.task = Task {
+            defer {
+                session.task = nil
+                print("[PTTConnection] generation=\(session.id) stage=prepare_task_complete uptime_ns=\(DispatchTime.now().uptimeNanoseconds)")
+            }
             do {
-                let token = try await fetchToken()
+                // AudioManager is shared: never let old teardown stop a new warmup.
+                await previousCleanup?.value
+                guard owns(session) else { return }
+                let token: String
+                if let tokenOperation = connectionOperations.token {
+                    token = try await tokenOperation()
+                } else {
+                    token = try await fetchToken(tokenServerURL: tokenServerURL, roomName: roomName, idTokenProvider: idTokenProvider)
+                }
+                guard owns(session) else { return }
                 appendLog(String(localized: "トークン取得成功"))
 
                 let newRoom = Room(delegate: self)
+                session.room = newRoom
                 room = newRoom
 
-                try await newRoom.connect(url: livekitURL, token: token)
+                logPTTPublishState(stage: "room_connect_begin", generation: diagnosticGeneration, room: newRoom, currentRoom: self.room)
+                try await connectionOperations.connect(newRoom, livekitURL, token)
+                guard owns(session) else { return }
+                session.connected = true
+                logPTTPublishState(stage: "room_connect_complete", generation: diagnosticGeneration, room: newRoom, currentRoom: self.room)
                 logCurrentAudioSession(context: "room_connected(before_warmup)")
 
-                guard self.room === newRoom, case .connecting = status else { return }
+                guard owns(session), case .connecting = status else { return }
                 let preparationStarted = DispatchTime.now().uptimeNanoseconds
-                let permissionGranted = await LiveKitSDK.ensureDeviceAccess(for: [.audio])
+                let permissionGranted = await connectionOperations.permission()
+                guard owns(session) else { return }
                 appendLog("[PTTPrepare] microphone_permission=\(permissionGranted) elapsed_ms=\(Double(DispatchTime.now().uptimeNanoseconds - preparationStarted) / 1_000_000)")
-                guard self.room === newRoom, case .connecting = status else { return }
+                guard owns(session), case .connecting = status else { return }
                 if permissionGranted {
                     let warmupStarted = DispatchTime.now().uptimeNanoseconds
                     appendLog("[PTTPrepare] warmup_begin")
                     do {
-                        try await PTTAudioWorker.run { try AudioManager.shared.startLocalRecording() }
-                        guard self.room === newRoom, case .connecting = status else {
-                            try? await PTTAudioWorker.run { try AudioManager.shared.stopLocalRecording() }
-                            return
-                        }
-                        localRecordingWarmupActive = true
+                        try await connectionOperations.warmup()
+                        // Ownership stays with this session even if exit happened during the await.
+                        session.warmedUp = true
+                        guard owns(session) else { return }
                         appendLog("[PTTPrepare] warmup_complete elapsed_ms=\(Double(DispatchTime.now().uptimeNanoseconds - warmupStarted) / 1_000_000) engine=\(AudioManager.shared.isEngineRunning)")
                     } catch {
+                        guard owns(session) else { return }
                         appendLog("[PTTPrepare] warmup_failed: \(error.localizedDescription)")
                     }
                     // Publish only a disabled track. Never enable a microphone before talk/start succeeds.
+                    let track = await LocalAudioTrack.createTrack()
+                    diagnosticPreparedTrack = track
                     do {
-                        let track = LocalAudioTrack.createTrack()
+                        logPTTPublishState(stage: "track_created_mute_begin", generation: diagnosticGeneration, room: newRoom, currentRoom: self.room, track: track)
                         try await track.mute()
-                        let publication = try await newRoom.localParticipant.publish(audioTrack: track)
-                        keepAliveTrackPublished = publication.isMuted
-                        appendLog("[PTTPrepare] muted_publish_complete muted=\(publication.isMuted)")
+                        guard owns(session) else { return }
+                        logPTTPublishState(stage: "mute_complete_publish_begin", generation: diagnosticGeneration, room: newRoom, currentRoom: self.room, track: track)
+                        let publishedMuted = try await connectionOperations.publish(newRoom, track)
+                        guard owns(session) else { return }
+                        logPTTPublishState(stage: "publish_complete_before_result", generation: diagnosticGeneration, room: newRoom, currentRoom: self.room, track: track)
+                        keepAliveTrackPublished = publishedMuted
+                        appendLog("[PTTPrepare] muted_publish_complete muted=\(publishedMuted)")
                     } catch {
+                        guard owns(session) else { return }
+                        logPTTPublishState(stage: "publish_failed", generation: diagnosticGeneration, room: newRoom, currentRoom: self.room, track: track)
                         appendLog("[PTTPrepare] muted_publish_failed: \(error.localizedDescription)")
                     }
                 }
+                guard owns(session) else { return }
                 logCurrentAudioSession(context: "room_connected(after_warmup)")
                 appendLog("[PTTPrepare] complete elapsed_ms=\(Double(DispatchTime.now().uptimeNanoseconds - preparationStarted) / 1_000_000) engine=\(AudioManager.shared.isEngineRunning) muted_track=\(keepAliveTrackPublished)")
 
-                guard self.room === newRoom, case .connecting = status else { return }
+                guard owns(session), case .connecting = status else { return }
 
                 // 接続時点で既に誰かが発話ロックを保持していた場合や、既に録音中だった場合に
                 // 備え、room.metadataから初期状態を読み込む(メタデータ更新デリゲートは
@@ -191,58 +283,128 @@ final class PTTConnectionManager: NSObject, ObservableObject {
                 status = .connected(room: roomName)
                 appendLog(String(format: NSLocalizedString("ルーム接続完了: room=%@", comment: "Room connected log"), roomName))
             } catch {
+                // Intentional exit invalidates the generation before cancellation is requested.
+                guard owns(session) else { return }
                 appendLog(String(format: NSLocalizedString("接続エラー: %@", comment: "Connection error log"), error.localizedDescription))
                 status = .error(error.localizedDescription)
-                room = nil
+                retireConnection(session)
             }
         }
     }
 
     func disconnect() {
-        guard let room else { return }
+        guard let session = connectionSession else { return }
         status = .disconnected
+        retireConnection(session, releaseTalkLock: true)
+    }
+
+    private func retireConnection(_ session: ConnectionSession, releaseTalkLock: Bool = false) {
+        guard connectionSession?.id == session.id else { return }
+        screenPress = nil
+        isStoppingTalk = false
+        talkStopError = nil
+        let ownedRoom = session.room
+        let prepareTask = session.task
+        let previousCleanup = connectionCleanupTask
+        let previousTalk = talkOperationTask
+        let context = talkRequestContext
+        let trace = activeTalkTrace
+        session.valid = false
+        connectionSession = nil
+        prepareTask?.cancel()
+        print("[PTTConnection] generation=\(session.id) stage=exit_invalidated room_created=\(ownedRoom != nil) prepare_cancel_requested=\(prepareTask != nil) uptime_ns=\(DispatchTime.now().uptimeNanoseconds)")
+        self.room = nil
+        if let ownedRoom {
+            logPTTPublishState(stage: "disconnect_requested_prepare_task_cancel", generation: session.id, room: ownedRoom, currentRoom: nil, track: diagnosticPreparedTrack)
+        }
+        trace?.mark("stop_requested source=disconnect")
         pttHeld = false
         isAcquiringTalk = false
         talkRequestToken += 1
         stopTalkHeartbeat()
-        let previous = talkOperationTask
-        let context = talkRequestContext
-        talkOperationTask = Task {
-            await previous?.value
-            do {
-                try await room.localParticipant.setMicrophone(enabled: false)
-            } catch {
-                await room.disconnect()
-            }
-            // 自分がロックを保持したまま切断すると、サーバー側はTTL(15秒)経過まで
-            // 他の人をブロックし続けてしまうため、ベストエフォートで明示的に解放しておく。
-            // (失敗しても実害はTTL経過まで待つだけなので、エラーは握りつぶしてよい)
-            try? await self.talkRequest(.stop, context: context)
+        participants.removeAll()
+        isSending = false
+        currentTalkerUid = nil
+        isRecording = false
+        recordingStartedAt = nil
+        keepAliveTrackPublished = false
 
-            await room.disconnect()
-            self.room = nil
-            participants.removeAll()
-            isSending = false
-            currentTalkerUid = nil
-            isRecording = false
-            recordingStartedAt = nil
-            keepAliveTrackPublished = false
-            if localRecordingWarmupActive {
-                try? await PTTAudioWorker.run { try AudioManager.shared.stopLocalRecording() }
-                localRecordingWarmupActive = false
+        let cleanup = Task {
+            await previousCleanup?.value
+            await previousTalk?.value
+            if let ownedRoom {
+                do {
+                    let began = trace?.muteBegan(reason: "disconnect")
+                    do {
+                        try await self.connectionOperations.mute(ownedRoom)
+                        if let began { trace?.muteEnded(began: began, success: true, reason: "disconnect") }
+                    } catch {
+                        if let began { trace?.muteEnded(began: began, success: false, reason: "disconnect") }
+                        throw error
+                    }
+                } catch {
+                    // Transport must stop before releasing any granted talk lock.
+                    await self.connectionOperations.disconnect(ownedRoom)
+                }
+                if releaseTalkLock {
+                    if let release = self.connectionOperations.releaseTalk { await release() }
+                    else { try? await self.talkRequest(.stop, context: context) }
+                }
+                await self.connectionOperations.disconnect(ownedRoom)
             }
-            status = .disconnected
-            appendLog(String(localized: "切断しました"))
+            // Cancellation is cooperative. Drain late warmup/publish before sharing the engine.
+            await prepareTask?.value
+            if let ownedRoom {
+                // A cancelled SDK await may have completed late; close only its own Room.
+                await self.connectionOperations.disconnect(ownedRoom)
+            }
+            if session.warmedUp { await self.connectionOperations.stopWarmup() }
+            print("[PTTConnection] generation=\(session.id) stage=cleanup_complete uptime_ns=\(DispatchTime.now().uptimeNanoseconds)")
+            if let ownedRoom {
+                logPTTPublishState(stage: "disconnect_complete", generation: session.id, room: ownedRoom, currentRoom: self.room)
+            }
+            // No old completion may overwrite a queued/new session's UI state.
+            if self.connectionSession == nil { self.appendLog(String(localized: "切断しました")) }
         }
+        connectionCleanupTask = cleanup
+        talkOperationTask = cleanup
+    }
+
+    struct ScreenPress: Equatable {
+        let id: UUID
+        let generation: String
+    }
+    private var screenPress: ScreenPress?
+
+    /// Screen input has its own ownership; scene changes must not stop remote controls.
+    func startScreenTalking() -> ScreenPress? {
+        guard screenPress == nil, !pttHeld, !isSending, !isStoppingTalk,
+              let session = connectionSession, session.valid else { return nil }
+        startTalking()
+        guard pttHeld else { return nil }
+        let press = ScreenPress(id: UUID(), generation: session.id)
+        screenPress = press
+        activeTalkTrace?.mark("screen_press_begin press=\(press.id) generation=\(press.generation)")
+        return press
+    }
+
+    func stopScreenTalking(_ press: ScreenPress, source: String) {
+        guard screenPress == press, connectionSession?.id == press.generation else { return }
+        screenPress = nil
+        if source == "gesture_end_or_cancel" { activeTalkTrace?.release(source: source) }
+        activeTalkTrace?.mark("screen_press_stop press=\(press.id) generation=\(press.generation) source=\(source)")
+        stopTalking(source: source)
     }
 
     /// PTTボタンが押された
     func startTalking() {
         // DragGesture.onChanged fires repeatedly while held. Accept one request per press.
-        guard let room, case .connected = status, !pttHeld, !isSending else { return }
+        guard let room, case .connected = status, !pttHeld, !isSending, !isStoppingTalk else { return }
         guard currentTalkerUid == nil else { return }
         talkAttempt += 1
+        let diagnosticGeneration = publishDiagnosticGeneration
         let trace = PTTStartTrace(attempt: talkAttempt)
+        activeTalkTrace = trace
         trace.mark("button_event")
         trace.mark("ui_change_begin")
         pttHeld = true
@@ -281,16 +443,25 @@ final class PTTConnectionManager: NSObject, ObservableObject {
                 return
             }
             do {
-                trace.mark("microphone_enable_begin")
-                guard let publication = try await room.localParticipant.setMicrophone(enabled: true) else {
-                    throw LiveKitError(.invalidState, message: "Microphone publication missing")
+                logPTTPublishState(stage: "microphone_enable_begin trace=\(trace.id)", generation: diagnosticGeneration, room: room, currentRoom: self.room, track: diagnosticPreparedTrack)
+                trace.enableBegan()
+                let publication: LocalTrackPublication?
+                if let enable = self.talkOperations.enable {
+                    try await enable(room)
+                    publication = nil
+                } else {
+                    guard let enabledPublication = try await room.localParticipant.setMicrophone(enabled: true) else {
+                        throw LiveKitError(.invalidState, message: "Microphone publication missing")
+                    }
+                    publication = enabledPublication
                 }
-                trace.mark("microphone_enable_complete")
+                trace.enableEnded(success: true)
+                logPTTPublishState(stage: "microphone_enable_complete trace=\(trace.id)", generation: diagnosticGeneration, room: room, currentRoom: self.room, track: publication?.track as? LocalAudioTrack)
                 // The SDK returns after publish/unmute. This is not a first RTP packet timestamp.
-                trace.mark("audio_publish_or_unmute_complete muted=\(publication.isMuted)")
+                trace.mark("audio_publish_or_unmute_complete muted=\(publication?.isMuted.description ?? "mock")")
                 guard self.room === room, self.pttHeld, myToken == self.talkRequestToken else {
                     // Keep the lock until audio is muted; queued stop performs release afterward.
-                    try await room.localParticipant.setMicrophone(enabled: false)
+                    try await self.muteMicrophone(room, trace: trace, reason: "released_during_enable")
                     trace.mark("released_during_enable_muted")
                     return
                 }
@@ -299,43 +470,75 @@ final class PTTConnectionManager: NSObject, ObservableObject {
                 self.startTalkHeartbeat(context: context)
                 trace.mark("ui_sending_complete")
             } catch {
+                if trace.microphoneEnableInFlight { trace.enableEnded(success: false) }
                 self.appendLog(String(format: NSLocalizedString("マイク有効化エラー: %@", comment: "Microphone enable error"), error.localizedDescription))
                 if myToken == self.talkRequestToken {
                     // Keep the physical-press guard until release, including failures.
                     self.isAcquiringTalk = false
                 }
-                // Do not release a granted lock while a partially enabled mic might send.
-                do {
-                    try await room.localParticipant.setMicrophone(enabled: false)
-                    try? await self.talkRequest(.stop, context: context)
-                } catch {
-                    await room.disconnect()
-                }
-                trace.mark("microphone_failed_cleanup_complete")
+                // Use the same queued stop, including when release already queued it.
+                // This avoids a second floor release from the enable error path.
+                self.stopTalking(source: "enable_failure")
+                trace.mark("microphone_failed_cleanup_queued")
             }
         }
     }
 
     /// Queue microphone mute before lock release, including release during acquisition/publish.
-    func stopTalking(forced: Bool = false) {
+    func stopTalking(forced: Bool = false, source: String = "control") {
+        guard !isStoppingTalk else { return }
+        screenPress = nil
+        let trace = activeTalkTrace
+        if forced { trace?.mark("stop_requested source=forced") }
+        else if source == "button" { trace?.release(source: source) }
+        else { trace?.mark("stop_requested source=\(source)") }
         pttHeld = false
         isAcquiringTalk = false
         talkRequestToken += 1
         guard let room else { return }
         stopTalkHeartbeat()
         isSending = false
+        isStoppingTalk = true
+        talkStopError = nil
+        let generation = connectionSession?.id
         let previous = talkOperationTask
         let context = talkRequestContext
         talkOperationTask = Task {
             await previous?.value
             do {
-                try await room.localParticipant.setMicrophone(enabled: false)
+                try await self.muteMicrophone(room, trace: trace, reason: forced ? "forced" : source)
             } catch {
                 self.appendLog(String(format: NSLocalizedString("マイク無効化エラー: %@", comment: "Microphone disable error"), error.localizedDescription))
                 // Disconnect transport before allowing another participant to acquire the lock.
-                await room.disconnect()
+                await self.connectionOperations.disconnect(room)
             }
-            if !forced { try? await self.talkRequest(.stop, context: context) }
+            do {
+                if !forced {
+                    trace?.mark("talk_stop_begin")
+                    try await self.talkRequest(.stop, context: context)
+                    trace?.mark("talk_stop_complete")
+                }
+                guard self.connectionSession?.id == generation, self.room === room else { return }
+                self.isStoppingTalk = false
+            } catch {
+                trace?.mark("talk_stop_failed")
+                guard self.connectionSession?.id == generation, self.room === room else { return }
+                self.talkStopError = error.localizedDescription
+                self.appendLog("発話権の解放に失敗しました: \(error.localizedDescription)")
+                // Remain blocked: a failed stop is not a released floor. No automatic retry.
+            }
+        }
+    }
+
+    /// Logging wrapper: preserves the original SDK call and error propagation.
+    private func muteMicrophone(_ room: Room, trace: PTTStartTrace?, reason: String) async throws {
+        let began = trace?.muteBegan(reason: reason)
+        do {
+            try await self.connectionOperations.mute(room)
+            if let trace, let began { trace.muteEnded(began: began, success: true, reason: reason) }
+        } catch {
+            if let trace, let began { trace.muteEnded(began: began, success: false, reason: reason) }
+            throw error
         }
     }
 
@@ -374,6 +577,10 @@ final class PTTConnectionManager: NSObject, ObservableObject {
     }
 
     private func talkRequest(_ action: TalkAction, trace: PTTStartTrace? = nil, context: TalkRequestContext? = nil) async throws {
+        if let request = talkOperations.request {
+            try await request(action.rawValue)
+            return
+        }
         let context = context ?? talkRequestContext
         guard let idTokenProvider = context.idTokenProvider else {
             throw TokenFetchError.serverError(statusCode: 401, message: String(localized: "サインインしていません"))
@@ -465,11 +672,9 @@ final class PTTConnectionManager: NSObject, ObservableObject {
         }
     }
 
-    private func fetchToken() async throws -> String {
-        guard let idTokenProvider else {
-            throw TokenFetchError.serverError(statusCode: 401, message: String(localized: "サインインしていません"))
-        }
+    private func fetchToken(tokenServerURL: String, roomName: String, idTokenProvider: @escaping () async throws -> String) async throws -> String {
         let idToken = try await idTokenProvider()
+        try Task.checkCancellation()
 
         guard var components = URLComponents(string: "\(tokenServerURL)/token") else {
             throw URLError(.badURL)
@@ -518,28 +723,11 @@ extension PTTConnectionManager: RoomDelegate {
 
     nonisolated func room(_ room: Room, didUpdateConnectionState connectionState: ConnectionState, from oldConnectionState: ConnectionState) {
         Task { @MainActor in
-            guard self.room === room else { return }
+            guard self.ownsRoom(room) else { return }
             self.appendLog(String(format: NSLocalizedString("接続状態: %@ → %@", comment: "Connection state changed"), String(describing: oldConnectionState), String(describing: connectionState)))
-            if connectionState == .disconnected {
-                self.pttHeld = false
-                self.isAcquiringTalk = false
-                self.talkRequestToken += 1
-                self.stopTalkHeartbeat()
-                self.participants.removeAll()
-                self.isSending = false
-                self.currentTalkerUid = nil
-                self.isRecording = false
-                self.recordingStartedAt = nil
-                self.room = nil
-                if self.localRecordingWarmupActive {
-                    try? await PTTAudioWorker.run { try AudioManager.shared.stopLocalRecording() }
-                    self.localRecordingWarmupActive = false
-                }
-                if case .error = self.status {
-                    // エラーによる切断は表示を残す
-                } else {
-                    self.status = .disconnected
-                }
+            if connectionState == .disconnected, let session = self.connectionSession, session.connected {
+                if case .error = self.status {} else { self.status = .disconnected }
+                self.retireConnection(session)
             }
         }
     }
@@ -549,6 +737,7 @@ extension PTTConnectionManager: RoomDelegate {
     /// ネットワーク瞬断からの自動復旧中であることをUIに反映するためのフック。
     nonisolated func room(_ room: Room, didStartReconnectWithMode reconnectMode: ReconnectMode) {
         Task { @MainActor in
+            guard self.ownsRoom(room) else { return }
             self.appendLog(String(format: NSLocalizedString("再接続を開始しました (mode=%@)", comment: "Reconnect started"), String(describing: reconnectMode)))
             if case .error = self.status {
                 // 既にエラー表示中ならそのまま維持する
@@ -561,6 +750,7 @@ extension PTTConnectionManager: RoomDelegate {
     /// 再接続成功。
     nonisolated func room(_ room: Room, didCompleteReconnectWithMode reconnectMode: ReconnectMode) {
         Task { @MainActor in
+            guard self.ownsRoom(room) else { return }
             self.appendLog(String(format: NSLocalizedString("再接続に成功しました (mode=%@)", comment: "Reconnect succeeded"), String(describing: reconnectMode)))
             if case .error = self.status {
                 // 既にエラー表示中ならそのまま維持する
@@ -578,6 +768,7 @@ extension PTTConnectionManager: RoomDelegate {
     /// 行われる(こちらは主に理由をログに残すため)。
     nonisolated func room(_ room: Room, didDisconnectWithError error: LiveKitError?) {
         Task { @MainActor in
+            guard self.ownsRoom(room) else { return }
             if let error {
                 self.appendLog(String(format: NSLocalizedString("予期しない切断: %@", comment: "Unexpected disconnect"), error.localizedDescription))
             } else {
@@ -588,9 +779,11 @@ extension PTTConnectionManager: RoomDelegate {
 
     nonisolated func room(_ room: Room, didFailToConnectWithError error: LiveKitError?) {
         Task { @MainActor in
+            guard self.ownsRoom(room) else { return }
             let reason = error?.localizedDescription ?? String(localized: "不明なエラー")
             self.appendLog(String(format: NSLocalizedString("接続失敗: %@", comment: "Connection failed log"), reason))
             self.status = .error(error?.localizedDescription ?? String(localized: "接続失敗"))
+            if let session = self.connectionSession { self.retireConnection(session) }
         }
     }
 
@@ -604,6 +797,7 @@ extension PTTConnectionManager: RoomDelegate {
     /// (ptt-android側のRoom.eventsに関する既存の注意書きと同じ理由)。
     nonisolated func room(_ room: Room, didUpdateMetadata metadata: String?) {
         Task { @MainActor in
+            guard self.ownsRoom(room) else { return }
             self.applyMetadata(fromMetadataString: metadata)
             self.appendLog(String(format: NSLocalizedString("[診断] メタデータ更新受信: currentTalker=%@ recording=%@", comment: "Metadata update diagnostic log"), self.currentTalkerUid ?? "null", self.isRecording ? "true" : "false"))
         }
@@ -611,6 +805,7 @@ extension PTTConnectionManager: RoomDelegate {
 
     nonisolated func room(_ room: Room, participantDidConnect participant: RemoteParticipant) {
         Task { @MainActor in
+            guard self.ownsRoom(room) else { return }
             let uid = participant.identity?.stringValue ?? "?"
             self.appendLog(String(format: NSLocalizedString("参加: %@", comment: "Participant joined log"), uid))
             // participantDidConnect発火時点で既にトラック情報(publish済みか)を
@@ -624,6 +819,7 @@ extension PTTConnectionManager: RoomDelegate {
 
     nonisolated func room(_ room: Room, participantDidDisconnect participant: RemoteParticipant) {
         Task { @MainActor in
+            guard self.ownsRoom(room) else { return }
             let id = participant.identity?.stringValue ?? "?"
             self.appendLog(String(format: NSLocalizedString("退出: %@", comment: "Participant left log"), id))
             self.participants.removeValue(forKey: id)
@@ -635,6 +831,7 @@ extension PTTConnectionManager: RoomDelegate {
     nonisolated func room(_ room: Room, participant: Participant, trackPublication: TrackPublication, didUpdateIsMuted isMuted: Bool) {
         guard trackPublication.kind == .audio, let identity = participant.identity?.stringValue else { return }
         Task { @MainActor in
+            guard self.ownsRoom(room) else { return }
             self.participants[identity]?.isMuted = isMuted
         }
     }

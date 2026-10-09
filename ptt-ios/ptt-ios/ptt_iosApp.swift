@@ -16,6 +16,11 @@ import LiveKit
 struct ptt_iosApp: App {
 
     init() {
+        #if DEBUG
+        LiveKitSDK.setLogger(PTTPublishSDKLogger())
+        // Report the actual linked SDK version for development diagnostics.
+        print("[PTTBuild] sdk=\(LiveKitSDK.version) configuration=Debug app_version=\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") ?? "nil") build=\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") ?? "nil") bundle=\(Bundle.main.bundleIdentifier ?? "nil")")
+        #endif
         // [Phase14] App Checkプロバイダの登録は FirebaseApp.configure() より
         // 前に行う必要がある(登録が後だと反映されない)。詳細は
         // PTTAppCheckProvider.swift 参照。

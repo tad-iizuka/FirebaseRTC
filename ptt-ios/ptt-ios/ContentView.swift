@@ -75,6 +75,11 @@ struct ContentView: View {
     /// 同種の不具合を踏むリスクを避ける判断は変えていないため、自前HStack方式は
     /// 維持する。
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.scenePhase) private var scenePhase
+    @GestureState private var screenGestureHeld = false
+    @State private var screenPress: PTTConnectionManager.ScreenPress?
+    @State private var screenGestureCancelled = false
+    @State private var screenGestureAttempted = false
 
     @StateObject private var auth = PTTAuthManager()
     @StateObject private var roomManager = PTTRoomManager()
@@ -222,6 +227,23 @@ struct ContentView: View {
         .onAppear {
             // [Phase9] 1回だけ実行すればよい(attach内部でも二重呼び出しをガードしている)。
             backgroundControl.attach(to: connection)
+        }
+        .onChange(of: scenePhase) { oldPhase, newPhase in
+            if oldPhase == .active && newPhase != .active, let press = screenPress {
+                screenGestureCancelled = true
+                connection.stopScreenTalking(press, source: "scene_inactive")
+            }
+            // Returning active never starts a press.
+        }
+        .onChange(of: screenGestureHeld) { _, held in
+            if !held {
+                if let press = screenPress {
+                    connection.stopScreenTalking(press, source: "gesture_end_or_cancel")
+                }
+                screenPress = nil
+                screenGestureCancelled = false
+                screenGestureAttempted = false
+            }
         }
         .onChange(of: pendingInviteStore.pendingInvite, initial: true) { _, invite in
             // [招待リンク/QR] onOpenURL(Universal Link)またはQRスキャナーが検出した
@@ -1425,7 +1447,7 @@ struct ContentView: View {
     }
 
     private var talkAreaButton: some View {
-        let canTalk = isConnected && !someoneElseIsTalking
+        let canTalk = isConnected && !someoneElseIsTalking && !connection.isStoppingTalk
         return VStack(spacing: 14) {
             Circle()
                 .strokeBorder(connection.isSending ? Color.pttAccent : .pttLine, lineWidth: 2)
@@ -1442,11 +1464,32 @@ struct ContentView: View {
                 .opacity(canTalk ? 1.0 : 0.3)
                 .gesture(
                     DragGesture(minimumDistance: 0)
-                        .onChanged { _ in connection.startTalking() }
-                        .onEnded { _ in connection.stopTalking() }
+                        .updating($screenGestureHeld) { _, held, _ in held = true }
+                        .onChanged { _ in
+                            guard scenePhase == .active, !screenGestureCancelled,
+                                  !screenGestureAttempted else { return }
+                            // A rejected press stays rejected until this touch sequence ends.
+                            screenGestureAttempted = true
+                            screenPress = connection.startScreenTalking()
+                        }
+                    // GestureState resets on both successful end and system cancellation.
+                    // Do not rely on onEnded, which is not called for cancellation.
                 )
                 .allowsHitTesting(canTalk)
+                .onDisappear {
+                    if let press = screenPress {
+                        connection.stopScreenTalking(press, source: "view_disappear")
+                        screenPress = nil
+                    }
+                }
 
+            if let error = connection.talkStopError {
+                Text("発話権の解放に失敗しました: \(error)")
+                    .font(.caption)
+                    .foregroundColor(.pttWarning)
+            } else if connection.isStoppingTalk {
+                Text("送話を停止しています…").font(.caption)
+            }
             Text("ボタンを押している間だけ音声が送信されます")
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundColor(.pttMuted)

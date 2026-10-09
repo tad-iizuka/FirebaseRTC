@@ -70,3 +70,7 @@ UI完了ログはPublished状態への代入完了であり画面描画完了を
 - 実際のtalk/start handlerをVMで実行する一時モック検証で、取得成功・他人のロックの409拒否・自分のacquiredAt維持・失効ロック取得・commit後の応答を確認。実Firestoreの統合試験ではない。
 - 初回実行の一時ビルドはディスク容量不足で失敗したため、その一時領域を削除し既存Xcodeキャッシュで再実行。テスト用cloneのサービス警告も出たが、最終の並列無効テストは成功。
 - 実機の初回／2回目以降の数値比較、App Check 403の解消確認、録音・Bluetooth・短い押下の統合検証、Instruments測定は未実施。端末とサーバーに変更を反映し、本資料のログで確認する。
+
+## 解放計測の追加（2026-10-08）
+
+同じ開始traceにbutton_release、microphone_mute_begin/complete/failedを追加。全端末traceにuptime_nsを付加し、release_to_mute_msと有効化中解放を記録する。処理順序・排他制御・音声初期化は変更しない。詳細と相手端末の実音声確認手順は[PTT_RELEASE_SAFETY.md](PTT_RELEASE_SAFETY.md)を参照。
