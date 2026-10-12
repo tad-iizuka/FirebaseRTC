@@ -52,6 +52,10 @@ final class PTTConnectionManager: NSObject, ObservableObject {
     private var publishDiagnosticGeneration = "none"
     private weak var diagnosticPreparedTrack: LocalAudioTrack?
     private var activeTalkTrace: PTTStartTrace?
+    #if DEBUG
+    private var mediaObservation: PTTMediaObservation?
+    private var roomMediaObservation: PTTMediaObservation?
+    #endif
     private var talkAttempt = 0
     private var talkOperationTask: Task<Void, Never>?
     /// [送話ロック連携] サーバー(routes/talk.js)がLiveKitのRoom Metadataに書き込む
@@ -182,6 +186,9 @@ final class PTTConnectionManager: NSObject, ObservableObject {
         let previousCleanup = connectionCleanupTask
         let diagnosticGeneration = session.id
         publishDiagnosticGeneration = diagnosticGeneration
+        #if DEBUG
+        PTTDebugEngineObserver.context(generation: String(describing: diagnosticGeneration))
+        #endif
         diagnosticPreparedTrack = nil
         print("[PTTConnection] generation=\(session.id) stage=prepare_begin uptime_ns=\(DispatchTime.now().uptimeNanoseconds)")
 
@@ -281,6 +288,11 @@ final class PTTConnectionManager: NSObject, ObservableObject {
                 participants = initialParticipants
 
                 status = .connected(room: roomName)
+                #if DEBUG
+                let roomObservation = PTTMediaObservation(traceID: "room-\(session.id)", room: newRoom)
+                roomMediaObservation = roomObservation
+                roomObservation.start(capture: false)
+                #endif
                 appendLog(String(format: NSLocalizedString("ルーム接続完了: room=%@", comment: "Room connected log"), roomName))
             } catch {
                 // Intentional exit invalidates the generation before cancellation is requested.
@@ -300,6 +312,13 @@ final class PTTConnectionManager: NSObject, ObservableObject {
 
     private func retireConnection(_ session: ConnectionSession, releaseTalkLock: Bool = false) {
         guard connectionSession?.id == session.id else { return }
+        #if DEBUG
+        roomMediaObservation?.finish()
+        roomMediaObservation = nil
+        mediaObservation?.sample(stage: "exit")
+        mediaObservation?.finish()
+        mediaObservation = nil
+        #endif
         screenPress = nil
         isStoppingTalk = false
         talkStopError = nil
@@ -444,6 +463,12 @@ final class PTTConnectionManager: NSObject, ObservableObject {
             }
             do {
                 logPTTPublishState(stage: "microphone_enable_begin trace=\(trace.id)", generation: diagnosticGeneration, room: room, currentRoom: self.room, track: diagnosticPreparedTrack)
+                #if DEBUG
+                PTTDebugEngineObserver.context(generation: String(describing: diagnosticGeneration), trace: trace.id)
+                let observation = PTTMediaObservation(traceID: trace.id, room: room)
+                mediaObservation = observation
+                observation.start()
+                #endif
                 trace.enableBegan()
                 let publication: LocalTrackPublication?
                 if let enable = self.talkOperations.enable {
@@ -455,6 +480,9 @@ final class PTTConnectionManager: NSObject, ObservableObject {
                     }
                     publication = enabledPublication
                 }
+                #if DEBUG
+                observation.sample(stage: "enable_after")
+                #endif
                 trace.enableEnded(success: true)
                 logPTTPublishState(stage: "microphone_enable_complete trace=\(trace.id)", generation: diagnosticGeneration, room: room, currentRoom: self.room, track: publication?.track as? LocalAudioTrack)
                 // The SDK returns after publish/unmute. This is not a first RTP packet timestamp.
@@ -532,11 +560,23 @@ final class PTTConnectionManager: NSObject, ObservableObject {
 
     /// Logging wrapper: preserves the original SDK call and error propagation.
     private func muteMicrophone(_ room: Room, trace: PTTStartTrace?, reason: String) async throws {
+        #if DEBUG
+        let observation = mediaObservation?.traceID == trace?.id ? mediaObservation : nil
+        observation?.sample(stage: "mute_before")
+        #endif
         let began = trace?.muteBegan(reason: reason)
         do {
             try await self.connectionOperations.mute(room)
+            #if DEBUG
+            observation?.sample(stage: "mute_after")
+            observation?.finish()
+            #endif
             if let trace, let began { trace.muteEnded(began: began, success: true, reason: reason) }
         } catch {
+            #if DEBUG
+            observation?.sample(stage: "mute_failed")
+            observation?.finish()
+            #endif
             if let trace, let began { trace.muteEnded(began: began, success: false, reason: reason) }
             throw error
         }

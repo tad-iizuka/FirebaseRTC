@@ -532,3 +532,152 @@ struct ScreenPressSafetyTests {
         m.disconnect(); await m.waitForConnectionCleanup()
     }
 }
+
+#if DEBUG
+import AVFoundation
+
+struct PTTPCMLevelTests {
+    private func buffer(_ format: AVAudioCommonFormat, channels: UInt32 = 1,
+                        interleaved: Bool = false, frames: UInt32 = 4) -> AVAudioPCMBuffer {
+        let audioFormat = AVAudioFormat(commonFormat: format, sampleRate: 48000,
+                                       channels: channels, interleaved: interleaved)!
+        let buffer = AVAudioPCMBuffer(pcmFormat: audioFormat, frameCapacity: max(frames, 1))!
+        buffer.frameLength = frames
+        return buffer
+    }
+
+    @Test func floatSilenceAndSignal() {
+        let pcm = buffer(.pcmFormatFloat32)
+        let data = pcm.floatChannelData![0]
+        for i in 0..<4 { data[i] = 0 }
+        #expect(PTTPCMLevel.measure(pcm)?.rms == 0)
+        #expect(PTTPCMLevel.measure(pcm)?.peak == 0)
+        data[0] = 0.5; data[1] = -0.5; data[2] = 0.5; data[3] = -0.5
+        #expect(PTTPCMLevel.measure(pcm)?.rms == 0.5)
+        #expect(PTTPCMLevel.measure(pcm)?.peak == 0.5)
+    }
+
+    @Test func int16ExtremesAndSilence() {
+        let pcm = buffer(.pcmFormatInt16)
+        let data = pcm.int16ChannelData![0]
+        for i in 0..<4 { data[i] = 0 }
+        #expect(PTTPCMLevel.measure(pcm)?.rms == 0)
+        data[0] = .min; data[1] = .max; data[2] = 0; data[3] = 0
+        let expected = sqrt((1 + pow(32767.0 / 32768, 2)) / 4)
+        #expect(abs(PTTPCMLevel.measure(pcm)!.rms - expected) < 1e-12)
+        #expect(PTTPCMLevel.measure(pcm)?.peak == 1)
+    }
+
+    @Test(arguments: [false, true]) func stereoStride(interleaved: Bool) {
+        for format in [AVAudioCommonFormat.pcmFormatFloat32, .pcmFormatInt16] {
+            let pcm = buffer(format, channels: 2, interleaved: interleaved)
+            for channel in 0..<2 {
+                for frame in 0..<4 {
+                    if format == .pcmFormatFloat32 {
+                        pcm.floatChannelData![channel][frame * pcm.stride] = channel == 0 ? 0 : 0.5
+                    } else {
+                        pcm.int16ChannelData![channel][frame * pcm.stride] = channel == 0 ? 0 : 16384
+                    }
+                }
+            }
+            #expect(abs(PTTPCMLevel.measure(pcm)!.rms - sqrt(0.125)) < 1e-12)
+            #expect(PTTPCMLevel.measure(pcm)?.peak == 0.5)
+        }
+    }
+
+    @Test func unsupportedEmptyAndNonFinite() {
+        #expect(PTTPCMLevel.measure(buffer(.pcmFormatFloat64)) == nil)
+        #expect(PTTPCMLevel.measure(buffer(.pcmFormatFloat32, frames: 0)) == nil)
+        let pcm = buffer(.pcmFormatFloat32)
+        for i in 0..<4 { pcm.floatChannelData![0][i] = 2 }
+        #expect(PTTPCMLevel.measure(pcm)?.rms == 1)
+        pcm.floatChannelData![0][0] = .nan
+        #expect(PTTPCMLevel.measure(pcm) == nil)
+    }
+}
+#endif
+
+#if DEBUG
+struct PTTDebugEngineObserverTests {
+    private final class Tail: AudioEngineObserver, @unchecked Sendable {
+        var next: (any AudioEngineObserver)?
+        var events: [String] = []
+        var inputResult = -18
+        func engineDidCreate(_ engine: AVAudioEngine) -> Int { events.append("create"); return -11 }
+        func engineWillEnable(_ engine: AVAudioEngine, isPlayoutEnabled: Bool, isRecordingEnabled: Bool) -> Int { events.append("enable:\(isPlayoutEnabled):\(isRecordingEnabled)"); return -12 }
+        func engineWillStart(_ engine: AVAudioEngine, isPlayoutEnabled: Bool, isRecordingEnabled: Bool) -> Int { events.append("start:\(isPlayoutEnabled):\(isRecordingEnabled)"); return -13 }
+        func engineDidStop(_ engine: AVAudioEngine, isPlayoutEnabled: Bool, isRecordingEnabled: Bool) -> Int { events.append("stop:\(isPlayoutEnabled):\(isRecordingEnabled)"); return -14 }
+        func engineDidDisable(_ engine: AVAudioEngine, isPlayoutEnabled: Bool, isRecordingEnabled: Bool) -> Int { events.append("disable:\(isPlayoutEnabled):\(isRecordingEnabled)"); return -15 }
+        func engineWillRelease(_ engine: AVAudioEngine) -> Int { events.append("release"); return -16 }
+        func engineWillConnectOutput(_ engine: AVAudioEngine, src: AVAudioNode, dst: AVAudioNode?, format: AVAudioFormat, context: [AnyHashable: Any]) -> Int { events.append("output"); return -17 }
+        func engineWillConnectInput(_ engine: AVAudioEngine, src: AVAudioNode?, dst: AVAudioNode, format: AVAudioFormat, context: [AnyHashable: Any]) -> Int { events.append("input"); return inputResult }
+    }
+    @Test @MainActor func preservesLifecycleArgumentsAndErrors() {
+        let observer = PTTDebugEngineObserver()
+        let tail = Tail()
+        observer.next = tail
+        let engine = AVAudioEngine()
+        #expect(observer.engineDidCreate(engine) == -11)
+        #expect(observer.engineWillEnable(engine, isPlayoutEnabled: true, isRecordingEnabled: false) == -12)
+        #expect(observer.engineWillStart(engine, isPlayoutEnabled: false, isRecordingEnabled: true) == -13)
+        #expect(observer.engineDidStop(engine, isPlayoutEnabled: true, isRecordingEnabled: false) == -14)
+        #expect(observer.engineDidDisable(engine, isPlayoutEnabled: false, isRecordingEnabled: true) == -15)
+        #expect(observer.engineWillRelease(engine) == -16)
+        let node = AVAudioMixerNode()
+        let format = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1)!
+        #expect(observer.engineWillConnectOutput(engine, src: node, dst: nil, format: format, context: [:]) == -17)
+        #expect(observer.engineWillConnectInput(engine, src: nil, dst: node, format: format, context: [:]) == -18)
+        #expect(tail.events == ["create", "enable:true:false", "start:false:true", "stop:true:false", "disable:false:true", "release", "output", "input"])
+        let inputEvent = observer.buffer.take(limit: 64)?.events.last
+        #expect(inputEvent?.connectionStatus == "skipped_observer_error")
+        #expect(inputEvent?.inputFormat == nil)
+    }
+    @Test @MainActor func inputObservationPreservesMissingAndUnsupportedSource() {
+        let observer = PTTDebugEngineObserver()
+        let tail = Tail()
+        tail.inputResult = 0
+        observer.next = tail
+        let engine = AVAudioEngine()
+        let node = AVAudioMixerNode()
+        let format = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1)!
+        #expect(observer.engineWillConnectInput(engine, src: nil, dst: node, format: format, context: [:]) == 0)
+        #expect(observer.engineWillConnectInput(engine, src: node, dst: node, format: format, context: [:]) == 0)
+        let events = observer.buffer.take()?.events ?? []
+        #expect(tail.events == ["input", "input"])
+        #expect(events.map(\.connectionStatus) == ["no_source_manual_or_unavailable", "unsupported_source_node_type"])
+        #expect(events.allSatisfy { $0.inputFormat == nil && $0.outputFormat == nil && $0.destinationID == ObjectIdentifier(node) })
+    }
+
+    @Test func boundedBufferDropsOverflowAndDistinguishesReusedEngineIdentity() {
+        let buffer = PTTInputPathBuffer(capacity: 2)
+        let identityObject = NSObject()
+        let id = ObjectIdentifier(identityObject)
+        var event = PTTInputPathBuffer.Event(name: "did_create", time: 1)
+        event.engineID = id
+        buffer.put(event)
+        event = PTTInputPathBuffer.Event(name: "will_release", time: 2)
+        event.engineID = id
+        buffer.put(event)
+        buffer.put(PTTInputPathBuffer.Event(name: "overflow", time: 3))
+        let first = buffer.take(limit: 8)
+        #expect(first?.events.count == 2)
+        #expect(first?.overflowDrops == 1)
+        #expect(first?.events.map(\.engineGeneration) == [1, 1])
+        event = PTTInputPathBuffer.Event(name: "did_create", time: 4)
+        event.engineID = id
+        buffer.put(event)
+        #expect(buffer.take()?.events.first?.engineGeneration == 2)
+        #expect(buffer.take()?.events.isEmpty == true)
+    }
+
+    @Test func formatSnapshotReportsConfigurationOnly() {
+        let format = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1)!
+        let snapshot = PTTInputPathFormat(format)
+        #expect(snapshot.status == "valid_configuration")
+        #expect(snapshot.sampleRate == 48000)
+        #expect(snapshot.channels == 1)
+        let empty = PTTInputPathFormat(AVAudioFormat())
+        #expect(empty.status == "unavailable_zero_or_invalid_format")
+    }
+}
+#endif

@@ -18,6 +18,7 @@ struct ptt_iosApp: App {
     init() {
         #if DEBUG
         LiveKitSDK.setLogger(PTTPublishSDKLogger())
+        PTTDebugEngineObserver.install()
         // Report the actual linked SDK version for development diagnostics.
         print("[PTTBuild] sdk=\(LiveKitSDK.version) configuration=Debug app_version=\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") ?? "nil") build=\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") ?? "nil") bundle=\(Bundle.main.bundleIdentifier ?? "nil")")
         #endif
