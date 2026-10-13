@@ -112,6 +112,9 @@ final class PTTConnectionManager: NSObject, ObservableObject {
         var task: Task<Void, Never>?
         var warmedUp = false
         var connected = false
+        #if DEBUG
+        var prepublishPCM: PTTPrepublishPCMObservation?
+        #endif
     }
 
     /// Narrow async boundaries for deterministic lifecycle tests; live defaults preserve SDK calls.
@@ -194,6 +197,10 @@ final class PTTConnectionManager: NSObject, ObservableObject {
 
         session.task = Task {
             defer {
+                #if DEBUG
+                session.prepublishPCM?.finish("task_end")
+                session.prepublishPCM = nil
+                #endif
                 session.task = nil
                 print("[PTTConnection] generation=\(session.id) stage=prepare_task_complete uptime_ns=\(DispatchTime.now().uptimeNanoseconds)")
             }
@@ -248,12 +255,24 @@ final class PTTConnectionManager: NSObject, ObservableObject {
                         try await track.mute()
                         guard owns(session) else { return }
                         logPTTPublishState(stage: "mute_complete_publish_begin", generation: diagnosticGeneration, room: newRoom, currentRoom: self.room, track: track)
+                        #if DEBUG
+                        session.prepublishPCM = PTTPrepublishPCMObservation.make(enabled: PTTPrepublishPCMObservation.enabled, generation: session.id, trackID: ObjectIdentifier(track))
+                        session.prepublishPCM?.sample("publish_begin")
+                        #endif
                         let publishedMuted = try await connectionOperations.publish(newRoom, track)
+                        #if DEBUG
+                        session.prepublishPCM?.finish("publish_success")
+                        session.prepublishPCM = nil
+                        #endif
                         guard owns(session) else { return }
                         logPTTPublishState(stage: "publish_complete_before_result", generation: diagnosticGeneration, room: newRoom, currentRoom: self.room, track: track)
                         keepAliveTrackPublished = publishedMuted
                         appendLog("[PTTPrepare] muted_publish_complete muted=\(publishedMuted)")
                     } catch {
+                        #if DEBUG
+                        session.prepublishPCM?.finish("publish_failure")
+                        session.prepublishPCM = nil
+                        #endif
                         guard owns(session) else { return }
                         logPTTPublishState(stage: "publish_failed", generation: diagnosticGeneration, room: newRoom, currentRoom: self.room, track: track)
                         appendLog("[PTTPrepare] muted_publish_failed: \(error.localizedDescription)")
@@ -313,6 +332,8 @@ final class PTTConnectionManager: NSObject, ObservableObject {
     private func retireConnection(_ session: ConnectionSession, releaseTalkLock: Bool = false) {
         guard connectionSession?.id == session.id else { return }
         #if DEBUG
+        session.prepublishPCM?.finish("exit")
+        session.prepublishPCM = nil
         roomMediaObservation?.finish()
         roomMediaObservation = nil
         mediaObservation?.sample(stage: "exit")

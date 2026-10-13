@@ -324,6 +324,129 @@ final class PTTMediaObservation {
 #endif
 
 #if DEBUG
+private final class PTTPrepublishCaptureMeter: NSObject, AudioRenderer, @unchecked Sendable {
+    private let lock = NSLock()
+    private var callbacks: UInt64 = 0
+    private var frames: UInt64 = 0
+    private var samples: UInt64 = 0
+    private var first: UInt64 = 0
+    private var acceptsCallbacks = true
+    private var last: UInt64 = 0
+    private var format: AVAudioCommonFormat = .otherFormat
+    private var rate = 0.0
+    private var channels: UInt32 = 0
+    private var interleaved = false
+    private var bytesPerFrame: UInt32 = 0
+    private var rms: Double?
+    private var peak: Double?
+    private var windowEnergy = 0.0
+    private var windowSamples = 0
+    private var windowPeak = 0.0
+    private var windowNonSilent = 0
+    private var windowMeasured = 0
+    private var windowUnsupported = 0
+
+    func render(pcmBuffer: AVAudioPCMBuffer) {
+        guard lock.try() else { return }
+        defer { lock.unlock() }
+        guard acceptsCallbacks else { return }
+        callbacks += 1
+        frames += UInt64(pcmBuffer.frameLength)
+        samples += UInt64(pcmBuffer.frameLength) * UInt64(pcmBuffer.format.channelCount)
+        last = DispatchTime.now().uptimeNanoseconds
+        if first == 0 { first = last }
+        format = pcmBuffer.format.commonFormat
+        rate = pcmBuffer.format.sampleRate
+        channels = pcmBuffer.format.channelCount
+        interleaved = pcmBuffer.format.isInterleaved
+        bytesPerFrame = pcmBuffer.format.streamDescription.pointee.mBytesPerFrame
+        guard let level = PTTPCMLevel.measure(pcmBuffer) else {
+            rms = nil; peak = nil; windowUnsupported += 1; return
+        }
+        rms = level.rms
+        peak = level.peak
+        windowEnergy += level.sumSquares
+        windowSamples += level.count
+        windowPeak = max(windowPeak, level.peak)
+        windowMeasured += 1
+        // Signal threshold only; not voice activity detection.
+        if level.peak > 0.0001 { windowNonSilent += 1 }
+    }
+
+    func deactivate() {
+        lock.lock(); acceptsCallbacks = false; lock.unlock()
+    }
+
+    func snapshot(includeFirst: Bool = false) -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        let name: String
+        switch format {
+        case .pcmFormatFloat32: name = "Float32"
+        case .pcmFormatInt16: name = "Int16"
+        default: name = "unsupported_\(format.rawValue)"
+        }
+        let windowRMS = windowSamples > 0 ? String(sqrt(windowEnergy / Double(windowSamples))) : "未計測"
+        let value = "pcm_scope=shared_capture_post callbacks=\(callbacks) frames=\(frames) samples=\(samples) last_pcm_ns=\(last) sample_format=\(name) sample_rate=\(rate) channel_count=\(channels) samples_per_frame=\(channels) bytes_per_frame=\(bytesPerFrame) interleaved=\(interleaved) rms=\(rms.map(String.init(describing:)) ?? "未計測") peak=\(peak.map(String.init(describing:)) ?? "未計測") window_rms=\(windowRMS) window_peak=\(windowSamples > 0 ? String(windowPeak) : "未計測") window_measured_buffers=\(windowMeasured) window_non_silent_buffers=\(windowNonSilent) window_unsupported_buffers=\(windowUnsupported) signal_peak_threshold=0.0001 max_scalar_samples_per_buffer=4096 max_channels=8 callback_drop_on_contention=possible"
+        windowEnergy = 0; windowSamples = 0; windowPeak = 0
+        windowMeasured = 0; windowNonSilent = 0; windowUnsupported = 0
+        return includeFirst ? "first_pcm_ns=\(first) " + value : value
+    }
+}
+
+
+/// Public renderer observation changes APM delegate attachment timing; it is not a fix.
+@MainActor
+final class PTTPrepublishPCMObservation {
+    static var enabled: Bool { ProcessInfo.processInfo.environment["PTT_PREPUBLISH_PCM"] == "1" }
+    private let meter = PTTPrepublishCaptureMeter()
+    let generation: String
+    private let trackID: ObjectIdentifier
+    private let remove: (AudioRenderer) -> Void
+    private let output: (String) -> Void
+    private var task: Task<Void, Never>?
+    private var active = true
+    private var registered = false
+
+    static func make(enabled: Bool, generation: String, trackID: ObjectIdentifier,
+                     add: (AudioRenderer) -> Void = { AudioManager.shared.add(localAudioRenderer: $0) },
+                     remove: @escaping (AudioRenderer) -> Void = { AudioManager.shared.remove(localAudioRenderer: $0) },
+                     output: @escaping (String) -> Void = { print($0) }) -> PTTPrepublishPCMObservation? {
+        guard enabled else { return nil } // OFF: no renderer, task, getters, or additional logging.
+        return .init(generation: generation, trackID: trackID, add: add, remove: remove, output: output)
+    }
+
+    private init(generation: String, trackID: ObjectIdentifier, add: (AudioRenderer) -> Void,
+                 remove: @escaping (AudioRenderer) -> Void, output: @escaping (String) -> Void) {
+        self.generation = generation; self.trackID = trackID; self.remove = remove; self.output = output
+        sample("register_begin")
+        add(meter)
+        registered = true
+        sample("register_complete")
+        task = Task { [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(1)) } catch { return }
+                guard let self, active, !Task.isCancelled else { return }
+                sample("periodic")
+            }
+        }
+    }
+
+    func sample(_ stage: String) {
+        guard active else { return }
+        output("[PTTPrepublishPCM] mode=ON stage=\(stage) uptime_ns=\(DispatchTime.now().uptimeNanoseconds) generation=\(generation) track_object=\(trackID) track_scope=context_not_per_track_pcm engine_generation=\(PTTDebugEngineObserver.shared.buffer.latestGeneration.map(String.init) ?? "未計測") engine_ownership=未計測 observation=\(registered ? "registered" : "not_yet_registered") \(meter.snapshot(includeFirst: true))")
+    }
+
+    func finish(_ reason: String) {
+        guard active else { return }
+        meter.deactivate() // Queued deliveries after detach must not count toward this session.
+        sample("finish_" + reason)
+        active = false
+        task?.cancel(); task = nil
+        remove(meter)
+    }
+}
+
 /// Scalar configuration snapshot only; a valid format is not evidence of captured sound.
 nonisolated struct PTTInputPathFormat: Sendable {
     let status: String
@@ -370,6 +493,12 @@ nonisolated final class PTTInputPathBuffer: @unchecked Sendable {
     private var generation: UInt64 = 0
     private var engines: [ObjectIdentifier: UInt64] = [:]
     init(capacity: Int = 64) { storage = Array(repeating: nil, count: max(1, capacity)) }
+
+    var latestGeneration: UInt64? {
+        guard lock.try() else { return nil }
+        defer { lock.unlock() }
+        return generation == 0 ? nil : generation
+    }
 
     func put(_ original: Event) {
         guard lock.try() else { return }

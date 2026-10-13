@@ -92,8 +92,19 @@ jobs:
 
       - name: Show Xcode & SDK versions
         run: |
-          xcodebuild -version
-          xcodebuild -showsdks
+          set -o pipefail
+          mkdir -p build/reports
+          {
+            sw_vers
+            uname -m
+            xcode-select -p
+            xcodebuild -version
+            xcrun swift --version
+            xcodebuild -showsdks
+            xcrun --sdk iphonesimulator --show-sdk-version
+            xcrun --sdk iphonesimulator --show-sdk-path
+            cat "$PROJECT/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
+          } 2>&1 | tee build/reports/toolchain.log
 
       - name: List installed Xcode versions on this runner
         run: |
@@ -242,16 +253,55 @@ jobs:
           xcrun simctl list devices | grep "$UDID" || true
 
       - name: Build (Debug, Simulator)
+        shell: bash
         run: |
           set -o pipefail
-          xcodebuild build \
+          mkdir -p build/reports
+          echo "Configuration: Debug; destination: platform=iOS Simulator,name=${{ steps.sim.outputs.name }},OS=${{ steps.sim.outputs.os }}" \
+            | tee -a build/reports/toolchain.log
+          # if で errexit を抑制し、失敗時も診断を抽出してから元の終了コードを返す。
+          if xcodebuild build \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
             -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }},OS=${{ steps.sim.outputs.os }}" \
             -configuration Debug \
             -derivedDataPath "$DERIVED_DATA_PATH" \
             $XCODE_FLAGS \
-            | xcpretty
+            > build/reports/xcodebuild.log 2>&1; then
+            BUILD_STATUS=0
+          else
+            BUILD_STATUS=$?
+          fi
+
+          grep -n -E 'error:|fatal error:|SwiftCompile|BUILD FAILED|BUILD SUCCEEDED' \
+            build/reports/xcodebuild.log | head -100 > build/reports/build-diagnostics.txt || true
+          FIRST_ERROR=$(awk '/error:|fatal error:/ { print NR; exit }' build/reports/xcodebuild.log)
+          if [ -n "$FIRST_ERROR" ]; then
+            START=$((FIRST_ERROR > 20 ? FIRST_ERROR - 20 : 1))
+            END=$((FIRST_ERROR + 40))
+            sed -n "${START},${END}p" build/reports/xcodebuild.log \
+              > build/reports/first-error.txt
+            echo "First error at xcodebuild.log:$FIRST_ERROR"
+            cat build/reports/first-error.txt
+          else
+            echo "No error: diagnostic found; last 80 lines:"
+            tail -80 build/reports/xcodebuild.log
+          fi
+          cat build/reports/build-diagnostics.txt
+          echo "xcodebuild exit code: $BUILD_STATUS"
+          exit "$BUILD_STATUS"
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-logs
+          path: |
+            build/reports/xcodebuild.log
+            build/reports/toolchain.log
+            build/reports/build-diagnostics.txt
+            build/reports/first-error.txt
+          retention-days: 14
 
       - name: Unit Tests (ptt-iosTests)
         # [方針: A+C]

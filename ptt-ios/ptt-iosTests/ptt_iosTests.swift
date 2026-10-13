@@ -681,3 +681,45 @@ struct PTTDebugEngineObserverTests {
     }
 }
 #endif
+
+#if DEBUG
+struct PTTPrepublishPCMObservationTests {
+    @Test @MainActor func offHasNoSideEffects() {
+        let track = NSObject()
+        var adds = 0; var removes = 0; var logs = 0
+        let probe = PTTPrepublishPCMObservation.make(enabled: false, generation: "off", trackID: ObjectIdentifier(track), add: { _ in adds += 1 }, remove: { _ in removes += 1 }, output: { _ in logs += 1 })
+        #expect(probe == nil)
+        #expect(adds == 0 && removes == 0 && logs == 0)
+    }
+
+    @Test @MainActor func releaseIsIdempotentAndLateDeliveryIsIgnored() throws {
+        let track = NSObject()
+        var renderer: AudioRenderer?; var removes = 0; var logs: [String] = []
+        let probe = try #require(PTTPrepublishPCMObservation.make(enabled: true, generation: "old", trackID: ObjectIdentifier(track), add: { renderer = $0 }, remove: { _ in removes += 1 }, output: { logs.append($0) }))
+        let format = try #require(AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 48000, channels: 1, interleaved: false))
+        let pcm = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 480))
+        pcm.frameLength = 480
+        pcm.int16ChannelData?[0].initialize(repeating: 0, count: 480)
+        renderer?.render(pcmBuffer: pcm)
+        probe.finish("publish_failure")
+        let count = logs.count
+        renderer?.render(pcmBuffer: pcm)
+        probe.sample("late"); probe.finish("exit")
+        #expect(removes == 1 && logs.count == count)
+        #expect(logs.last?.contains("callbacks=1") == true)
+        #expect(logs.last?.contains("rms=0.0") == true)
+        #expect(logs.last?.contains("generation=old") == true)
+    }
+
+    @Test @MainActor func oldGenerationCannotDetachNewObservation() throws {
+        let a = NSObject(); let b = NSObject()
+        var removed: [ObjectIdentifier] = []; var added: [ObjectIdentifier] = []
+        let old = try #require(PTTPrepublishPCMObservation.make(enabled: true, generation: "old", trackID: ObjectIdentifier(a), add: { added.append(ObjectIdentifier($0)) }, remove: { removed.append(ObjectIdentifier($0)) }, output: { _ in }))
+        let new = try #require(PTTPrepublishPCMObservation.make(enabled: true, generation: "new", trackID: ObjectIdentifier(b), add: { added.append(ObjectIdentifier($0)) }, remove: { removed.append(ObjectIdentifier($0)) }, output: { _ in }))
+        old.finish("exit"); old.finish("task_end")
+        #expect(removed == [added[0]])
+        new.finish("publish_success")
+        #expect(removed == added)
+    }
+}
+#endif

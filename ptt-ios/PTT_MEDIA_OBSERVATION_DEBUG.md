@@ -125,3 +125,27 @@ AVAudioApplication.isInputMutedはiOS17以上の公開read-only getter。
 
 SDK依存・本番動作・talk start/stop・mute/floor順序は変更しない。
 測定処理はDebugのみ。観測あり/なしで再現率が変化する可能性は残る。
+
+
+## 事前publish PCM比較（Debug限定、既定OFF）
+
+Xcode Scheme → Run → Arguments → Environment Variablesで `PTT_PREPUBLISH_PCM=1` を指定するとON。
+未指定または1以外はOFF。Releaseには計測クラスと呼び出しを含めない。
+OFFでは追加renderer・timer・計測ログを生成せず、既存PTTとRoom診断を維持する。
+
+ONはmute完了後、実publish直前にrendererを1つ登録する。ログは `[PTTPrepublishPCM]`。
+register_begin/complete、publish_begin、periodic（1秒）、finish_publish_success/failure/exit/task_endを記録。
+Room generationとtrack_objectは接続Task固有。PCMは共有capture-postのためtrack固有音声とは証明しない。
+engine_generationは既存observerの最新世代であり、EngineのRoom所有権は未計測。
+実SDK watcher/rollback開始時刻は既存PTTSDKログと照合し、この計測だけで内部完了を断定しない。
+
+callbackはON専用meterの非待機ロックと既存計算関数による最大4096サンプル計算のみ。ログ・Engine getterは行わない。
+first_pcm_ns/last_pcm_nsはrenderer配送時刻で、物理マイク取得時刻ではない。
+callbacks=0＋RMS未計測は配送未観測。callbacks>0＋RMS/Peak=0は測定対象PCMゼロ。
+形式未対応、競合drop可能性、観測未登録を区別する。配送なしをAPM生成なしと断定しない。
+成功/失敗/退出/旧Task終了で冪等に解除し、退出後の遅延配送は集計しない。旧観測の解除は自分のrendererだけ。
+
+ONによりAPM delegateの接続が早まり、PCM変換と共通配送キューの負荷が増える。
+SDK配送順序・同期実装は変更しないが、計測の負荷はタイミングへ影響し得る。
+同条件でOFF/ONを交互に比較し、入室単位のtimeout率とPTT単位の無音率を別集計する。
+ONでtimeoutが消えても原因解消とは扱わない。今回実機比較は未実施。
