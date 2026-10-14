@@ -28,9 +28,7 @@ jobs:
     env:
       PROJECT: ptt-ios/ptt-ios.xcodeproj
       SCHEME: ptt-ios
-      # actions/cache で復元・保存する対象を固定パスにするため明示的に指定する。
-      # 指定しない場合、xcodebuildは実行のたびに ~/Library/Developer/Xcode/DerivedData 配下に
-      # ハッシュ付きのランダムなサブディレクトリを作るため、キャッシュのpathと噛み合わない。
+      # CI のビルド成果物と依存の取得先を固定する。DerivedData はキャッシュしない。
       DERIVED_DATA_PATH: ${{ github.workspace }}/DerivedData
       # PRやフォークからのビルドでも通るよう、CIでは署名を無効化する
       # (シミュレータ向けビルド/テストなので署名は不要)
@@ -44,16 +42,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # [キャッシュ方針]
-      # SPMの取得先(パッケージのソース本体)と、コンパイル成果物(DerivedData)を
-      # それぞれ別キーでキャッシュする:
-      #   - SPMキャッシュ: Package.resolved のハッシュが変わらない限り再利用可能
-      #     (依存バージョンが変わらなければダウンロード自体をスキップできる)
-      #   - DerivedDataキャッシュ: ソースコード(.swift等)のハッシュもキーに含める。
-      #     Swiftのビルドはインクリメンタルコンパイルに対応しているため、
-      #     コード変更後もキャッシュがあれば差分だけの再コンパイルで済み、
-      #     フルビルドよりかなり速くなる。restore-keysでSPM分だけでも
-      #     部分一致すればゼロからよりはマシになるようフォールバックを用意する。
+      # SPM のダウンロードキャッシュのみ再利用する。
+      # DerivedData 全体の復元は、バイナリ SDK のヘッダーとキャッシュ内の .pcm を
+      # 不整合にすることがあるため行わない (LiveKitWebRTC / RTCAudioDeviceModule.h)。
       - name: Cache Swift Package Manager
         uses: actions/cache@v4
         with:
@@ -64,14 +55,6 @@ jobs:
           key: ${{ runner.os }}-spm-${{ hashFiles('ptt-ios/ptt-ios.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
           restore-keys: |
             ${{ runner.os }}-spm-
-
-      - name: Cache DerivedData
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.DERIVED_DATA_PATH }}
-          key: ${{ runner.os }}-deriveddata-${{ hashFiles('ptt-ios/**/*.swift', 'ptt-ios/ptt-ios.xcodeproj/project.pbxproj') }}
-          restore-keys: |
-            ${{ runner.os }}-deriveddata-
 
       - name: Select Xcode version
         uses: maxim-lobanov/setup-xcode@v1
